@@ -133,5 +133,4 @@ android {
 
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"  // Usa la versión de ext
-apply plugin: "com.facebook.react"
-apply plugin: "com.google.gms.google-services"
+apply plugin: "com.facebook.react"  // Si aplica

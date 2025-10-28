@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "521895100453",
+    "project_id": "chickeninventoryapp",
+    "storage_bucket": "chickeninventoryapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:521895100453:android:a210e737ed585712d33fcc",
+        "android_client_info": {
+          "package_name": "com.chickeninventoryapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC8Bi8pSLuQOm3BD45JCTm4t_6JK98qvHY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

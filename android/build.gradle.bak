@@ -21,3 +21,4 @@ buildscript {
 
 // Aplica el plugin de Google Services usando el método tradicional
 apply plugin: "com.facebook.react.rootproject"
+apply plugin: "com.google.gms.google-services"
