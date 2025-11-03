@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,34 +6,36 @@ import {
   FlatList,
   TextInput,
   Modal,
+  Animated,
   Alert,
   ActivityIndicator,
-  Animated,
+  SafeAreaView,
 } from 'react-native';
-import firestore from '@react-native-firebase/firestore';
+import { firestore } from '../services/firebaseConfig';
 import { getUserRole } from '../services/auth';
+import { useNavigation } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
 
-export default function ProductList({ role: initialRole }) {
+export default function ProductList({ role: propRole, user: propUser }) {
   const [products, setProducts] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [currentProduct, setCurrentProduct] = useState(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-  const [role, setRole] = useState(initialRole || '');
-  const [animValue] = useState(new Animated.Value(0));
-  const user = auth().currentUser;
+  const [role, setRole] = useState(propRole || '');
+  const [user, setUser] = useState(propUser || auth().currentUser);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [currentProduct, setCurrentProduct] = useState(null);
+  const [form, setForm] = useState({ name: '', price: '', stock: '' });
+  const animValue = useRef(new Animated.Value(0)).current;
 
-  const [form, setForm] = useState({
-    name: '',
-    price: '',
-    stock: '',
-  });
+  const navigation = useNavigation();
 
+  // 🔹 Cargar productos + rol
   useEffect(() => {
-    if (!role) fetchUserRole();
+    if (!role && user) {
+      getUserRole(user.uid).then(r => setRole(r));
+    }
 
     const unsubscribe = firestore()
       .collection('products')
@@ -49,15 +51,9 @@ export default function ProductList({ role: initialRole }) {
       });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
-  const fetchUserRole = async () => {
-    if (!user) return;
-    const r = await getUserRole(user.uid);
-    setRole(r);
-  };
-
-  // 🔍 Búsqueda
+  // 🔍 Filtros y búsqueda
   useEffect(() => {
     let data = [...products];
     if (search.trim()) {
@@ -65,92 +61,84 @@ export default function ProductList({ role: initialRole }) {
         p.name.toLowerCase().includes(search.toLowerCase())
       );
     }
-
-    switch (filter) {
-      case 'lowStock':
-        data = data.filter(p => (p.stock || 0) < 5);
-        break;
-      case 'priceAsc':
-        data = data.sort((a, b) => a.price - b.price);
-        break;
-      case 'priceDesc':
-        data = data.sort((a, b) => b.price - a.price);
-        break;
-      default:
-        break;
-    }
+    if (filter === 'lowStock') data = data.filter(p => (p.stock || 0) < 5);
+    if (filter === 'priceAsc') data = data.sort((a, b) => a.price - b.price);
+    if (filter === 'priceDesc') data = data.sort((a, b) => b.price - a.price);
     setFiltered(data);
   }, [search, filter, products]);
 
-  const animateModal = () => {
+  // 🧩 Animación modal
+  const showModal = () => {
+    setModalVisible(true);
     Animated.timing(animValue, {
       toValue: 1,
-      duration: 250,
+      duration: 200,
       useNativeDriver: true,
     }).start();
   };
 
+  const hideModal = () => {
+    Animated.timing(animValue, {
+      toValue: 0,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(() => {
+      setModalVisible(false);
+      setCurrentProduct(null);
+      setForm({ name: '', price: '', stock: '' });
+    });
+  };
+
+  // 🧠 Guardar producto
   const handleSave = async () => {
+    if (role !== 'admin') {
+      Alert.alert('Permiso denegado', 'Solo los administradores pueden guardar productos.');
+      return;
+    }
+
     if (!form.name.trim() || !form.price.trim()) {
-      Alert.alert('Campos obligatorios', 'Nombre y precio son requeridos.');
+      Alert.alert('Campos requeridos', 'Nombre y precio son obligatorios.');
       return;
     }
 
     try {
       if (currentProduct) {
         await firestore().collection('products').doc(currentProduct.id).update({
-          ...form,
+          name: form.name,
           price: parseFloat(form.price),
           stock: parseInt(form.stock) || 0,
           updatedAt: new Date(),
         });
       } else {
         await firestore().collection('products').add({
-          ...form,
+          name: form.name,
           price: parseFloat(form.price),
           stock: parseInt(form.stock) || 0,
           createdAt: new Date(),
         });
       }
-      setModalVisible(false);
-      setForm({ name: '', price: '', stock: '' });
-      setCurrentProduct(null);
+
+      hideModal();
     } catch (e) {
-      console.error(e);
       Alert.alert('Error', e.message);
     }
   };
 
-  const handleDelete = async (id) => {
-    Alert.alert('Eliminar producto', '¿Deseas eliminar este producto?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await firestore().collection('products').doc(id).delete();
-          } catch (e) {
-            Alert.alert('Error', e.message);
-          }
-        },
-      },
-    ]);
-  };
-
   const openEdit = (product) => {
+    if (role !== 'admin') return;
     setCurrentProduct(product);
     setForm({
       name: product.name,
       price: product.price.toString(),
       stock: product.stock?.toString() || '',
     });
-    setModalVisible(true);
-    animateModal();
+    showModal();
   };
 
   const renderItem = ({ item }) => (
-    <Animated.View
+    <TouchableOpacity
+      onPress={() => openEdit(item)}
+      activeOpacity={0.8}
       style={{
         backgroundColor: '#fff',
         padding: 16,
@@ -158,40 +146,16 @@ export default function ProductList({ role: initialRole }) {
         marginVertical: 6,
         marginHorizontal: 10,
         elevation: 2,
-        transform: [
-          {
-            scale: animValue.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0.98, 1],
-            }),
-          },
-        ],
       }}
     >
-      <TouchableOpacity
-        onPress={() => role === 'admin' && openEdit(item)}
-        disabled={role !== 'admin'}
-      >
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ fontSize: 18, fontWeight: '600' }}>{item.name}</Text>
-          <Text style={{ fontSize: 16, color: '#007AFF' }}>
-            ${item.price.toFixed(2)}
-          </Text>
-        </View>
-        <Text style={{ color: '#666', marginTop: 4 }}>
-          Stock: {item.stock || 0}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <Text style={{ fontSize: 18, fontWeight: '600' }}>{item.name}</Text>
+        <Text style={{ fontSize: 16, color: '#007AFF' }}>
+          ${item.price.toFixed(2)}
         </Text>
-
-        {role === 'admin' && (
-          <TouchableOpacity
-            onPress={() => handleDelete(item.id)}
-            style={{ marginTop: 8, alignSelf: 'flex-end' }}
-          >
-            <Text style={{ color: '#FF3B30', fontWeight: '600' }}>Eliminar</Text>
-          </TouchableOpacity>
-        )}
-      </TouchableOpacity>
-    </Animated.View>
+      </View>
+      <Text style={{ color: '#666', marginTop: 4 }}>Stock: {item.stock || 0}</Text>
+    </TouchableOpacity>
   );
 
   if (loading) {
@@ -203,28 +167,30 @@ export default function ProductList({ role: initialRole }) {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
-      {/* Encabezado */}
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
+      {/* Header */}
       <View
         style={{
           padding: 16,
           backgroundColor: '#007AFF',
-          borderBottomLeftRadius: 14,
-          borderBottomRightRadius: 14,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
         }}
       >
-        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700' }}>
-          Inventario
-        </Text>
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', paddingTop: 10 }}>Inventario</Text>
+        <TouchableOpacity onPress={() => navigation.openDrawer()}>
+          <Text style={{ color: '#fff', fontSize: 18 }}>☰</Text>
+        </TouchableOpacity>
+      </View>
 
-        {/* 🔍 Búsqueda */}
+      {/* Buscar */}
+      <View style={{ padding: 10 }}>
         <TextInput
           placeholder="Buscar producto..."
-          placeholderTextColor="#eee"
           value={search}
           onChangeText={setSearch}
           style={{
-            marginTop: 12,
             backgroundColor: '#fff',
             borderRadius: 10,
             paddingHorizontal: 14,
@@ -234,65 +200,18 @@ export default function ProductList({ role: initialRole }) {
         />
       </View>
 
-      {/* Filtros */}
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-around',
-          marginVertical: 10,
-        }}
-      >
-        {[
-          { label: 'Todos', value: 'all' },
-          { label: 'Stock bajo', value: 'lowStock' },
-          { label: '▲ Precio ↑', value: 'priceAsc' },
-          { label: '▼ Precio ↓', value: 'priceDesc' },
-        ].map(f => (
-          <TouchableOpacity
-            key={f.value}
-            onPress={() => setFilter(f.value)}
-            style={{
-              backgroundColor: filter === f.value ? '#007AFF' : '#E0E0E0',
-              paddingVertical: 6,
-              paddingHorizontal: 10,
-              borderRadius: 8,
-            }}
-          >
-            <Text
-              style={{
-                color: filter === f.value ? '#fff' : '#333',
-                fontWeight: '600',
-              }}
-            >
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
       {/* Lista */}
-      {filtered.length === 0 ? (
-        <View style={{flex:1,justifyContent:'center',alignItems:'center'}}>
-          <Text style={{color:'#aaa'}}>No hay productos</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={item => item.id}
-          renderItem={renderItem}
-          contentContainerStyle={{ paddingVertical: 10 }}
-        />
-      )}
+      <FlatList
+        data={filtered}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        contentContainerStyle={{ paddingBottom: 100 }}
+      />
 
       {/* Botón agregar */}
       {role === 'admin' && (
         <TouchableOpacity
-          onPress={() => {
-            setModalVisible(true);
-            setCurrentProduct(null);
-            setForm({ name: '', price: '', stock: '' });
-            animateModal();
-          }}
+          onPress={() => showModal()}
           style={{
             position: 'absolute',
             right: 20,
@@ -310,31 +229,31 @@ export default function ProductList({ role: initialRole }) {
         </TouchableOpacity>
       )}
 
-      {/* Modal Crear/Editar */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
-        <View
-          style={{
-            flex: 1,
-            justifyContent: 'center',
-            backgroundColor: 'rgba(0,0,0,0.5)',
+      {/* 🪟 MODAL PEQUEÑO */}
+      <Modal transparent visible={modalVisible} animationType="none">
+        <View style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          paddingHorizontal: 20,
+        }}>
+          <Animated.View style={{
+            width: '100%',
+            backgroundColor: '#fff',
+            borderRadius: 16,
             padding: 20,
-          }}
-        >
-          <Animated.View
-            style={{
-              backgroundColor: '#fff',
-              borderRadius: 12,
-              padding: 20,
-              transform: [
-                {
-                  scale: animValue.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.9, 1],
-                  }),
-                },
-              ],
-            }}
-          >
+            elevation: 8,
+            transform: [
+              {
+                scale: animValue.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.8, 1],
+                }),
+              },
+            ],
+            opacity: animValue,
+          }}>
             <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 12 }}>
               {currentProduct ? 'Editar producto' : 'Nuevo producto'}
             </Text>
@@ -342,47 +261,41 @@ export default function ProductList({ role: initialRole }) {
             <TextInput
               placeholder="Nombre"
               value={form.name}
-              onChangeText={t => setForm({ ...form, name: t })}
+              onChangeText={(t) => setForm({ ...form, name: t })}
               style={inputStyle}
             />
             <TextInput
               placeholder="Precio"
               keyboardType="numeric"
               value={form.price}
-              onChangeText={t => setForm({ ...form, price: t })}
+              onChangeText={(t) => setForm({ ...form, price: t })}
               style={inputStyle}
             />
             <TextInput
               placeholder="Stock"
               keyboardType="numeric"
               value={form.stock}
-              onChangeText={t => setForm({ ...form, stock: t })}
+              onChangeText={(t) => setForm({ ...form, stock: t })}
               style={inputStyle}
             />
 
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', marginTop: 10 }}>
               <TouchableOpacity onPress={handleSave} style={btnPrimary}>
                 <Text style={{ color: '#fff', fontWeight: '600' }}>Guardar</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  setModalVisible(false);
-                  setForm({ name: '', price: '', stock: '' });
-                  setCurrentProduct(null);
-                }}
-                style={btnCancel}
-              >
+              <TouchableOpacity onPress={hideModal} style={btnCancel}>
                 <Text style={{ color: '#fff', fontWeight: '600' }}>Cancelar</Text>
               </TouchableOpacity>
             </View>
           </Animated.View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const inputStyle = {
+  backgroundColor: '#F9FAFB',
   borderWidth: 1,
   borderColor: '#ddd',
   borderRadius: 8,
@@ -391,19 +304,19 @@ const inputStyle = {
 };
 
 const btnPrimary = {
+  flex: 1,
   backgroundColor: '#007AFF',
   padding: 12,
   borderRadius: 8,
-  flex: 1,
   alignItems: 'center',
-  marginRight: 6,
+  marginRight: 5,
 };
 
 const btnCancel = {
+  flex: 1,
   backgroundColor: '#FF3B30',
   padding: 12,
   borderRadius: 8,
-  flex: 1,
   alignItems: 'center',
-  marginLeft: 6,
+  marginLeft: 5,
 };
