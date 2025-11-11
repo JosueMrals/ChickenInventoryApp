@@ -11,6 +11,9 @@ import ProductForm from './android/app/src/screens/ProductForm';
 import Sidebar from './android/app/src/components/Sidebar';
 import ProfileScreen from './android/app/src/screens/ProfileScreen';
 import RegisterScreen from './android/app/src/screens/RegisterScreen';
+import SalesScreen from './android/app/src/screens/sales/SalesScreen';
+import CreditsScreen from './android/app/src/screens/CreditsScreen';
+import CustomersScreen from './android/app/src/screens/CustomersScreen';
 
 
 const Stack = createNativeStackNavigator();
@@ -38,8 +41,23 @@ function AppDrawer({ route }) {
         {(props) => <ProfileScreen {...props} user={user} role={role} />}
       </Drawer.Screen>
       <Drawer.Screen name="Register">
-        {(props) => <RegisterScreen {...props} user={user} role={role} />}
+          {(props) => <RegisterScreen {...props} user={user} role={role} />}
+        </Drawer.Screen>
+      <Drawer.Screen name="Customer">
+        {(props) => <CustomersScreen {...props} user={user} role={role} />}
       </Drawer.Screen>
+      <Drawer.Screen name="Sales"
+        component={SalesScreen}
+        options={{ title: 'Ventas', drawerIcon: ({ color, size }) => (
+          <Ionicons name="cash-outline" size={size} color={color} />
+        )}}
+      />
+      <Drawer.Screen name="Credits"
+        component={CreditsScreen}
+        options={{ title: 'Créditos', drawerIcon: ({ color, size }) => (
+          <Ionicons name="cash-outline" size={size} color={color} />
+        )}}
+      />
     </Drawer.Navigator>
   );
 }

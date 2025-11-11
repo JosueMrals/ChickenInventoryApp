@@ -1,0 +1,116 @@
+// styles/salesScreenStyles.js
+import { StyleSheet } from 'react-native';
+
+export default StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F6FA',
+  },
+  header: {
+    backgroundColor: '#007AFF',
+    padding: 16,
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '700',
+    marginTop: 25,
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#EAEAEA',
+    margin: 10,
+    borderRadius: 10,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '50%',
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+  },
+  tabText: {
+    flex: 1,
+    textAlign: 'center',
+    paddingVertical: 10,
+    color: '#333',
+    fontWeight: '600',
+    zIndex: 2,
+  },
+  tabTextActive: {
+    color: '#fff',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    marginHorizontal: 12,
+    marginVertical: 6,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    elevation: 1,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 8,
+    fontSize: 16,
+    color: '#333',
+  },
+  loader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  noProducts: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  productCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    marginHorizontal: 10,
+    marginVertical: 6,
+    padding: 14,
+    borderRadius: 12,
+    elevation: 2,
+  },
+  productName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#333',
+  },
+  productInfo: {
+    color: '#777',
+    marginTop: 2,
+  },
+  productPrice: {
+    color: '#007AFF',
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  sellButton: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignSelf: 'center',
+  },
+  sellText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+});

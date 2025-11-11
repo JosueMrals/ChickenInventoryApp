@@ -11,10 +11,9 @@ import {
   Animated,
   SafeAreaView,
 } from 'react-native';
-import { firestore } from '../services/firebaseConfig';
-import auth from '@react-native-firebase/auth';
+import { firestore, auth } from '../services/firebaseConfig';
 
-export default function UserManagementScreen({ route, navigation }) {
+export default function RegisterScreen({ route, navigation }) {
   const { role: currentRole, user: currentUser } = route.params || {};
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,8 +21,10 @@ export default function UserManagementScreen({ route, navigation }) {
   const [form, setForm] = useState({ email: '', password: '', role: 'user' });
   const animValue = useRef(new Animated.Value(0)).current;
 
+  // 🔹 Escucha la colección de usuarios
   useEffect(() => {
-    if (currentRole === 'admin') {
+
+    if (currentRole !== 'admin') {
       Alert.alert('Acceso denegado', 'Solo los administradores pueden ver esta sección.');
       navigation.goBack();
       return;
@@ -32,18 +33,31 @@ export default function UserManagementScreen({ route, navigation }) {
     const unsubscribe = firestore()
       .collection('users')
       .orderBy('email', 'asc')
-      .onSnapshot(snapshot => {
-        const data = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setUsers(data);
-        setLoading(false);
-      });
+      .onSnapshot(
+        (snapshot) => {
+          if (!snapshot || !snapshot.docs) {
+            console.log('⚠️ Snapshot nulo en Firestore');
+            setUsers([]);
+            setLoading(false);
+            return;
+          }
+          const data = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+          setUsers(data);
+          setLoading(false);
+        },
+        (error) => {
+          console.log('🔥 Error Firestore snapshot:', error);
+          setLoading(false);
+        }
+      );
 
     return () => unsubscribe();
   }, []);
 
+  // 🔹 Animación modal
   const animateModal = (show) => {
     Animated.timing(animValue, {
       toValue: show ? 1 : 0,
@@ -64,6 +78,7 @@ export default function UserManagementScreen({ route, navigation }) {
     animateModal(false);
   };
 
+  // 🔹 Crear usuario con UID y verificación
   const handleAddUser = async () => {
     if (!form.email.trim() || !form.password.trim()) {
       Alert.alert('Campos requeridos', 'Correo y contraseña son obligatorios.');
@@ -71,19 +86,48 @@ export default function UserManagementScreen({ route, navigation }) {
     }
 
     try {
-      const tempAuth = auth(); // ya tienes auth nativo
-      const newUser = await tempAuth.createUserWithEmailAndPassword(
-        form.email,
-        form.password
+      const admin = auth().currentUser;
+      if (!admin) {
+        Alert.alert('Error', 'No hay un administrador autenticado.');
+        return;
+      }
+
+      const adminToken = await admin.getIdToken(true);
+      console.log('🔐 Admin token generado correctamente.');
+
+      // Crear usuario temporalmente
+      const newUserCredential = await auth().createUserWithEmailAndPassword(
+        form.email.trim(),
+        form.password.trim()
       );
 
-      await firestore().collection('users').doc(newUser.user.uid).set({
-        email: form.email,
-        role: form.role,
+      const newUser = newUserCredential.user;
+      console.log('✅ Usuario creado:', newUser.uid);
+
+      // Enviar correo de verificación
+      await newUser.sendEmailVerification();
+
+      // Crear documento en Firestore con UID
+      await firestore().collection('users').doc(newUser.uid).set({
+        uid: newUser.uid,
+        email: form.email.trim(),
+        role: form.role.trim().toLowerCase(),
+        verified: false,
+        createdBy: admin.uid,
         createdAt: new Date(),
       });
 
-      Alert.alert('Usuario creado', `Usuario ${form.email} agregado con éxito.`);
+      Alert.alert(
+        'Usuario creado correctamente',
+        `📩 Se envió un correo de verificación a ${form.email}.
+        El usuario se registrará como verificado cuando confirme su correo.`
+      );
+
+      // Restaurar sesión del admin
+      await auth().signOut();
+      await auth().signInWithCustomToken(adminToken);
+      console.log('🔄 Sesión del admin restaurada.');
+
       closeModal();
     } catch (error) {
       console.log('🔥 Error creando usuario:', error);
@@ -91,6 +135,7 @@ export default function UserManagementScreen({ route, navigation }) {
     }
   };
 
+  // 🔹 Eliminar usuario
   const handleDeleteUser = async (uid, email) => {
     Alert.alert('Eliminar usuario', `¿Eliminar a ${email}?`, [
       { text: 'Cancelar', style: 'cancel' },
@@ -118,14 +163,6 @@ export default function UserManagementScreen({ route, navigation }) {
         borderRadius: 14,
         padding: 16,
         elevation: 2,
-        transform: [
-          {
-            scale: animValue.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0.98, 1],
-            }),
-          },
-        ],
       }}
     >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -134,12 +171,17 @@ export default function UserManagementScreen({ route, navigation }) {
           <Text style={{ color: '#777', fontSize: 14 }}>
             Rol: {item.role.toUpperCase()}
           </Text>
-          {item.createdAt && (
-            <Text style={{ color: '#aaa', fontSize: 12 }}>
-              {new Date(item.createdAt.seconds * 1000).toLocaleString()}
-            </Text>
-          )}
+          <Text
+            style={{
+              color: item.verified ? '#007AFF' : '#FF9500',
+              fontSize: 13,
+              fontWeight: '600',
+            }}
+          >
+            {item.verified ? 'Verificado' : 'Pendiente de verificación'}
+          </Text>
         </View>
+
         {item.id !== currentUser?.uid && (
           <TouchableOpacity onPress={() => handleDeleteUser(item.id, item.email)}>
             <Text style={{ color: '#FF3B30', fontWeight: '700' }}>Eliminar</Text>
@@ -148,14 +190,6 @@ export default function UserManagementScreen({ route, navigation }) {
       </View>
     </Animated.View>
   );
-
-  if (loading) {
-    return (
-      <View style={{flex:1,justifyContent:'center',alignItems:'center'}}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
-    );
-  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
@@ -171,21 +205,27 @@ export default function UserManagementScreen({ route, navigation }) {
           borderBottomRightRadius: 14,
         }}
       >
-        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700' }}>
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', paddingTop: 10 }}>
           Administración de Usuarios
         </Text>
         <TouchableOpacity onPress={() => navigation.openDrawer()}>
-          <Text style={{ color: '#fff', fontSize: 18 }}>☰</Text>
+          <Text style={{ color: '#fff', fontSize: 18, paddingTop:10 }}>☰</Text>
         </TouchableOpacity>
       </View>
 
       {/* Lista */}
-      <FlatList
-        data={users}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={{ paddingVertical: 10 }}
-      />
+      {loading ? (
+        <View style={{flex:1,justifyContent:'center',alignItems:'center'}}>
+          <ActivityIndicator size="large" color="#007AFF" />
+        </View>
+      ) : (
+        <FlatList
+          data={users}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          contentContainerStyle={{ paddingVertical: 10 }}
+        />
+      )}
 
       {/* Botón agregar */}
       <TouchableOpacity
@@ -206,7 +246,7 @@ export default function UserManagementScreen({ route, navigation }) {
         <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>+</Text>
       </TouchableOpacity>
 
-      {/* Modal para agregar usuario */}
+      {/* Modal agregar usuario */}
       <Modal transparent visible={modalVisible} animationType="none">
         <View
           style={{
@@ -261,7 +301,7 @@ export default function UserManagementScreen({ route, navigation }) {
 
             <View style={{ flexDirection: 'row', marginTop: 10 }}>
               <TouchableOpacity onPress={handleAddUser} style={btnPrimary}>
-                <Text style={{ color: '#fff', fontWeight: '600' }}>Guardar</Text>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Crear</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={closeModal} style={btnCancel}>
                 <Text style={{ color: '#fff', fontWeight: '600' }}>Cancelar</Text>
