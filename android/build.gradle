@@ -7,17 +7,26 @@ buildscript {
         ndkVersion = "27.1.12297006"
         kotlinVersion = "2.1.20"
     }
+
     repositories {
         google()
         mavenCentral()
     }
+
     dependencies {
-        classpath("com.android.tools.build:gradle")
+        // 🔧 Usa una versión reciente y estable del plugin de Android
+        classpath("com.android.tools.build:gradle:8.5.2")
+
+        // 🔧 React Native Gradle plugin
         classpath("com.facebook.react:react-native-gradle-plugin")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
-        classpath("com.google.gms:google-services:4.4.4")  // Mantén esto para el plugin
+
+        // 🔧 Kotlin plugin (ya tienes kotlinVersion arriba)
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.20")
+
+        // 🔧 Plugin de servicios de Google (para Firebase, etc.)
+        classpath("com.google.gms:google-services:4.4.4")
     }
 }
 
-// Aplica el plugin de Google Services usando el método tradicional
-apply plugin: "com.facebook.react.rootproject"
+// Aplica el plugin principal de React Native
+apply plugin: "com.facebook.react"
