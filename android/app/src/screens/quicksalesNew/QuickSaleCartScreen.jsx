@@ -1,98 +1,134 @@
-import React, { useContext, useState, useMemo } from 'react';
+import React, { useContext, useMemo, useState } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   FlatList,
   Alert,
-} from 'react-native';
-import { QuickSaleContext } from './context/quickSaleContext';
-import CartItem from './components/CartItem';
-import styles from './styles/quickCartStyles';
-import Icon from 'react-native-vector-icons/Ionicons';
-import DiscountModal from './components/DiscountModal';
+} from "react-native";
+import Icon from "react-native-vector-icons/Ionicons";
+import { QuickSaleContext } from "./context/quickSaleContext";
+
+import CartItem from "./components/CartItem";
+import DiscountModal from "./components/DiscountModal";
+
+import styles from "./styles/quickCartStyles";
 
 export default function QuickSaleCartScreen({ navigation }) {
-  const { cart, updateCart, removeFromCart, clearCart, customer, setCustomer } = useContext(QuickSaleContext);
-  const [discountModal, setDiscountModal] = useState({ visible: false, product: null });
 
+  const { resetQuickSale } = useContext(QuickSaleContext);
+  const {
+    cart,
+    updateCart,
+    removeItem,
+    customer,
+    setCustomer,
+    removeFromCart
+  } = useContext(QuickSaleContext);
+
+  const [discountModal, setDiscountModal] = useState({
+    visible: false,
+    product: null,
+  });
+
+  // SUBTOTAL
   const subtotal = useMemo(() => {
-    return cart.reduce((s, p) => s + (Number(p.price || 0) * Number(p.quantity || 0)), 0);
+    return cart.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   }, [cart]);
 
+  // DESCUENTO TOTAL
   const totalDiscount = useMemo(() => {
-    return cart.reduce((s, p) => {
-      const q = Number(p.quantity || 0);
-      const price = Number(p.price || 0);
-      if (!p.discountType || p.discountType === 'none') return s;
-      if (p.discountType === 'percent') return s + (price * q) * (Number(p.discountValue || 0) / 100);
-      return s + Number(p.discountValue || 0);
-    }, 0);
+    return cart.reduce((sum, item) => sum + item.discount, 0);
   }, [cart]);
 
-  const total = Math.max(subtotal - totalDiscount, 0);
+  // TOTAL FINAL
+  const total = subtotal - totalDiscount;
 
+  // EDITAR PRODUCTO
   const openEdit = (item) => {
-    navigation.navigate('ProductEdit', {
+    navigation.navigate("ProductEdit", {
       item,
-      onUpdate: (newData) => updateCart(item.id, newData),
+      onUpdate: (changes) => updateCart(item.id, changes),
+      onRemove: () => removeItem(item.id),
     });
   };
 
-  const openDiscount = (item) => setDiscountModal({ visible: true, product: item });
+  // DESCUENTO INDIVIDUAL
+  const openDiscount = (item) => {
+    setDiscountModal({ visible: true, product: item });
+  };
 
   const applyDiscountToProduct = ({ discountType, discountValue }) => {
-    const prod = discountModal.product;
-    if (!prod) return;
-    updateCart(prod.id, { discountType, discountValue });
+    const product = discountModal.product;
+    updateCart(product.id, {
+      discount: Number(discountValue || 0),
+    });
+
     setDiscountModal({ visible: false, product: null });
   };
 
-  const handleRemove = (id) => {
-    Alert.alert('Eliminar', '¿Eliminar este producto del carrito?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: () => removeFromCart(id) },
+  // ELIMINAR PRODUCTO
+  const handleRemove = (item) => {
+    Alert.alert("Eliminar", "¿Eliminar este producto del carrito?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Eliminar",
+        style: "destructive",
+        onPress: () => removeFromCart(item.id),
+      },
     ]);
   };
 
   return (
     <View style={styles.container}>
+
+      {/* HEADER */}
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="chevron-back" size={26} color="#111" />
         </TouchableOpacity>
+
         <Text style={styles.headerTitle}>Carrito</Text>
+
         <View style={{ width: 40 }} />
       </View>
 
+      {/* CLIENTE */}
       {customer && (
         <View style={styles.customerBox}>
           <Icon name="person" size={18} color="#007AFF" />
           <Text style={styles.customerText}>
             {customer.firstName} {customer.lastName}
           </Text>
+          <TouchableOpacity onPress={() => setCustomer(null)} style={{ marginLeft: 8 }}>
+            <Icon name="close" size={20} color="#FF3B30" />
+          </TouchableOpacity>
         </View>
       )}
 
+      {/* LISTA DEL CARRITO */}
       <FlatList
         data={cart}
-        keyExtractor={(it) => it.id}
+        keyExtractor={(item, i) =>
+          item?.id ? item.id : `fallback-${i}`
+        }
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <CartItem
             item={item}
             onEdit={() => openEdit(item)}
             onDiscount={() => openDiscount(item)}
-            onRemove={() => handleRemove(item.id)}
+            onRemove={() => handleRemove(item)}
           />
         )}
         ListEmptyComponent={() => (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>No hay items en el carrito</Text>
+            <Text style={styles.emptyText}>No hay productos en el carrito</Text>
           </View>
         )}
       />
 
+      {/* RESUMEN */}
       <View style={styles.summary}>
         <View style={styles.row}>
           <Text style={styles.label}>Subtotal</Text>
@@ -110,9 +146,22 @@ export default function QuickSaleCartScreen({ navigation }) {
         </View>
 
         <TouchableOpacity
+          style={styles.cancelBtn}
+          onPress={() => {
+            resetQuickSale();
+            navigation.navigate("QuickSaleProducts");
+          }}
+        >
+          <Text style={styles.cancelText}>Cancelar</Text>
+        </TouchableOpacity>
+
+        {/* BOTÓN CONTINUAR */}
+        <TouchableOpacity
           style={styles.checkoutBtn}
           onPress={() => {
-            if (cart.length === 0) return Alert.alert('Carrito vacío', 'Agrega productos antes de pagar.');
+            if (cart.length === 0)
+              return Alert.alert("Carrito vacío", "Agrega productos antes de pagar.");
+
             navigation.navigate("QuickSalePayment", {
               cart,
               subtotal,
@@ -126,16 +175,15 @@ export default function QuickSaleCartScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Discount Modal (component provided below) */}
-      {discountModal.visible && (
-        <DiscountModal
-          visible={discountModal.visible}
-          product={discountModal.product}
-          onClose={() => setDiscountModal({ visible: false, product: null })}
-          onApply={applyDiscountToProduct}
-        />
-      )}
+      {/* MODAL DESCUENTO */}
+      <DiscountModal
+        visible={discountModal.visible}
+        product={discountModal.product}
+        onClose={() =>
+          setDiscountModal({ visible: false, product: null })
+        }
+        onApply={applyDiscountToProduct}
+      />
     </View>
   );
 }
-
