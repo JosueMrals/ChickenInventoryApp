@@ -33,7 +33,7 @@ export default function ProductListSection({ products, onSell, loading }) {
           <View>
             <Text style={styles.productName}>{item.name}</Text>
             <Text style={styles.productInfo}>Stock: {item.stock}</Text>
-            <Text style={styles.productPrice}>${item.price?.toFixed(2)}</Text>
+            <Text style={styles.productPrice}>${item.salePrice?.toFixed(2)}</Text>
           </View>
           <TouchableOpacity
             onPress={() => onSell(item)}

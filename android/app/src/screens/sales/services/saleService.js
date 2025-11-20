@@ -26,7 +26,7 @@ async function getNextSaleNumber() {
  */
 export async function registerSale(product, customer, quantity, form) {
   const saleNumber = await getNextSaleNumber();
-  const subtotal = product.price * quantity;
+  const subtotal = product.salePrice * quantity;
   const discountValue = parseFloat(form.discountValue || 0);
   const discount =
     form.discountType === 'percent'
@@ -46,7 +46,7 @@ export async function registerSale(product, customer, quantity, form) {
     productId: product.id,
     productName: product.name,
     quantity,
-    price: product.price,
+    price: product.salePrice,
     subtotal,
     discount,
     total,
