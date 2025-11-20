@@ -14,6 +14,23 @@ export default StyleSheet.create({
     marginBottom: 20,
   },
 
+ quantityBox: {
+    borderWidth: 2,
+    borderColor: "#007AFF",
+    borderRadius: 30,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    alignSelf: "center",
+    width: 180,
+  },
+
+  quantityText: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#111",
+  },
+
+
   headerTitle: {
     fontSize: 20,
     fontWeight: "600",

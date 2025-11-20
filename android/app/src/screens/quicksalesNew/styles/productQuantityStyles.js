@@ -46,9 +46,6 @@ export default StyleSheet.create({
     alignSelf: "center",
     width: 180,
 
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
   },
 
   quantityText: {
