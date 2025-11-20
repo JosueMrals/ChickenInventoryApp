@@ -27,7 +27,7 @@ export const getUserRole = async (uid) => {
     const snap = await firestore().collection('users').doc(uid).get();
 
     if (!snap.exists) {
-      console.log('⚠️ Usuario sin documento, asignando rol por defecto.');
+      console.log('Usuario sin documento, asignando rol por defecto.');
       return 'user';
     }
 

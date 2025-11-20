@@ -27,14 +27,18 @@ export default function ProductList({ role: propRole, user: propUser }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [currentProduct, setCurrentProduct] = useState(null);
   const [form, setForm] = useState({ name: '', price: '', stock: '' });
+  const [stockOnlyMode, setStockOnlyMode] = useState(false); // <-- modo para bodeguero
   const animValue = useRef(new Animated.Value(0)).current;
 
   const navigation = useNavigation();
 
   // 🔹 Cargar productos + rol
   useEffect(() => {
+    let mounted = true;
     if (!role && user) {
-      getUserRole(user.uid).then(r => setRole(r));
+      getUserRole(user.uid).then(r => {
+        if (mounted) setRole(r);
+      });
     }
 
     const unsubscribe = firestore()
@@ -48,12 +52,18 @@ export default function ProductList({ role: propRole, user: propUser }) {
         setProducts(data);
         setFiltered(data);
         setLoading(false);
+      }, err => {
+        console.error('Error snapshot products:', err);
+        setLoading(false);
       });
 
-    return () => unsubscribe();
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, [user]);
 
-  // 🔍 Filtros y búsqueda
+  //  Filtros y búsqueda
   useEffect(() => {
     let data = [...products];
     if (search.trim()) {
@@ -67,7 +77,7 @@ export default function ProductList({ role: propRole, user: propUser }) {
     setFiltered(data);
   }, [search, filter, products]);
 
-  // 🧩 Animación modal
+  //  Animación modal
   const showModal = () => {
     setModalVisible(true);
     Animated.timing(animValue, {
@@ -86,58 +96,104 @@ export default function ProductList({ role: propRole, user: propUser }) {
       setModalVisible(false);
       setCurrentProduct(null);
       setForm({ name: '', price: '', stock: '' });
+      setStockOnlyMode(false);
     });
   };
 
-  // 🧠 Guardar producto
+  //  Guardar producto (ahora soporta admin y bodeguero stock-only)
   const handleSave = async () => {
-    if (role !== 'admin') {
-      Alert.alert('Permiso denegado', 'Solo los administradores pueden guardar productos.');
-      return;
-    }
-
-    if (!form.name.trim() || !form.price.trim()) {
-      Alert.alert('Campos requeridos', 'Nombre y precio son obligatorios.');
-      return;
-    }
-
     try {
-      if (currentProduct) {
+      // BODEGUERO: solo permite actualizar stock de producto existente
+      if (role === 'bodeguero') {
+        if (!currentProduct) {
+          Alert.alert('Permiso denegado', 'No puedes crear productos.');
+          return;
+        }
+        const newStock = parseInt(form.stock, 10);
+        if (isNaN(newStock)) {
+          Alert.alert('Valor inválido', 'Ingresa un número válido en stock.');
+          return;
+        }
+
         await firestore().collection('products').doc(currentProduct.id).update({
-          name: form.name,
-          price: parseFloat(form.price),
-          stock: parseInt(form.stock) || 0,
+          stock: newStock,
           updatedAt: new Date(),
         });
-      } else {
-        await firestore().collection('products').add({
-          name: form.name,
-          price: parseFloat(form.price),
-          stock: parseInt(form.stock) || 0,
-          createdAt: new Date(),
-        });
+
+        hideModal();
+        return;
       }
 
-      hideModal();
+      // ADMIN: puede crear o editar completamente
+      if (role === 'admin') {
+        if (!form.name.trim() || !form.price.trim()) {
+          Alert.alert('Campos requeridos', 'Nombre y precio son obligatorios.');
+          return;
+        }
+
+        if (currentProduct) {
+          await firestore().collection('products').doc(currentProduct.id).update({
+            name: form.name,
+            price: parseFloat(form.price),
+            stock: parseInt(form.stock) || 0,
+            updatedAt: new Date(),
+          });
+        } else {
+          await firestore().collection('products').add({
+            name: form.name,
+            price: parseFloat(form.price),
+            stock: parseInt(form.stock) || 0,
+            createdAt: new Date(),
+          });
+        }
+
+        hideModal();
+        return;
+      }
+
+      // OTROS ROLES: negar
+      Alert.alert('Permiso denegado', 'No tienes permisos para esta acción.');
     } catch (e) {
-      Alert.alert('Error', e.message);
+      console.error('Error guardando producto:', e);
+      Alert.alert('Error', e.message || 'Ocurrió un error al guardar.');
     }
   };
 
+  // Abrir edición completa (solo admin)
   const openEdit = (product) => {
     if (role !== 'admin') return;
     setCurrentProduct(product);
     setForm({
       name: product.name,
-      price: product.price.toString(),
-      stock: product.stock?.toString() || '',
+      price: (product.price ?? '').toString(),
+      stock: (product.stock ?? '').toString(),
     });
+    setStockOnlyMode(false);
     showModal();
   };
 
+  // Abrir edición de solo stock (para bodeguero)
+  const openStockEdit = (product) => {
+    // permite abrir modal si es bodeguero o admin (admin usará openEdit normalmente)
+    if (role !== 'bodeguero' && role !== 'admin') return;
+    setCurrentProduct(product);
+    setForm({
+      name: product.name || '',
+      price: (product.price ?? '').toString(),
+      stock: (product.stock ?? '').toString(),
+    });
+    setStockOnlyMode(role === 'bodeguero'); // true para bodeguero
+    showModal();
+  };
+
+  // Render item: admin abre la edición completa, bodeguero abre stock-only
   const renderItem = ({ item }) => (
     <TouchableOpacity
-      onPress={() => openEdit(item)}
+      onPress={() => {
+        if (role === 'admin') openEdit(item);
+        else if (role === 'bodeguero') openStockEdit(item);
+        else {} // otros roles: no hacen nada
+      }}
       activeOpacity={0.8}
       style={{
         backgroundColor: '#fff',
@@ -151,7 +207,7 @@ export default function ProductList({ role: propRole, user: propUser }) {
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
         <Text style={{ fontSize: 18, fontWeight: '600' }}>{item.name}</Text>
         <Text style={{ fontSize: 16, color: '#007AFF' }}>
-          ${item.price.toFixed(2)}
+          ${Number(item.price ?? 0).toFixed(2)}
         </Text>
       </View>
       <Text style={{ color: '#666', marginTop: 4 }}>Stock: {item.stock || 0}</Text>
@@ -208,10 +264,15 @@ export default function ProductList({ role: propRole, user: propUser }) {
         contentContainerStyle={{ paddingBottom: 100 }}
       />
 
-      {/* Botón agregar */}
+      {/* Botón agregar (solo admin) */}
       {role === 'admin' && (
         <TouchableOpacity
-          onPress={() => showModal()}
+          onPress={() => {
+            setCurrentProduct(null);
+            setForm({ name: '', price: '', stock: '' });
+            setStockOnlyMode(false);
+            showModal();
+          }}
           style={{
             position: 'absolute',
             right: 20,
@@ -255,22 +316,29 @@ export default function ProductList({ role: propRole, user: propUser }) {
             opacity: animValue,
           }}>
             <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 12 }}>
-              {currentProduct ? 'Editar producto' : 'Nuevo producto'}
+              {stockOnlyMode ? 'Editar stock' : (currentProduct ? 'Editar producto' : 'Nuevo producto')}
             </Text>
 
-            <TextInput
-              placeholder="Nombre"
-              value={form.name}
-              onChangeText={(t) => setForm({ ...form, name: t })}
-              style={inputStyle}
-            />
-            <TextInput
-              placeholder="Precio"
-              keyboardType="numeric"
-              value={form.price}
-              onChangeText={(t) => setForm({ ...form, price: t })}
-              style={inputStyle}
-            />
+            {/* Si no es stockOnly, mostrar campos completos (admin) */}
+            {!stockOnlyMode && (
+              <>
+                <TextInput
+                  placeholder="Nombre"
+                  value={form.name}
+                  onChangeText={(t) => setForm({ ...form, name: t })}
+                  style={inputStyle}
+                />
+                <TextInput
+                  placeholder="Precio"
+                  keyboardType="numeric"
+                  value={form.price}
+                  onChangeText={(t) => setForm({ ...form, price: t })}
+                  style={inputStyle}
+                />
+              </>
+            )}
+
+            {/* Stock siempre visible/editable */}
             <TextInput
               placeholder="Stock"
               keyboardType="numeric"
@@ -281,7 +349,9 @@ export default function ProductList({ role: propRole, user: propUser }) {
 
             <View style={{ flexDirection: 'row', marginTop: 10 }}>
               <TouchableOpacity onPress={handleSave} style={btnPrimary}>
-                <Text style={{ color: '#fff', fontWeight: '600' }}>Guardar</Text>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>
+                  {role === 'bodeguero' ? 'Actualizar stock' : 'Guardar'}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={hideModal} style={btnCancel}>
                 <Text style={{ color: '#fff', fontWeight: '600' }}>Cancelar</Text>

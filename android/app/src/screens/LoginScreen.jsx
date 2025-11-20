@@ -44,7 +44,22 @@ export default function LoginScreen({ navigation }) {
       navigation.replace('AppDrawer', { role, user });
     } catch (error) {
       console.log('🔥 Error al iniciar sesión:', error);
+ // Si el error tiene texto indicando que NO está verificado:
+    if ((error.message && error.message.toLowerCase().includes('verificado')) ||
+        (error.code && error.code === 'correo-no-verificado')) {
+      // auth().currentUser estará presente porque signInWithEmailAndPassword ya se ejecutó dentro de loginUser
+      const current = auth().currentUser;
+      if (current) {
+        setUnverifiedUser(current); // mostramos la UI para reenviar verificación
+      }
 
+      setLoading(false);
+      Alert.alert(
+        'Correo no verificado',
+        'Tu cuenta no está verificada. Por favor revisa tu correo o reenvía la verificación.'
+      );
+      return; // detenemos aquí, dejamos la UI para reenviar/verificar
+    }
       let msg = 'Error al iniciar sesión.';
       if (error.code === 'auth/invalid-email') msg = 'Correo electrónico inválido.';
       if (error.code === 'auth/user-not-found') msg = 'Usuario no encontrado.';
