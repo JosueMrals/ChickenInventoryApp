@@ -1,5 +1,6 @@
-import React, { useContext, useState, useEffect } from "react";
+import React, { useContext, useState, useEffect, useCallback  } from "react";
 import { View, Text, FlatList, TouchableOpacity, TextInput } from "react-native";
+
 import { QuickSaleContext } from "./context/quickSaleContext";
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "./styles/quickProductsStyles";
@@ -35,6 +36,7 @@ export default function QuickSaleProductsScreen({ navigation }) {
         addItem(product, qty); // usa estructura correcta
       },
     });
+    console.log(product);
   };
 
 
@@ -101,7 +103,7 @@ export default function QuickSaleProductsScreen({ navigation }) {
         >
           <Text style={styles.cartButtonText}>
             {cart.length} ítems · Total C$
-            {cart.reduce((a, c) => a + c.quantity * c.price, 0).toFixed(2)}
+            {cart.reduce((sum, item) => sum + item.total, 0).toFixed(2)}
           </Text>
         </TouchableOpacity>
       )}

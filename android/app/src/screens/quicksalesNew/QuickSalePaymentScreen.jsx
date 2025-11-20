@@ -9,6 +9,8 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "./styles/quickPaymentStyles";
+import { registerQuickSaleFull } from "./services/quickSaleService";
+
 
 export default function QuickSalePaymentScreen({ navigation, route }) {
   const {
@@ -73,7 +75,22 @@ export default function QuickSalePaymentScreen({ navigation, route }) {
       date: new Date(),
     };
 
-    navigation.replace("QuickSaleDone", { sale });
+    registerQuickSaleFull({
+      cart,
+      subtotal,
+      total,
+      tip,
+      paymentMethod,
+      amountPaid: paid,
+      change,
+      customer
+    })
+    .then((id) => {
+      navigation.replace("QuickSaleDone", { saleId: id });
+    })
+    .catch((e) => {
+      Alert.alert("Error", "No se pudo registrar la venta");
+    });
   };
 
   return (

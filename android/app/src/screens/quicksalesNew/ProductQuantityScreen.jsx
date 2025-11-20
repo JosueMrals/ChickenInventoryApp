@@ -7,41 +7,25 @@ import Icon from "react-native-vector-icons/Ionicons";
 export default function ProductQuantityScreen({ navigation, route }) {
   const { product, onConfirm } = route.params;
 
+  const [qty, setQty] = useState(""); // ← inicia VACÍO
 
-  const [qty, setQty] = useState("1");
-
-  // Borrar valor
-  const clearQty = () => setQty("");
-
-  // Guardar cantidad
   const saveQuantity = () => {
-    const quantity = Number(qty);
+    const n = Number(qty);
 
-    if (!qty || isNaN(quantity) || quantity <= 0) {
+    if (!qty || isNaN(n) || n <= 0) {
       Alert.alert("Cantidad inválida", "Ingresa una cantidad mayor a 0.");
       return;
     }
 
-    onConfirm(quantity);
+    onConfirm(n);
     navigation.goBack();
   };
 
-  const handleKeyPress = (key) => {
-    if (key === "del") {
-      saveQuantity();
-      return;
-    }
-
-    if (key === "clear") {
-      clearQty();
-      return;
-    }
-
-    setQty((prev) => (prev === "0" ? key : prev + key));
-  };
+  const clearQty = () => setQty("");
 
   return (
     <View style={styles.container}>
+
       {/* HEADER */}
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -50,19 +34,20 @@ export default function ProductQuantityScreen({ navigation, route }) {
 
         <Text style={styles.headerTitle}>{product.name}</Text>
 
-        <TouchableOpacity onPress={() => clearQty()}>
+        <TouchableOpacity onPress={clearQty}>
           <Icon name="close-circle" size={24} color="#FF3B30" />
         </TouchableOpacity>
       </View>
 
-      {/* QUANTITY INPUT */}
+      {/* CONTENEDOR */}
       <View style={styles.inputContainer}>
         <Text style={styles.quantityLabel}>Cantidad:</Text>
 
         <View style={styles.quantityBox}>
           <Text style={styles.quantityText}>{qty || "0"}</Text>
 
-        <TouchableOpacity onPress={clearQty} style={styles.clearButton}>
+        {/* BOTÓN BORRAR */}
+        <TouchableOpacity onPress={clearQty} style={styles.quantityDelete}>
           <Icon name="close" size={20} color="#333" />
         </TouchableOpacity>
         </View>
@@ -84,6 +69,7 @@ export default function ProductQuantityScreen({ navigation, route }) {
     </View>
   );
 }
+
 
 // export default function ProductQuantityScreen({ navigation, route }) {
 //   const { product, onConfirm } = route.params;
