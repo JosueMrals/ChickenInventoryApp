@@ -15,7 +15,7 @@ export default StyleSheet.create({
     fontWeight: '700',
     color: '#007AFF',
     marginBottom: 12,
-    textAlign: 'center',
+    textAlign: 'left',
   },
 
   // === Buscador ===

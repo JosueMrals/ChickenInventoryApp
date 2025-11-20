@@ -14,7 +14,7 @@ export default function Sidebar({ navigation, role, user }) {
       <View style={{ padding: 20 }}>
         <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 20 }}>Menú</Text>
 
-        <TouchableOpacity onPress={() => navigation.navigate('Dashboard')}>
+        <TouchableOpacity onPress={() => navigation.navigate('DashboardScreen')}>
           <Text style={{ fontSize: 16, marginBottom: 10 }}>🏠 Inicio</Text>
         </TouchableOpacity>
 

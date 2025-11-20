@@ -1,4 +1,3 @@
-// styles/salesScreenStyles.js
 import { StyleSheet } from 'react-native';
 
 export default StyleSheet.create({
@@ -16,7 +15,7 @@ export default StyleSheet.create({
     color: '#fff',
     fontSize: 22,
     fontWeight: '700',
-    marginTop: 25,
+    marginTop: 30,
   },
   tabsContainer: {
     flexDirection: 'row',

@@ -1,9 +1,25 @@
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+} from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import styles from '../styles/saleModalStyles';
+import styles from '../styles/paymentSelectorStyles';
 
-export default function PaymentSelector({ form, setForm, subtotal, discount, total }) {
+export default function PaymentSelector({
+  paymentMethod,
+  setPaymentMethod,
+  paidAmount,
+  setPaidAmount,
+  transferNumber,
+  setTransferNumber,
+  saleDiscount,
+  setSaleDiscount,
+  total,
+  customer,
+}) {
   const methods = [
     { key: 'cash', label: 'Efectivo', icon: 'cash-outline', color: '#34A853' },
     { key: 'transfer', label: 'Transferencia', icon: 'swap-horizontal', color: '#4285F4' },
@@ -11,68 +27,46 @@ export default function PaymentSelector({ form, setForm, subtotal, discount, tot
     { key: 'credit', label: 'Crédito', icon: 'time-outline', color: '#EA4335' },
   ];
 
+  const paid = parseFloat(paidAmount || 0);
+  const discount = parseFloat(saleDiscount || 0);
+  const discountAmount = +(total * (discount / 100)).toFixed(2);
+  const finalTotal = +(total - discountAmount).toFixed(2);
+  const pending = Math.max(finalTotal - paid, 0);
+
   return (
-    <View style={{ marginTop: 8 }}>
-      <Text style={styles.sectionTitle}>Descuento</Text>
-      <View style={styles.discountRow}>
-        {['none', 'percent', 'amount'].map((t) => (
-          <TouchableOpacity
-            key={t}
-            onPress={() => setForm({ ...form, discountType: t })}
-            style={[
-              styles.discountBtn,
-              {
-                backgroundColor: form.discountType === t ? '#007AFF' : '#E0E0E0',
-              },
-            ]}
-          >
-            <Text
-              style={{
-                color: form.discountType === t ? '#fff' : '#333',
-                fontWeight: '600',
-              }}
-            >
-              {t === 'none' ? 'Sin Desc.' : t === 'percent' ? '% Descuento' : '$ Descuento'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+    <View style={{ marginTop: 12 }}>
+      <Text style={styles.sectionTitle}>Descuento por Venta</Text>
 
-      {form.discountType !== 'none' && (
-        <TextInput
-          placeholder="Valor descuento"
-          keyboardType="numeric"
-          value={form.discountValue}
-          onChangeText={(t) => setForm({ ...form, discountValue: t })}
-          style={styles.input}
-        />
-      )}
+      <TextInput
+        placeholder="% descuento"
+        keyboardType="numeric"
+        value={saleDiscount}
+        onChangeText={setSaleDiscount}
+        style={styles.input}
+      />
 
-      <Text style={styles.sectionTitle}>Método de pago</Text>
+      <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Método de Pago</Text>
+
       <View style={styles.paymentRow}>
         {methods.map((m) => (
           <TouchableOpacity
             key={m.key}
-            onPress={() => setForm({ ...form, paymentMethod: m.key })}
+            onPress={() => setPaymentMethod(m.key)}
             style={[
               styles.paymentBtn,
-              {
-                backgroundColor:
-                  form.paymentMethod === m.key ? m.color : '#E0E0E0',
-              },
+              paymentMethod === m.key && { backgroundColor: m.color },
             ]}
           >
             <Ionicons
               name={m.icon}
               size={22}
-              color={form.paymentMethod === m.key ? '#fff' : '#555'}
+              color={paymentMethod === m.key ? '#fff' : '#555'}
             />
             <Text
-              style={{
-                color: form.paymentMethod === m.key ? '#fff' : '#333',
-                fontWeight: '600',
-                fontSize: 12,
-              }}
+              style={[
+                styles.paymentLabel,
+                paymentMethod === m.key && { color: '#fff' },
+              ]}
             >
               {m.label}
             </Text>
@@ -80,28 +74,52 @@ export default function PaymentSelector({ form, setForm, subtotal, discount, tot
         ))}
       </View>
 
-      {form.paymentMethod === 'transfer' && (
+      {paymentMethod === 'transfer' && (
         <TextInput
           placeholder="Número de transferencia"
-          value={form.transferNumber}
-          onChangeText={(t) => setForm({ ...form, transferNumber: t })}
+          value={transferNumber}
+          onChangeText={setTransferNumber}
           style={styles.input}
         />
       )}
 
-      <TextInput
-        placeholder="Monto pagado"
-        keyboardType="numeric"
-        value={form.paidAmount}
-        onChangeText={(t) => setForm({ ...form, paidAmount: t })}
-        style={styles.input}
-      />
+      {paymentMethod !== 'credit' && (
+        <>
+          <Text style={styles.label}>Monto pagado</Text>
+          <TextInput
+            placeholder="0.00"
+            keyboardType="numeric"
+            value={paidAmount}
+            onChangeText={setPaidAmount}
+            style={styles.input}
+          />
+        </>
+      )}
 
-      {/* Totales */}
+      {customer && paymentMethod === 'credit' && (
+        <View style={styles.creditBox}>
+          <Text style={styles.creditText}>
+            Límite disponible:{' '}
+            <Text style={{ fontWeight: '700' }}>
+              C${(customer.creditLimit - (customer.currentCredit || 0)).toFixed(2)}
+            </Text>
+          </Text>
+        </View>
+      )}
+
       <View style={styles.totalBox}>
-        <Text style={styles.totalText}>Subtotal: ${subtotal.toFixed(2)}</Text>
-        <Text style={styles.totalText}>Descuento: ${discount.toFixed(2)}</Text>
-        <Text style={styles.totalMain}>Total a pagar: ${total.toFixed(2)}</Text>
+        <Text style={styles.totalText}>
+          Total: <Text style={{ fontWeight: '700' }}>C${finalTotal.toFixed(2)}</Text>
+        </Text>
+
+        <Text
+          style={[
+            styles.pendingText,
+            pending > 0 && { color: '#EA4335' },
+          ]}
+        >
+          Pendiente: C${pending.toFixed(2)}
+        </Text>
       </View>
     </View>
   );
