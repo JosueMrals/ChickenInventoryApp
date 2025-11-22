@@ -1,27 +1,50 @@
-import React from 'react';
-import { View, TextInput } from 'react-native';
-import Ionicons from 'react-native-vector-icons/Ionicons';
-import styles from '../styles/productsStyles';
+import React, { useEffect, useState } from "react";
+import { View, TextInput, TouchableOpacity, Text } from "react-native";
+import styles from "../styles/searchBarStyles";
 
 export default function ProductSearchBar({ search, setSearch }) {
+  const [localValue, setLocalValue] = useState("");
+
+  // Sincronizar cuando search viene vacío desde fuera
+  useEffect(() => {
+    if (!search) setLocalValue("");
+  }, [search]);
+
+  // Debounce — evita recalcular en cada tecla
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setSearch(typeof localValue === "string" ? localValue : "");
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [localValue]);
+
+  const handleClear = () => {
+    setLocalValue("");
+    setSearch("");
+  };
+
   return (
-    <View style={styles.searchContainer}>
-      <Ionicons name="search-outline" size={20} color="#666" style={{ marginHorizontal: 8 }} />
+    <View style={styles.container}>
+      {/* Ícono */}
+      <Text style={styles.icon}>🔍</Text>
+
+      {/* Input */}
       <TextInput
+        style={styles.input}
         placeholder="Buscar producto..."
         placeholderTextColor="#999"
-        value={search}
-        onChangeText={setSearch}
-        style={styles.searchInput}
+        value={localValue}
+        onChangeText={(text) => {
+          setLocalValue(typeof text === "string" ? text : "");
+        }}
       />
-      {search?.length > 0 && (
-        <Ionicons
-          name="close-circle"
-          size={18}
-          color="#999"
-          style={{ marginHorizontal: 6 }}
-          onPress={() => setSearch('')}
-        />
+
+      {/* Botón limpiar */}
+      {localValue?.length > 0 && (
+        <TouchableOpacity onPress={handleClear}>
+          <Text style={styles.clear}>✕</Text>
+        </TouchableOpacity>
       )}
     </View>
   );
