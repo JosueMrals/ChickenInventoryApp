@@ -1,97 +1,114 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet } from "react-native";
 
 export default StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F5F6FA' },
-    header: {
-    backgroundColor: '#007AFF',
-    padding: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    },
-    title: { color: '#fff', fontSize: 20, fontWeight: '700', marginTop: 25 },
-    headerBtn: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginLeft: 8,
-    marginTop: 25
-    },
-    headerBtnText: { color: '#fff', fontWeight: '700', },
-
-    loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-    card: {
-    flexDirection: 'row',
-    padding: 14,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginVertical: 6,
-    elevation: 2,
-    alignItems: 'center',
-    },
-    name: { fontSize: 16, fontWeight: '700', color: '#222' },
-    info: { color: '#007AFF', marginTop: 4 },
-    subInfo: { color: '#666', marginTop: 4 },
-
-    editBtn: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginLeft: 12,
-    },
-    editBtnText: { color: '#fff', fontWeight: '700' },
-
-    modalOverlay: {
+  container: {
+    paddingTop: 40,
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.42)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    },
-    modalCard: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    elevation: 8,
-    },
-    modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 10 },
+    backgroundColor: "#F5F7FA",  // gris claro profesional
+  },
 
-    input: {
-    borderWidth: 1,
-    borderColor: '#eee',
+  /* HEADER --------------------------------------------------- */
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    backgroundColor: "#ffffff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E4E4E4",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    elevation: 3,
+  },
+
+  title: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#333",
+  },
+
+  headerBtn: {
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 8,
-    padding: 10,
-    marginBottom: 8,
-    backgroundColor: '#F9FAFB',
-    },
+    elevation: 2,
+  },
 
-    btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-    btnPrimary: { backgroundColor: '#007AFF', marginRight: 6 },
-    btnCancel: { backgroundColor: '#FF3B30', marginLeft: 6 },
-    btnText: { color: '#fff', fontWeight: '700' },
+  headerBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 14,
+  },
 
-    // 🔍 Buscador
-    searchContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: '#fff',
-      borderRadius: 10,
-      marginHorizontal: 12,
-      marginVertical: 10,
-      paddingHorizontal: 6,
-      borderWidth: 1,
-      borderColor: '#eee',
-    },
-    searchInput: {
-      flex: 1,
-      fontSize: 16,
-      paddingVertical: 8,
-      color: '#222',
-    },
+  /* LOADER --------------------------------------------------- */
+  loader: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* LISTA ---------------------------------------------------- */
+  listContent: {
+    paddingBottom: 100,
+    paddingHorizontal: 10,
+  },
+
+  emptyText: {
+    textAlign: "center",
+    marginTop: 50,
+    fontSize: 16,
+    color: "#888",
+  },
+
+  /* PRODUCT CARD --------------------------------------------- */
+  card: {
+    backgroundColor: "#fff",
+    padding: 16,
+    marginVertical: 6,
+    borderRadius: 12,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: "#ececec",
+  },
+
+  name: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: "#222",
+    marginBottom: 4,
+  },
+
+  barcode: {
+    color: "#555",
+    fontSize: 14,
+  },
+
+  price: {
+    marginTop: 6,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0A84FF",
+  },
+
+  stock: {
+    marginTop: 4,
+    fontSize: 14,
+    color: "#444",
+  },
+
+  actionBtn: {
+    backgroundColor: "#0A84FF",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignSelf: "flex-start",
+    marginTop: 10,
+  },
+
+  actionBtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
 
 });

@@ -1,45 +1,25 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { firestore } from '../../../services/firebaseConfig';
+import { useEffect, useState } from 'react';
+import { getProducts } from '../services/productService';
 
 export default function useProducts() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const unsubRef = useRef(null);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const list = await getProducts();
+      setProducts(list);
+    } catch (err) {
+      console.error("Error loading products:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    unsubRef.current = firestore()
-      .collection('products')
-      .orderBy('name', 'asc')
-      .onSnapshot(snapshot => {
-        const data = snapshot?.docs?.map(d => ({ id: d.id, ...d.data() })) || [];
-        setProducts(data);
-        setLoading(false);
-      }, (err) => {
-        console.error('useProducts snapshot error', err);
-        setLoading(false);
-      });
-
-    return () => {
-      if (unsubRef.current) unsubRef.current();
-    };
+    load();
   }, []);
 
-  const refresh = useCallback(() => {
-    // force re-fetch by detaching and re-attaching
-    if (unsubRef.current) unsubRef.current();
-    setLoading(true);
-    unsubRef.current = firestore()
-      .collection('products')
-      .orderBy('name', 'asc')
-      .onSnapshot(snapshot => {
-        const data = snapshot?.docs?.map(d => ({ id: d.id, ...d.data() })) || [];
-        setProducts(data);
-        setLoading(false);
-      }, (err) => {
-        console.error('useProducts refresh error', err);
-        setLoading(false);
-      });
-  }, []);
-
-  return { products, loading, refresh };
+  return { products, loading, refresh: load };
 }

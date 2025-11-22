@@ -1,37 +1,57 @@
-import { firestore } from '../../../services/firebaseConfig';
+import firestore from '@react-native-firebase/firestore';
 
-/**
- * payload example:
- * {
- *  name, purchasePrice, salePrice, stock, wholesaleThreshold, wholesalePrice, updatedAt
- * }
- */
+const COLLECTION = 'products';
 
-export async function createProduct(payload) {
-  const doc = {
-    name: payload.name,
-    purchasePrice: payload.purchasePrice ?? 0,
-    salePrice: payload.salePrice ?? 0,
-    stock: payload.stock ?? 0,
-    wholesaleThreshold: payload.wholesaleThreshold ?? 0,
-    wholesalePrice: payload.wholesalePrice ?? null,
-    createdAt: new Date(),
-  };
-  return firestore().collection('products').add(doc);
+// Obtener todos
+export async function getProducts() {
+  const snapshot = await firestore()
+    .collection(COLLECTION)
+    .orderBy("createdAt", "desc")
+    .get();
+
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
 }
 
-export async function updateProduct(id, payload) {
-  const clean = {};
-  if (payload.name !== undefined) clean.name = payload.name;
-  if (payload.purchasePrice !== undefined) clean.purchasePrice = payload.purchasePrice;
-  if (payload.salePrice !== undefined) clean.salePrice = payload.salePrice;
-  if (payload.stock !== undefined) clean.stock = payload.stock;
-  if (payload.wholesaleThreshold !== undefined) clean.wholesaleThreshold = payload.wholesaleThreshold;
-  if (payload.wholesalePrice !== undefined) clean.wholesalePrice = payload.wholesalePrice;
-  if (payload.updatedAt) clean.updatedAt = payload.updatedAt;
-  return firestore().collection('products').doc(id).update(clean);
+// Buscar por código
+export async function getProductByBarcode(barcode) {
+  const query = await firestore()
+    .collection(COLLECTION)
+    .where('barcode', '==', barcode)
+    .limit(1)
+    .get();
+
+  if (query.empty) return null;
+
+  const doc = query.docs[0];
+  return { id: doc.id, ...doc.data() };
 }
 
+// Crear
+export async function createProduct(data) {
+  data.createdAt = firestore.FieldValue.serverTimestamp();
+  return await firestore().collection(COLLECTION).add(data);
+}
+
+// Actualizar
+export async function updateProduct(id, data) {
+  return await firestore().collection(COLLECTION).doc(id).update(data);
+}
+
+// Eliminar
 export async function deleteProduct(id) {
-  return firestore().collection('products').doc(id).delete();
+  return await firestore().collection(COLLECTION).doc(id).delete();
+}
+
+// Ingreso de stock
+export async function addStockToProduct(id, amount) {
+  const ref = firestore().collection(COLLECTION).doc(id);
+
+  return await firestore().runTransaction(async (transaction) => {
+    const doc = await transaction.get(ref);
+    const current = doc.data().stock || 0;
+    transaction.update(ref, { stock: current + amount });
+  });
 }

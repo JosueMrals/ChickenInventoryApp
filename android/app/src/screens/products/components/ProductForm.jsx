@@ -1,116 +1,214 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
+import { View, Text, Modal, TouchableOpacity, TextInput, Alert } from 'react-native';
+import styles from '../styles/productFormStyles';
 import {
-  View, Text, TextInput, TouchableOpacity, Modal, Animated, ScrollView, Alert,
-} from 'react-native';
-import styles from '../styles/productsStyles';
-import { createProduct, updateProduct } from '../services/productService';
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  addStockToProduct
+} from '../services/productService';
 
 export default function ProductForm({ visible, onClose, product, role }) {
-  const [form, setForm] = useState({
-    name: '',
-    purchasePrice: '',
-    salePrice: '',
-    stock: '',
-    wholesaleThreshold: '',
-    wholesalePrice: '',
-  });
-  const anim = useRef(new Animated.Value(0)).current;
+  const isNew = !product || !product.id;
+  const isAdmin = role === "admin";
+
+  const [name, setName] = useState('');
+  const [barcode, setBarcode] = useState('');
+  const [price, setPrice] = useState('');
+  const [measureType, setMeasureType] = useState('unit'); // unit | weight
+  const [stock, setStock] = useState(0);
+
+  const [stockModal, setStockModal] = useState(false);
+  const [addAmount, setAddAmount] = useState('');
 
   useEffect(() => {
     if (product) {
-      setForm({
-        name: product.name || '',
-        purchasePrice: product.purchasePrice?.toString() || '',
-        salePrice: product.salePrice?.toString() || '',
-        stock: (product.stock ?? 0).toString(),
-        wholesaleThreshold: product.wholesaleThreshold?.toString() || '',
-        wholesalePrice: product.wholesalePrice?.toString() || '',
-      });
-    } else {
-      resetForm();
+      setName(product.name || '');
+      setBarcode(product.barcode || '');
+      setPrice(product.price?.toString() || '');
+      setMeasureType(product.measureType || 'unit');
+      setStock(product.stock || 0);
     }
   }, [product]);
 
-  useEffect(() => {
-    if (visible) {
-      Animated.timing(anim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-    } else {
-      Animated.timing(anim, { toValue: 0, duration: 180, useNativeDriver: true }).start();
-    }
-  }, [visible]);
+  const handleSave = async () => {
+    if (!name.trim()) return Alert.alert('Error', 'El nombre es obligatorio');
+    if (!barcode.trim()) return Alert.alert('Error', 'El código de barras es obligatorio');
+    if (!price.trim() || isNaN(price)) return Alert.alert('Error', 'Precio inválido');
 
-  const resetForm = () => setForm({
-    name: '',
-    purchasePrice: '',
-    salePrice: '',
-    stock: '',
-    wholesaleThreshold: '',
-    wholesalePrice: '',
-  });
-
-  const validateAndSubmit = async () => {
-    if (!form.name.trim() || !form.salePrice.trim()) {
-      return Alert.alert('Campos requeridos', 'Nombre y precio de venta son obligatorios.');
-    }
-
-    // parse numbers safely
-    const payload = {
-      name: form.name.trim(),
-      purchasePrice: role === 'admin' ? parseFloat(form.purchasePrice || 0) : undefined,
-      salePrice: parseFloat(form.salePrice || 0),
-      stock: parseInt(form.stock || 0),
-      wholesaleThreshold: parseInt(form.wholesaleThreshold || 0) || 0,
-      wholesalePrice: form.wholesalePrice ? parseFloat(form.wholesalePrice) : null,
-      updatedAt: new Date(),
+    const data = {
+      name,
+      barcode,
+      price: parseFloat(price),
+      measureType,
+      stock: stock ?? 0
     };
 
     try {
-      if (product && product.id) {
-        await updateProduct(product.id, payload);
-      } else {
-        await createProduct(payload);
-      }
+      if (isNew) await createProduct(data);
+      else await updateProduct(product.id, data);
+
       onClose();
-      resetForm();
-    } catch (e) {
-      console.error('Error guardando producto', e);
-      Alert.alert('Error', e.message || 'No se pudo guardar el producto.');
+    } catch (err) {
+      Alert.alert('Error', 'No se pudo guardar el producto');
     }
   };
 
+  const handleDelete = () => {
+    Alert.alert(
+      "Eliminar producto",
+      "¿Seguro que deseas eliminar este producto?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: async () => {
+            await deleteProduct(product.id);
+            onClose();
+          }
+        }
+      ]
+    );
+  };
+
+  const handleAddStock = async () => {
+    if (!addAmount.trim() || isNaN(addAmount))
+      return Alert.alert("Error", "Cantidad inválida");
+
+    await addStockToProduct(product.id, parseFloat(addAmount));
+    setAddAmount('');
+    setStockModal(false);
+    onClose();
+  };
+
   return (
-    <Modal transparent visible={visible} animationType="none">
-      <View style={styles.modalOverlay}>
-        <Animated.View style={[styles.modalCard, { transform: [{ scale: anim }] }]}>
-          <ScrollView>
-            <Text style={styles.modalTitle}>{product ? 'Editar producto' : 'Nuevo producto'}</Text>
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={styles.overlay}>
+        <View style={styles.modal}>
 
-            <TextInput placeholder="Nombre" value={form.name} onChangeText={(t) => setForm({...form, name: t})} style={styles.input} />
+          <Text style={styles.title}>
+            {isNew ? "Nuevo Producto" : `Producto: ${product.name}`}
+          </Text>
 
-            {role === 'admin' && (
-              <TextInput placeholder="Precio compra" keyboardType="numeric" value={form.purchasePrice} onChangeText={(t) => setForm({...form, purchasePrice: t})} style={styles.input} />
+          {/* Nombre */}
+          <Text style={styles.label}>Nombre</Text>
+          <TextInput
+            editable={isAdmin}
+            value={name}
+            onChangeText={setName}
+            style={styles.input}
+          />
+
+          {/* Código de barra */}
+          <Text style={styles.label}>Código de barras</Text>
+          <TextInput
+            editable={isAdmin}
+            value={barcode}
+            onChangeText={setBarcode}
+            style={styles.input}
+          />
+
+          {/* Precio */}
+          <Text style={styles.label}>Precio (venta)</Text>
+          <TextInput
+            editable={isAdmin}
+            keyboardType="numeric"
+            value={price}
+            onChangeText={setPrice}
+            style={styles.input}
+          />
+
+          {/* Tipo de medida */}
+          <Text style={styles.label}>Medición</Text>
+          <View style={styles.measureRow}>
+            <TouchableOpacity
+              disabled={!isAdmin}
+              onPress={() => setMeasureType('unit')}
+              style={[styles.measureBtn, measureType === 'unit' && styles.measureActive]}
+            >
+              <Text>Unidad</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              disabled={!isAdmin}
+              onPress={() => setMeasureType('weight')}
+              style={[styles.measureBtn, measureType === 'weight' && styles.measureActive]}
+            >
+              <Text>Peso</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.label}>Stock actual: {stock}</Text>
+
+          {/* Botones */}
+          <View style={styles.btnRow}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
+              <Text style={styles.cancelText}>Cerrar</Text>
+            </TouchableOpacity>
+
+            {isAdmin && (
+              <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
+                <Text style={styles.saveText}>{isNew ? "Crear" : "Guardar"}</Text>
+              </TouchableOpacity>
             )}
+          </View>
 
-            <TextInput placeholder="Precio venta" keyboardType="numeric" value={form.salePrice} onChangeText={(t) => setForm({...form, salePrice: t})} style={styles.input} />
-
-            <TextInput placeholder="Stock" keyboardType="numeric" value={form.stock} onChangeText={(t) => setForm({...form, stock: t})} style={styles.input} />
-
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TextInput placeholder="Umbral mayoreo (cantidad)" keyboardType="numeric" value={form.wholesaleThreshold} onChangeText={(t) => setForm({...form, wholesaleThreshold: t})} style={[styles.input, { flex: 1 }]} />
-              <TextInput placeholder="Precio mayoreo" keyboardType="numeric" value={form.wholesalePrice} onChangeText={(t) => setForm({...form, wholesalePrice: t})} style={[styles.input, { flex: 1 }]} />
-            </View>
-
-            <View style={{ flexDirection: 'row', marginTop: 10 }}>
-              <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={validateAndSubmit}>
-                <Text style={styles.btnText}>Guardar</Text>
+          {isAdmin && !isNew && (
+            <View style={styles.btnRow}>
+              <TouchableOpacity
+                style={styles.stockBtn}
+                onPress={() => setStockModal(true)}
+              >
+                <Text style={styles.stockText}>➕ Ingreso al inventario</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={() => { resetForm(); onClose(); }}>
-                <Text style={styles.btnText}>Cancelar</Text>
+
+              <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={handleDelete}
+              >
+                <Text style={styles.deleteText}>Eliminar</Text>
               </TouchableOpacity>
             </View>
-          </ScrollView>
-        </Animated.View>
+          )}
+
+        </View>
       </View>
+
+      {/* MODAL - Aumentar stock */}
+      <Modal visible={stockModal} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={styles.stockModalBox}>
+            <Text style={styles.title}>Ingreso de productos</Text>
+
+            <TextInput
+              placeholder="Cantidad"
+              keyboardType="numeric"
+              value={addAmount}
+              onChangeText={setAddAmount}
+              style={styles.input}
+            />
+
+            <View style={styles.btnRow}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setStockModal(false)}
+              >
+                <Text style={styles.cancelText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleAddStock}
+              >
+                <Text style={styles.saveText}>Ingresar</Text>
+              </TouchableOpacity>
+            </View>
+
+          </View>
+        </View>
+      </Modal>
+
     </Modal>
   );
 }
