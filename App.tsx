@@ -28,6 +28,8 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 
 import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen'
 
+import useSessionTimeout from "./android/app/src/hooks/useSessionTimeout";
+
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
 
@@ -86,6 +88,13 @@ function AppDrawer({ route }) {
 }
 
 export default function App() {
+
+  const handleSessionExpired = () => {
+    auth().signOut();
+  };
+
+  useSessionTimeout(handleSessionExpired);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <NavigationContainer>
