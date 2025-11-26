@@ -10,7 +10,7 @@ import QuickSaleDoneScreen from '../screens/quicksalesNew/QuickSaleDoneScreen';
 import AssignCustomerScreen from '../screens/quicksalesNew/AssignCustomerScreen';
 import ProductQuantityScreen from '../screens/quicksalesNew/ProductQuantityScreen';
 import ProductEditScreen from '../screens/quicksalesNew/ProductEditScreen';
-import ProductEditPriceScreen from '../screens/quicksalesNew/ProductEditPriceScreen';
+
 
 const Stack = createNativeStackNavigator();
 
@@ -87,10 +87,7 @@ export default function QuickSaleStack() {
         component={ProductEditScreen }
       />
 
-         <Stack.Screen
-              name="ProductEditPrice"
-              component={ProductEditPriceScreen }
-            />
+
     </Stack.Navigator>
   );
 }

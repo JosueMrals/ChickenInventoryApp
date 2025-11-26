@@ -69,32 +69,63 @@ export default function ProductEditScreen({ navigation, route }) {
 
       <ScrollView style={{ flex: 1 }}>
 
-        {/* CANTIDAD */}
-        <Text style={styles.label}>Cantidad</Text>
+      <Text style={styles.label}>Cantidad</Text>
+
+      <View style={{ flexDirection: "row", alignItems: "center", position: "relative" }}>
+
         <TextInput
-          style={styles.input}
+          style={[styles.input, { flex: 1, paddingRight: 40 }]} // ← este padding deja espacio para el botón
           keyboardType="numeric"
           value={quantity}
           onChangeText={setQuantity}
         />
 
-        {/* PRECIO UNITARIO */}
-        <Text style={styles.label}>Precio Unitario</Text>
-        <TextInput
-          style={styles.input}
-          keyboardType="numeric"
-          value={unitPrice}
-          onChangeText={setUnitPrice}
-        />
+        {quantity.length > 0 && (
+          <TouchableOpacity
+            onPress={() => setQuantity("")}
+            style={{ position: "absolute", right: 10 }} // ← esto lo pone dentro del input a la derecha
+          >
+            <Icon name="close-circle" size={24} />
+          </TouchableOpacity>
+        )}
 
-        {/* DESCUENTO INDIVIDUAL */}
-        <Text style={styles.label}>Descuento</Text>
-        <TextInput
-          style={styles.input}
-          keyboardType="numeric"
-          value={discount}
-          onChangeText={setDiscount}
-        />
+      </View>
+       <Text style={styles.label}>Precio Unitario</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", position: "relative" }}>
+          <TextInput
+            style={[styles.input, { flex: 1, paddingRight: 40 }]}
+            keyboardType="numeric"
+            value={unitPrice}
+            onChangeText={setUnitPrice}
+          />
+          {unitPrice.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setUnitPrice("")}
+              style={{ position: "absolute", right: 10 }}
+            >
+              <Icon name="close-circle" size={24} />
+            </TouchableOpacity>
+          )}
+        </View>
+ {/* DESCUENTO */}
+  <Text style={styles.label}>Descuento</Text>
+  <View style={{ flexDirection: "row", alignItems: "center", position: "relative" }}>
+    <TextInput
+      style={[styles.input, { flex: 1, paddingRight: 40 }]}
+      keyboardType="numeric"
+      value={discount}
+      onChangeText={setDiscount}
+    />
+    {discount.length > 0 && (
+      <TouchableOpacity
+        onPress={() => setDiscount("")}
+        style={{ position: "absolute", right: 10 }}
+      >
+        <Icon name="close-circle" size={24} />
+      </TouchableOpacity>
+    )}
+  </View>
+
       </ScrollView>
 
       {/* NUMERIC KEYBOARD */}
