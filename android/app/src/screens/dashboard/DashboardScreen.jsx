@@ -63,7 +63,7 @@ export default function DashboardScreen({ user, role }) {
       />
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>© 2025 ChickenInventoryApp</Text>
+        <Text style={styles.footerText}>© 2025  DIALIFGH</Text>
       </View>
     </View>
   );

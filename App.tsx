@@ -22,6 +22,8 @@ import QuickSalePaymentScreen from './android/app/src/screens/quicksalesNew/Quic
 import QuickSaleDoneScreen from './android/app/src/screens/quicksalesNew/QuickSaleDoneScreen';
 import QuickSaleStack from './android/app/src/navigation/QuickSaleStack';
 
+import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
+
 import { QuickSaleProvider } from './android/app/src/screens/quicksalesNew/context/quickSaleContext';
 
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -82,6 +84,13 @@ function AppDrawer({ route }) {
         headerShown: false,
         swipeEnabled: false,
       }}/>
+      <Drawer.Screen name="Reports"
+        component={ReportsScreen}
+        options={{
+          drawerLabel: "Reportes",
+          headerShown: false,
+          swipeEnabled: false,
+        }}/>
 
     </Drawer.Navigator>
   );

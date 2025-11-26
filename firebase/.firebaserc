@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "staging": "chickeninventoryapp",
+    "chickeninventoryapp": "chickeninventoryapp",
+    "default": "chickeninventoryapp"
+  },
+  "targets": {},
+  "etags": {}
+}

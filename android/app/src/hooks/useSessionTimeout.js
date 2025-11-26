@@ -19,7 +19,7 @@ export default function useSessionTimeout(onSessionExpired) {
         if (expired) {
           await SessionManager.clear();
           onSessionExpired(); // Cerrar sesión y reenviar al login
-        }
+        }reportsService.js
       }
 
       appState.current = nextState;
