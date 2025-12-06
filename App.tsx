@@ -1,8 +1,10 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { View, TouchableWithoutFeedback } from 'react-native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import auth from '@react-native-firebase/auth';
 
 import LoginScreen from './android/app/src/screens/LoginScreen';
 import ProductList from './android/app/src/screens/ProductList';
@@ -11,32 +13,26 @@ import Sidebar from './android/app/src/components/Sidebar';
 import ProfileScreen from './android/app/src/screens/ProfileScreen';
 import RegisterScreen from './android/app/src/screens/RegisterScreen';
 import SalesScreen from './android/app/src/screens/sales/SalesScreen';
-import CreditsScreen from './android/app/src/screens/CreditsScreen';
 import CustomersScreen from './android/app/src/screens/customer/CustomerListScreen';
 import ProductListScreen from './android/app/src/screens/products/ProductListScreen';
 import DashboardScreen from './android/app/src/screens/dashboard/DashboardScreen';
 
-import QuickSaleProductsScreen from './android/app/src/screens/quicksalesNew/QuickSaleProductsScreen';
-import QuickSaleCartScreen from './android/app/src/screens/quicksalesNew/QuickSaleCartScreen';
-import QuickSalePaymentScreen from './android/app/src/screens/quicksalesNew/QuickSalePaymentScreen';
-import QuickSaleDoneScreen from './android/app/src/screens/quicksalesNew/QuickSaleDoneScreen';
 import QuickSaleStack from './android/app/src/navigation/QuickSaleStack';
-
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
-
-import { QuickSaleProvider } from './android/app/src/screens/quicksalesNew/context/quickSaleContext';
-
-import Ionicons from 'react-native-vector-icons/Ionicons';
-
-import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen'
+import ProductsStack from './android/app/src/navigation/ProductsStack';
+import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen';
 
 import useSessionTimeout from "./android/app/src/hooks/useSessionTimeout";
+import { SessionManager } from './android/app/src/utils/SessionManager';
+
+// Creamos la referencia de navegación globalmente para usarla fuera de componentes si es necesario
+export const navigationRef = createNavigationContainerRef();
 
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
 
 function AppDrawer({ route }) {
-  const { role, user } = route.params;
+  const { role, user } = route.params || {};
 
   return (
     <Drawer.Navigator
@@ -91,6 +87,10 @@ function AppDrawer({ route }) {
           headerShown: false,
           swipeEnabled: false,
         }}/>
+    <Drawer.Screen name="ProductsStack"
+        component={ProductsStack}
+        options={{ headerShown: false
+            }} />
 
     </Drawer.Navigator>
   );
@@ -98,22 +98,39 @@ function AppDrawer({ route }) {
 
 export default function App() {
 
-  const handleSessionExpired = () => {
-    auth().signOut();
-  };
-
-  useSessionTimeout(handleSessionExpired);
+  useSessionTimeout(() => {
+      // Callback cuando expira la sesión
+      (async () => {
+        try {
+          // 1. Cerrar sesión en Firebase Auth
+          await auth().signOut();
+        } catch (e) {
+          console.log('Error signing out:', e);
+        }
+        
+        // 2. Limpiar datos de sesión local
+        await SessionManager.clear();
+        
+        // 3. Redirigir al Login usando la referencia global
+        if (navigationRef.isReady()) {
+          // Reseteamos el stack para que no pueda volver atrás
+          navigationRef.reset({ index: 0, routes: [{ name: 'Login' }] });
+        }
+      })();
+    });
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <NavigationContainer>
-        <QuickSaleProvider>
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="AppDrawer" component={AppDrawer} />
-          </Stack.Navigator>
-        </QuickSaleProvider>
-      </NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
+          <TouchableWithoutFeedback onPress={() => SessionManager.updateActivity()}>
+            <View style={{ flex: 1 }}>
+              <Stack.Navigator screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="Login" component={LoginScreen} />
+                  <Stack.Screen name="AppDrawer" component={AppDrawer} />
+              </Stack.Navigator>
+            </View>
+          </TouchableWithoutFeedback>
+        </NavigationContainer>
     </GestureHandlerRootView>
   );
 }

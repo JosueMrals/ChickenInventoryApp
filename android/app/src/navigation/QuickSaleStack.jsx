@@ -1,3 +1,4 @@
+import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { TouchableOpacity } from 'react-native';
@@ -10,6 +11,8 @@ import QuickSaleDoneScreen from '../screens/quicksalesNew/QuickSaleDoneScreen';
 import AssignCustomerScreen from '../screens/quicksalesNew/AssignCustomerScreen';
 import ProductQuantityScreen from '../screens/quicksalesNew/ProductQuantityScreen';
 import ProductEditScreen from '../screens/quicksalesNew/ProductEditScreen';
+
+import { QuickSaleProvider } from '../screens/quicksalesNew/context/quickSaleContext';
 
 const Stack = createNativeStackNavigator();
 
@@ -39,52 +42,54 @@ function BackToDashboardButton() {
 
 export default function QuickSaleStack() {
   return (
-    <Stack.Navigator
-      initialRouteName="QuickSaleProducts"
-      screenOptions={{
-        headerShown: false,
-        headerShadowVisible: false,
-        headerBackTitleVisible: false,
-        headerLeft: () => <BackButton />,
-        headerTitleStyle: { fontSize: 18, fontWeight: "700" },
-      }}
-    >
-      <Stack.Screen
-        name="QuickSaleProducts"
-        component={QuickSaleProductsScreen}
-        initialParams={{ role: null, user: null }}
-        options={{
-          title: "Venta Rápida",
-          headerLeft: () => <BackToDashboardButton />,
+    <QuickSaleProvider>
+      <Stack.Navigator
+        initialRouteName="QuickSaleProducts"
+        screenOptions={{
+          headerShown: false,
+          headerShadowVisible: false,
+          headerBackTitleVisible: false,
+          headerLeft: () => <BackButton />,
+          headerTitleStyle: { fontSize: 18, fontWeight: "700" },
         }}
-      />
-
-      <Stack.Screen
-        name="QuickSaleCart"
-        component={QuickSaleCartScreen}
-      />
-      <Stack.Screen
-        name="QuickSalePayment"
-        component={QuickSalePaymentScreen}
-        options={{ title: "Pagar" }}
-      />
-      <Stack.Screen
-        name="QuickSaleDone"
-        component={QuickSaleDoneScreen}
-        options={{ title: "Pago realizado" }}
-      />
-      <Stack.Screen
-         name="AssignCustomer"
-         component={AssignCustomerScreen }
+      >
+        <Stack.Screen
+          name="QuickSaleProducts"
+          component={QuickSaleProductsScreen}
+          initialParams={{ role: null, user: null }}
+          options={{
+            title: "Venta Rápida",
+            headerLeft: () => <BackToDashboardButton />,
+          }}
         />
-      <Stack.Screen
-        name="ProductQuantity"
-        component={ProductQuantityScreen }
-      />
-      <Stack.Screen
-        name="ProductEdit"
-        component={ProductEditScreen }
-      />
-    </Stack.Navigator>
+
+        <Stack.Screen
+          name="QuickSaleCart"
+          component={QuickSaleCartScreen}
+        />
+        <Stack.Screen
+          name="QuickSalePayment"
+          component={QuickSalePaymentScreen}
+          options={{ title: "Pagar" }}
+        />
+        <Stack.Screen
+          name="QuickSaleDone"
+          component={QuickSaleDoneScreen}
+          options={{ title: "Pago realizado" }}
+        />
+        <Stack.Screen
+           name="AssignCustomer"
+           component={AssignCustomerScreen }
+          />
+        <Stack.Screen
+          name="ProductQuantity"
+          component={ProductQuantityScreen }
+        />
+        <Stack.Screen
+          name="ProductEdit"
+          component={ProductEditScreen }
+        />
+      </Stack.Navigator>
+    </QuickSaleProvider>
   );
 }
