@@ -89,8 +89,12 @@ export default function QuickSaleProductsScreen({ navigation }) {
             <Text style={styles.cardName}>{item.name}</Text>
 
             <Text style={styles.cardPrice}>
-              C${item.salePrice ?? item.price}
+              C${(item.salePrice ?? item.price ?? 0).toFixed(2)}
             </Text>
+            {/* Show wholesale indicator if applicable */}
+            {((item.wholesalePrices && item.wholesalePrices.length > 0) || (item.wholesaleThreshold && item.wholesalePrice)) && (
+               <Text style={{ fontSize: 10, color: '#666', marginTop: 2 }}>Mayoreo disp.</Text>
+            )}
           </TouchableOpacity>
         )}
       />

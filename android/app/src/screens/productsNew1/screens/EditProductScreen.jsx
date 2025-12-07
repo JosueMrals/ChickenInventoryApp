@@ -9,7 +9,8 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
-  StyleSheet
+  StyleSheet,
+  TouchableOpacity
 } from 'react-native';
 import { db } from '../../../services/firebase'; // ajusta la ruta si hace falta
 import firestore from '@react-native-firebase/firestore';
@@ -29,8 +30,7 @@ export default function EditProductScreen({ route, navigation }) {
     autoSalePrice: true,
     salePrice: '',
     measureType: 'unit',
-    wholesalePrice: '',
-    wholesaleThreshold: '',
+    wholesalePrices: [], // Array of { price: string/number, quantity: string/number }
   });
 
   // keep initial snapshot to detect unsaved changes
@@ -56,6 +56,18 @@ export default function EditProductScreen({ route, navigation }) {
           return;
         }
         const data = snap.data();
+        
+        // Handle migration from single wholesale price to array
+        let loadedWholesalePrices = [];
+        if (Array.isArray(data.wholesalePrices)) {
+          loadedWholesalePrices = data.wholesalePrices;
+        } else if (data.wholesalePrice && data.wholesaleThreshold) {
+          loadedWholesalePrices = [{ 
+            price: data.wholesalePrice, 
+            quantity: data.wholesaleThreshold 
+          }];
+        }
+
         const normalized = {
           name: data.name ?? '',
           barcode: data.barcode ?? '',
@@ -65,8 +77,7 @@ export default function EditProductScreen({ route, navigation }) {
           autoSalePrice: data.autoSalePrice ?? true,
           salePrice: data.salePrice ?? '',
           measureType: data.measureType ?? 'unit',
-          wholesalePrice: data.wholesalePrice ?? '',
-          wholesaleThreshold: data.wholesaleThreshold ?? '',
+          wholesalePrices: loadedWholesalePrices,
         };
         setProduct({ id: snap.id, ...data });
         setValues(normalized);
@@ -131,6 +142,34 @@ export default function EditProductScreen({ route, navigation }) {
     setValues(v => ({ ...v, [field]: value }));
   }
 
+  // Helper for updating wholesale prices
+  function addWholesalePrice() {
+    if (values.wholesalePrices.length >= 5) {
+      Alert.alert('Límite alcanzado', 'Solo puedes agregar hasta 5 precios de mayorista.');
+      return;
+    }
+    setValues(v => ({
+      ...v,
+      wholesalePrices: [...v.wholesalePrices, { price: '', quantity: '' }]
+    }));
+  }
+
+  function removeWholesalePrice(index) {
+    setValues(v => {
+      const newPrices = [...v.wholesalePrices];
+      newPrices.splice(index, 1);
+      return { ...v, wholesalePrices: newPrices };
+    });
+  }
+
+  function updateWholesalePrice(index, field, value) {
+    setValues(v => {
+      const newPrices = [...v.wholesalePrices];
+      newPrices[index] = { ...newPrices[index], [field]: value };
+      return { ...v, wholesalePrices: newPrices };
+    });
+  }
+
   // validation helpers
   function validateValues() {
     if (!values.name || values.name.toString().trim() === '') return { ok: false, msg: 'El nombre es obligatorio.' };
@@ -143,6 +182,16 @@ export default function EditProductScreen({ route, navigation }) {
       const sp = Number(values.salePrice);
       if (Number.isNaN(sp) || sp <= 0) return { ok: false, msg: 'Precio de venta inválido.' };
     }
+    
+    // Validate wholesale prices
+    for (let i = 0; i < values.wholesalePrices.length; i++) {
+      const item = values.wholesalePrices[i];
+      const p = Number(item.price);
+      const q = Number(item.quantity);
+      if (Number.isNaN(p) || p <= 0) return { ok: false, msg: `El precio mayorista #${i+1} es inválido.` };
+      if (Number.isNaN(q) || q <= 0) return { ok: false, msg: `El umbral (cantidad) mayorista #${i+1} es inválido.` };
+    }
+
     return { ok: true };
   }
 
@@ -179,6 +228,13 @@ export default function EditProductScreen({ route, navigation }) {
         return;
       }
 
+      // Process wholesale prices: filter out incomplete ones if any (though validation catches them)
+      // and ensure numbers.
+      const processedWholesale = values.wholesalePrices.map(wp => ({
+        price: Number(wp.price),
+        quantity: Number(wp.quantity)
+      }));
+
       // prepare payload (cast numbers)
       const payload = {
         name: values.name,
@@ -189,8 +245,10 @@ export default function EditProductScreen({ route, navigation }) {
         autoSalePrice: Boolean(values.autoSalePrice),
         salePrice: Number(values.salePrice) || null,
         measureType: values.measureType,
-        wholesalePrice: values.wholesalePrice ? Number(values.wholesalePrice) : null,
-        wholesaleThreshold: values.wholesaleThreshold ? Number(values.wholesaleThreshold) : null,
+        wholesalePrices: processedWholesale,
+        // Optional: clear old fields if you want to clean up the DB
+        wholesalePrice: firestore.FieldValue.delete(), 
+        wholesaleThreshold: firestore.FieldValue.delete(),
         updatedAt: firestore.FieldValue.serverTimestamp()
       };
 
@@ -200,18 +258,17 @@ export default function EditProductScreen({ route, navigation }) {
 
       // update local states
       initialRef.current = JSON.stringify({
-        name: payload.name,
-        barcode: payload.barcode,
-        description: payload.description,
-        purchasePrice: payload.purchasePrice,
-        profitMargin: payload.profitMargin,
-        autoSalePrice: payload.autoSalePrice,
-        salePrice: payload.salePrice,
-        measureType: payload.measureType,
-        wholesalePrice: payload.wholesalePrice,
-        wholesaleThreshold: payload.wholesaleThreshold
+        name: values.name,
+        barcode: values.barcode,
+        description: values.description,
+        purchasePrice: values.purchasePrice,
+        profitMargin: values.profitMargin,
+        autoSalePrice: values.autoSalePrice,
+        salePrice: values.salePrice,
+        measureType: values.measureType,
+        wholesalePrices: values.wholesalePrices
       });
-      setProduct(prev => ({ ...prev, ...payload }));
+      setProduct(prev => ({ ...prev, ...payload, wholesalePrices: processedWholesale }));
       Alert.alert('Guardado', 'Producto actualizado correctamente.',[
 		  { text: 'Ver producto', onPress: () => navigation.navigate('EditProduct') },
 		  { text: 'Ir a lista', onPress: () => navigation.navigate('ProductsList') },
@@ -273,11 +330,46 @@ export default function EditProductScreen({ route, navigation }) {
         <Button title="Peso" onPress={() => setField('measureType', 'weight')} color={values.measureType === 'weight' ? undefined : '#888'} />
       </View>
 
-      <Text style={styles.label}>Precio mayorista</Text>
-      <TextInput style={styles.input} keyboardType="numeric" value={String(values.wholesalePrice ?? '')} onChangeText={t => setField('wholesalePrice', t)} />
+      <View style={{ marginTop: 20, marginBottom: 10 }}>
+        <Text style={{ fontSize: 16, fontWeight: 'bold' }}>Precios de Mayorista</Text>
+        <Text style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+          Puedes agregar hasta 5 precios por volumen.
+        </Text>
 
-      <Text style={styles.label}>Umbral mayorista (cantidad)</Text>
-      <TextInput style={styles.input} keyboardType="numeric" value={String(values.wholesaleThreshold ?? '')} onChangeText={t => setField('wholesaleThreshold', t)} />
+        {values.wholesalePrices.map((wp, index) => (
+          <View key={index} style={styles.wholesaleRow}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={styles.subLabel}>Precio</Text>
+              <TextInput 
+                style={styles.input} 
+                keyboardType="numeric"
+                placeholder="0.00"
+                value={String(wp.price)}
+                onChangeText={t => updateWholesalePrice(index, 'price', t)}
+              />
+            </View>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={styles.subLabel}>Umbral (Cant.)</Text>
+              <TextInput 
+                style={styles.input} 
+                keyboardType="numeric"
+                placeholder="10"
+                value={String(wp.quantity)}
+                onChangeText={t => updateWholesalePrice(index, 'quantity', t)}
+              />
+            </View>
+            <View style={{ justifyContent: 'flex-end', paddingBottom: 2 }}>
+                <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}>
+                    <Text style={{ color: 'white', fontWeight: 'bold' }}>X</Text>
+                </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+
+        {values.wholesalePrices.length < 5 && (
+            <Button title="+ Agregar precio mayorista" onPress={addWholesalePrice} />
+        )}
+      </View>
 
       <View style={{ height: 12 }} />
 
@@ -312,5 +404,29 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: '#fff'
   },
-  row: { flexDirection: 'row', alignItems: 'center', marginTop: 12, marginBottom: 8 }
+  row: { flexDirection: 'row', alignItems: 'center', marginTop: 12, marginBottom: 8 },
+  wholesaleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    backgroundColor: '#f9f9f9',
+    padding: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#eee'
+  },
+  subLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      marginBottom: 4
+  },
+  deleteButton: {
+      backgroundColor: '#ff4444',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 6,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 18 // align with input
+  }
 });

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useContext, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -10,13 +10,37 @@ import {
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "./styles/productEditStyles";
 import NumericKeyboard from "../../components/common/NumericKeyboard";
+import { QuickSaleContext } from "./context/quickSaleContext";
+import { calcPriceForProduct } from "../sales/hooks/useSalePricing";
 
 export default function ProductEditScreen({ navigation, route }) {
   const { item, onUpdate, onRemove } = route.params;
+  const { customer } = useContext(QuickSaleContext);
 
   const [quantity, setQuantity] = useState(String(item.quantity));
   const [unitPrice, setUnitPrice] = useState(String(item.unitPrice));
   const [discount, setDiscount] = useState(String(item.discount));
+  
+  // Ref to prevent overwriting custom price on initial load
+  const firstRun = useRef(true);
+
+  // Recalculate price when quantity changes
+  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      return;
+    }
+
+    const qty = Number(quantity);
+    if (!isNaN(qty) && qty > 0) {
+      const { priceToUse } = calcPriceForProduct({
+        product: item.product,
+        qty: qty,
+        customer: customer
+      });
+      setUnitPrice(String(priceToUse));
+    }
+  }, [quantity, customer, item.product]);
 
   const save = () => {
     const qty = Number(quantity);
@@ -27,8 +51,8 @@ export default function ProductEditScreen({ navigation, route }) {
       return Alert.alert("Cantidad inválida", "Debe ser mayor a 0.");
     }
 
-    if (price <= 0 || isNaN(price)) {
-      return Alert.alert("Precio inválido", "Debe ser mayor a 0.");
+    if (price < 0 || isNaN(price)) {
+      return Alert.alert("Precio inválido", "El precio no puede ser negativo.");
     }
 
     onUpdate({
@@ -111,4 +135,3 @@ export default function ProductEditScreen({ navigation, route }) {
     </View>
   );
 }
-

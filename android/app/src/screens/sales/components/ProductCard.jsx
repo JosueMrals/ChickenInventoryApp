@@ -19,6 +19,32 @@ export default function ProductCard({ product, onAddOne, onAddWithQty }) {
     setQtyModal(false);
   };
 
+  // Logic to display wholesale info
+  const renderWholesaleInfo = () => {
+    if (Array.isArray(product.wholesalePrices) && product.wholesalePrices.length > 0) {
+      // Show the best price or range? Or just "Mayoreo disp."
+      // Let's show the first one (usually lowest qty) or "Multiple"
+      // Or show the minimum threshold and price.
+      // Sort by quantity ascending to show the first tier
+      const sorted = [...product.wholesalePrices].sort((a, b) => a.quantity - b.quantity);
+      const first = sorted[0];
+      const count = sorted.length;
+      
+      if (count === 1) {
+        return <Text style={styles.wholesale}>Mayoreo: {first.quantity}u → C${Number(first.price).toFixed(2)}</Text>;
+      } else {
+        return <Text style={styles.wholesale}>Mayoreo: {first.quantity}u → C${Number(first.price).toFixed(2)} (+{count-1})</Text>;
+      }
+    } 
+    // Fallback for legacy data
+    else if (product.wholesaleThreshold && product.wholesalePrice) {
+      return (
+        <Text style={styles.wholesale}>Mayoreo: {product.wholesaleThreshold}u → C${(product.wholesalePrice ?? 0).toFixed(2)}</Text>
+      );
+    }
+    return null;
+  };
+
   return (
     <>
       <TouchableOpacity
@@ -30,9 +56,7 @@ export default function ProductCard({ product, onAddOne, onAddWithQty }) {
         <View>
           <Text style={styles.name}>{product.name}</Text>
           <Text style={styles.price}>C${(product.salePrice ?? product.price ?? 0).toFixed(2)}</Text>
-          {product.wholesaleThreshold ? (
-            <Text style={styles.wholesale}>Mayoreo: {product.wholesaleThreshold}u → C${(product.wholesalePrice ?? 0).toFixed(2)}</Text>
-          ) : null}
+          {renderWholesaleInfo()}
         </View>
       </TouchableOpacity>
 
