@@ -10,7 +10,11 @@ import {
   ActivityIndicator,
   ScrollView,
   StyleSheet,
-  TouchableOpacity
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
+  Dimensions
 } from 'react-native';
 import { db } from '../../../services/firebase'; // ajusta la ruta si hace falta
 import firestore from '@react-native-firebase/firestore';
@@ -20,7 +24,7 @@ export default function EditProductScreen({ route, navigation }) {
   const { productId } = route.params ?? {};
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [product, setProduct] = useState(null); // original loaded product
+  const [product, setProduct] = useState(null);
   const [values, setValues] = useState({
     name: '',
     barcode: '',
@@ -30,11 +34,23 @@ export default function EditProductScreen({ route, navigation }) {
     autoSalePrice: true,
     salePrice: '',
     measureType: 'unit',
-    wholesalePrices: [], // Array of { price: string/number, quantity: string/number }
+    wholesalePrices: [],
   });
 
-  // keep initial snapshot to detect unsaved changes
   const initialRef = useRef(null);
+
+  // ---------------------
+  // Refs y estado para manejar teclado y scroll (NUEVO)
+  // ---------------------
+  const scrollRef = useRef(null);
+  const inputsRef = useRef({}); // guardará refs: inputsRef.current['name'] = ref
+  const focusedField = useRef(null); // nombre del campo enfocado
+  const keyboardHeightRef = useRef(0);
+
+  // Helper para asignar refs a los TextInput de forma dinámica
+  const assignRef = (field) => (r) => {
+    inputsRef.current[field] = r;
+  };
 
   useEffect(() => {
     if (!productId) {
@@ -56,15 +72,14 @@ export default function EditProductScreen({ route, navigation }) {
           return;
         }
         const data = snap.data();
-        
-        // Handle migration from single wholesale price to array
+
         let loadedWholesalePrices = [];
         if (Array.isArray(data.wholesalePrices)) {
           loadedWholesalePrices = data.wholesalePrices;
         } else if (data.wholesalePrice && data.wholesaleThreshold) {
-          loadedWholesalePrices = [{ 
-            price: data.wholesalePrice, 
-            quantity: data.wholesaleThreshold 
+          loadedWholesalePrices = [{
+            price: data.wholesalePrice,
+            quantity: data.wholesaleThreshold
           }];
         }
 
@@ -103,16 +118,81 @@ export default function EditProductScreen({ route, navigation }) {
       const sale = cost / (1 - (margin / 100));
       setValues(v => ({ ...v, salePrice: Number(sale.toFixed(2)) }));
     }
-    // if margin invalid or >=100, leave salePrice as '' or null
   }, [values.purchasePrice, values.profitMargin, values.autoSalePrice]);
 
-  // detect unsaved changes
+  // ---------------------
+  // Listeners del teclado (NUEVO)
+  // ---------------------
+  useEffect(() => {
+    // Cuando el teclado se muestra
+    const onKeyboardShow = (e) => {
+      const kbHeight = e?.endCoordinates?.height ?? 0;
+      keyboardHeightRef.current = kbHeight;
+      // Intentamos desplazar el input enfocado si está cubierto
+      setTimeout(() => { // con timeout pequeño para que la medición sea correcta después de la animación del teclado
+        ensureFocusedInputVisible(kbHeight);
+      }, Platform.OS === 'ios' ? 50 : 0);
+    };
+
+    const onKeyboardHide = () => {
+      keyboardHeightRef.current = 0;
+      // opcional: volver a posición original
+      // scrollRef.current?.scrollTo({ y: 0, animated: true });
+    };
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, onKeyboardShow);
+    const hideSub = Keyboard.addListener(hideEvent, onKeyboardHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Mide el input enfocado y lo desplaza si queda cubierto por el teclado (NUEVO)
+  const ensureFocusedInputVisible = async (keyboardHeight = keyboardHeightRef.current) => {
+    try {
+      const field = focusedField.current;
+      if (!field) return;
+      const ref = inputsRef.current[field];
+      if (!ref || !scrollRef.current) return;
+
+      // Try measureInWindow from the input ref:
+      // Algunos refs tienen .measureInWindow; si no, salimos
+      if (typeof ref.measureInWindow === 'function') {
+        ref.measureInWindow((x, y, width, height) => {
+          const windowHeight = Dimensions.get('window').height;
+          const inputBottom = y + height;
+          const availableArea = windowHeight - keyboardHeight; // espacio visible sobre el teclado
+          const extraOffset = 10; // espacio extra para que no quede pegado
+          if (inputBottom + extraOffset > availableArea) {
+            const diff = inputBottom + extraOffset - availableArea;
+            // current scroll position not easily accessible; scrollTo diff relative to current y:
+            // Mejor: hacemos scrollTo currentY + diff; sin currentY, hacemos scrollTo diff (aprox)
+            // Para mayor precisión podemos pedir scrollResponderScrollNativeHandleToKeyboard, pero usamos scrollRef.scrollTo
+            scrollRef.current.scrollTo({ y: diff + (Platform.OS === 'ios' ? 0 : 20), animated: true });
+          }
+        });
+      } else {
+        // fallback si ref no expone measureInWindow
+        // No hacemos nada (podrías usar UIManager.measure con findNodeHandle)
+      }
+    } catch (err) {
+      console.warn('Error al asegurar visibilidad input:', err);
+    }
+  };
+
+  // ---------------------
+  // Resto de tus helpers y lógica (sin cambios significativos)
+  // ---------------------
   const hasChanges = useCallback(() => {
     const current = JSON.stringify(values);
     return initialRef.current !== null && current !== initialRef.current;
   }, [values]);
 
-  // confirm before leaving if unsaved changes
   useFocusEffect(
     useCallback(() => {
       const onBeforeRemove = (e) => {
@@ -132,17 +212,14 @@ export default function EditProductScreen({ route, navigation }) {
         );
       };
       navigation.addListener('beforeRemove', onBeforeRemove);
-      // cleanup
       return () => navigation.removeListener('beforeRemove', onBeforeRemove);
     }, [navigation, hasChanges])
   );
 
-  // helper for updating fields
   function setField(field, value) {
     setValues(v => ({ ...v, [field]: value }));
   }
 
-  // Helper for updating wholesale prices
   function addWholesalePrice() {
     if (values.wholesalePrices.length >= 5) {
       Alert.alert('Límite alcanzado', 'Solo puedes agregar hasta 5 precios de mayorista.');
@@ -170,7 +247,6 @@ export default function EditProductScreen({ route, navigation }) {
     });
   }
 
-  // validation helpers
   function validateValues() {
     if (!values.name || values.name.toString().trim() === '') return { ok: false, msg: 'El nombre es obligatorio.' };
     const cost = Number(values.purchasePrice);
@@ -182,8 +258,7 @@ export default function EditProductScreen({ route, navigation }) {
       const sp = Number(values.salePrice);
       if (Number.isNaN(sp) || sp <= 0) return { ok: false, msg: 'Precio de venta inválido.' };
     }
-    
-    // Validate wholesale prices
+
     for (let i = 0; i < values.wholesalePrices.length; i++) {
       const item = values.wholesalePrices[i];
       const p = Number(item.price);
@@ -195,18 +270,15 @@ export default function EditProductScreen({ route, navigation }) {
     return { ok: true };
   }
 
-  // check duplicates for barcode/name excluding current doc
   async function hasDuplicate(field, value) {
     try {
       const q = db.collection('products').where(field, '==', value).get();
       const snap = await q;
       if (snap.empty) return false;
-      // if there's any doc whose id != productId => duplicate
       const others = snap.docs.filter(d => d.id !== productId);
       return others.length > 0;
     } catch (err) {
       console.error('Error checking duplicates:', err);
-      // fallback: avoid blocking user on network issues — return false but log
       return false;
     }
   }
@@ -218,7 +290,6 @@ export default function EditProductScreen({ route, navigation }) {
       return;
     }
 
-    // check duplicates
     setSaving(true);
     try {
       const ndup = await hasDuplicate('name', values.name);
@@ -228,14 +299,11 @@ export default function EditProductScreen({ route, navigation }) {
         return;
       }
 
-      // Process wholesale prices: filter out incomplete ones if any (though validation catches them)
-      // and ensure numbers.
       const processedWholesale = values.wholesalePrices.map(wp => ({
         price: Number(wp.price),
         quantity: Number(wp.quantity)
       }));
 
-      // prepare payload (cast numbers)
       const payload = {
         name: values.name,
         barcode: values.barcode,
@@ -246,17 +314,14 @@ export default function EditProductScreen({ route, navigation }) {
         salePrice: Number(values.salePrice) || null,
         measureType: values.measureType,
         wholesalePrices: processedWholesale,
-        // Optional: clear old fields if you want to clean up the DB
-        wholesalePrice: firestore.FieldValue.delete(), 
+        wholesalePrice: firestore.FieldValue.delete(),
         wholesaleThreshold: firestore.FieldValue.delete(),
         updatedAt: firestore.FieldValue.serverTimestamp()
       };
 
-      // update document
       const docRef = db.doc(`products/${productId}`);
       await docRef.update(payload);
 
-      // update local states
       initialRef.current = JSON.stringify({
         name: values.name,
         barcode: values.barcode,
@@ -270,9 +335,9 @@ export default function EditProductScreen({ route, navigation }) {
       });
       setProduct(prev => ({ ...prev, ...payload, wholesalePrices: processedWholesale }));
       Alert.alert('Guardado', 'Producto actualizado correctamente.',[
-		  { text: 'Ver producto', onPress: () => navigation.navigate('EditProduct') },
-		  { text: 'Ir a lista', onPress: () => navigation.navigate('ProductsList') },
-		]);
+        { text: 'Ver producto', onPress: () => navigation.navigate('EditProduct') },
+        { text: 'Ir a lista', onPress: () => navigation.navigate('ProductsList') },
+      ]);
     } catch (err) {
       console.error('Error guardando producto:', err);
       Alert.alert('Error', 'No se pudo guardar el producto. Intenta de nuevo.');
@@ -290,106 +355,172 @@ export default function EditProductScreen({ route, navigation }) {
     );
   }
 
+  // ---------------------
+  // Render: usamos KeyboardAvoidingView para iOS pero el scroll real lo manejamos con listeners (NUEVO)
+  // ---------------------
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }}>
-      <Text style={styles.label}>Nombre</Text>
-      <TextInput style={styles.input} value={values.name} onChangeText={t => setField('name', t)} />
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1, backgroundColor: '#fff' }}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+    >
+      <ScrollView
+        ref={scrollRef}
+        style={styles.container}
+        contentContainerStyle={{ paddingBottom: 24 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.label}>Nombre</Text>
+        <TextInput
+          ref={assignRef('name')} // asignamos ref
+          style={styles.input}
+          value={values.name}
+          onFocus={() => { focusedField.current = 'name'; }}
+          onBlur={() => { if (focusedField.current === 'name') focusedField.current = null; }}
+          onChangeText={t => setField('name', t)}
+        />
 
-      <Text style={styles.label}>Código de barras</Text>
-      <TextInput style={styles.input} value={values.barcode} onChangeText={t => setField('barcode', t)} />
+        <Text style={styles.label}>Código de barras</Text>
+        <TextInput
+          ref={assignRef('barcode')}
+          style={styles.input}
+          value={values.barcode}
+          onFocus={() => { focusedField.current = 'barcode'; }}
+          onBlur={() => { if (focusedField.current === 'barcode') focusedField.current = null; }}
+          onChangeText={t => setField('barcode', t)}
+        />
 
-      <Text style={styles.label}>Descripción</Text>
-      <TextInput style={[styles.input, { height: 80 }]} multiline value={values.description} onChangeText={t => setField('description', t)} />
+        <Text style={styles.label}>Descripción</Text>
+        <TextInput
+          ref={assignRef('description')}
+          style={[styles.input, { height: 80 }]}
+          multiline
+          value={values.description}
+          onFocus={() => { focusedField.current = 'description'; }}
+          onBlur={() => { if (focusedField.current === 'description') focusedField.current = null; }}
+          onChangeText={t => setField('description', t)}
+        />
 
-      <Text style={styles.label}>Precio de compra</Text>
-      <TextInput style={styles.input} keyboardType="numeric" value={String(values.purchasePrice)} onChangeText={t => setField('purchasePrice', t)} />
+        <Text style={styles.label}>Precio de compra</Text>
+        <TextInput
+          ref={assignRef('purchasePrice')}
+          style={styles.input}
+          keyboardType="numeric"
+          value={String(values.purchasePrice)}
+          onFocus={() => { focusedField.current = 'purchasePrice'; }}
+          onBlur={() => { if (focusedField.current === 'purchasePrice') focusedField.current = null; }}
+          onChangeText={t => setField('purchasePrice', t)}
+        />
 
-      <Text style={styles.label}>Margen de ganancia (%)</Text>
-      <TextInput style={styles.input} keyboardType="numeric" value={String(values.profitMargin)} onChangeText={t => setField('profitMargin', t)} />
+        <Text style={styles.label}>Margen de ganancia (%)</Text>
+        <TextInput
+          ref={assignRef('profitMargin')}
+          style={styles.input}
+          keyboardType="numeric"
+          value={String(values.profitMargin)}
+          onFocus={() => { focusedField.current = 'profitMargin'; }}
+          onBlur={() => { if (focusedField.current === 'profitMargin') focusedField.current = null; }}
+          onChangeText={t => setField('profitMargin', t)}
+        />
 
-      <View style={styles.row}>
-        <Text style={{ flex: 1, marginTop: 6 }}>Calcular precio de venta automáticamente</Text>
-        <Switch value={values.autoSalePrice} onValueChange={v => setField('autoSalePrice', v)} />
-      </View>
+        <View style={styles.row}>
+          <Text style={{ flex: 1, marginTop: 6 }}>Calcular precio de venta automáticamente</Text>
+          <Switch value={values.autoSalePrice} onValueChange={v => setField('autoSalePrice', v)} />
+        </View>
 
-      {!values.autoSalePrice && (
-        <>
-          <Text style={styles.label}>Precio de venta (manual)</Text>
-          <TextInput style={styles.input} keyboardType="numeric" value={String(values.salePrice)} onChangeText={t => setField('salePrice', t)} />
-        </>
-      )}
-
-      {values.autoSalePrice && (
-        <Text style={{ marginVertical: 8 }}>Precio de venta calculado: {values.salePrice ?? '—'}</Text>
-      )}
-
-      <Text style={styles.label}>Tipo de medida</Text>
-      <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-        <Button title="Unidad" onPress={() => setField('measureType', 'unit')} color={values.measureType === 'unit' ? undefined : '#888'} />
-        <View style={{ width: 8 }} />
-        <Button title="Peso" onPress={() => setField('measureType', 'weight')} color={values.measureType === 'weight' ? undefined : '#888'} />
-      </View>
-
-      <View style={{ marginTop: 20, marginBottom: 10 }}>
-        <Text style={{ fontSize: 16, fontWeight: 'bold' }}>Precios de Mayorista</Text>
-        <Text style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
-          Puedes agregar hasta 5 precios por volumen.
-        </Text>
-
-        {values.wholesalePrices.map((wp, index) => (
-          <View key={index} style={styles.wholesaleRow}>
-            <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={styles.subLabel}>Precio</Text>
-              <TextInput 
-                style={styles.input} 
-                keyboardType="numeric"
-                placeholder="0.00"
-                value={String(wp.price)}
-                onChangeText={t => updateWholesalePrice(index, 'price', t)}
-              />
-            </View>
-            <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={styles.subLabel}>Umbral (Cant.)</Text>
-              <TextInput 
-                style={styles.input} 
-                keyboardType="numeric"
-                placeholder="10"
-                value={String(wp.quantity)}
-                onChangeText={t => updateWholesalePrice(index, 'quantity', t)}
-              />
-            </View>
-            <View style={{ justifyContent: 'flex-end', paddingBottom: 2 }}>
-                <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}>
-                    <Text style={{ color: 'white', fontWeight: 'bold' }}>X</Text>
-                </TouchableOpacity>
-            </View>
-          </View>
-        ))}
-
-        {values.wholesalePrices.length < 5 && (
-            <Button title="+ Agregar precio mayorista" onPress={addWholesalePrice} />
+        {!values.autoSalePrice && (
+          <>
+            <Text style={styles.label}>Precio de venta (manual)</Text>
+            <TextInput
+              ref={assignRef('salePrice')}
+              style={styles.input}
+              keyboardType="numeric"
+              value={String(values.salePrice)}
+              onFocus={() => { focusedField.current = 'salePrice'; }}
+              onBlur={() => { if (focusedField.current === 'salePrice') focusedField.current = null; }}
+              onChangeText={t => setField('salePrice', t)}
+            />
+          </>
         )}
-      </View>
 
-      <View style={{ height: 12 }} />
+        {values.autoSalePrice && (
+          <Text style={{ marginVertical: 8 }}>Precio de venta calculado: {values.salePrice ?? '—'}</Text>
+        )}
 
-      {saving ? (
-        <ActivityIndicator />
-      ) : (
-        <>
-          <Button title="Guardar cambios" onPress={handleSave} />
-          <View style={{ height: 8 }} />
-          <Button title="Cancelar" color="#888" onPress={() => {
-            if (hasChanges()) {
-              Alert.alert('Descartar cambios?', 'Estás a punto de descartar los cambios.', [
-                { text: 'Cancelar', style: 'cancel' },
-                { text: 'Descartar', style: 'destructive', onPress: () => navigation.goBack() }
-              ]);
-            } else navigation.goBack();
-          }} />
-        </>
-      )}
-    </ScrollView>
+        <Text style={styles.label}>Tipo de medida</Text>
+        <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+          <Button title="Unidad" onPress={() => setField('measureType', 'unit')} color={values.measureType === 'unit' ? undefined : '#888'} />
+          <View style={{ width: 8 }} />
+          <Button title="Peso" onPress={() => setField('measureType', 'weight')} color={values.measureType === 'weight' ? undefined : '#888'} />
+        </View>
+
+        <View style={{ marginTop: 20, marginBottom: 10 }}>
+          <Text style={{ fontSize: 16, fontWeight: 'bold' }}>Precios de Mayorista</Text>
+          <Text style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+            Puedes agregar hasta 5 precios por volumen.
+          </Text>
+
+          {values.wholesalePrices.map((wp, index) => (
+            <View key={index} style={styles.wholesaleRow}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={styles.subLabel}>Precio</Text>
+                <TextInput
+                  ref={assignRef(`wholesale_price_${index}`)}
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="0.00"
+                  value={String(wp.price)}
+                  onFocus={() => { focusedField.current = `wholesale_price_${index}`; }}
+                  onBlur={() => { if (focusedField.current === `wholesale_price_${index}`) focusedField.current = null; }}
+                  onChangeText={t => updateWholesalePrice(index, 'price', t)}
+                />
+              </View>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text style={styles.subLabel}>Umbral (Cant.)</Text>
+                <TextInput
+                  ref={assignRef(`wholesale_qty_${index}`)}
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="10"
+                  value={String(wp.quantity)}
+                  onFocus={() => { focusedField.current = `wholesale_qty_${index}`; }}
+                  onBlur={() => { if (focusedField.current === `wholesale_qty_${index}`) focusedField.current = null; }}
+                  onChangeText={t => updateWholesalePrice(index, 'quantity', t)}
+                />
+              </View>
+              <View style={{ justifyContent: 'flex-end', paddingBottom: 2 }}>
+                <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}>
+                  <Text style={{ color: 'white', fontWeight: 'bold' }}>X</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+
+          {values.wholesalePrices.length < 5 && (
+              <Button title="+ Agregar precio mayorista" onPress={addWholesalePrice} />
+          )}
+        </View>
+
+        <View style={{ height: 12 }} />
+
+        {saving ? (
+          <ActivityIndicator />
+        ) : (
+          <>
+            <Button title="Guardar cambios" onPress={handleSave} />
+            <View style={{ height: 8 }} />
+            <Button title="Cancelar" color="#888" onPress={() => {
+              if (hasChanges()) {
+                Alert.alert('Descartar cambios?', 'Estás a punto de descartar los cambios.', [
+                  { text: 'Cancelar', style: 'cancel' },
+                  { text: 'Descartar', style: 'destructive', onPress: () => navigation.goBack() }
+                ]);
+              } else navigation.goBack();
+            }} />
+          </>
+        )}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -427,6 +558,6 @@ const styles = StyleSheet.create({
       borderRadius: 6,
       justifyContent: 'center',
       alignItems: 'center',
-      marginTop: 18 // align with input
+      marginTop: 18
   }
 });

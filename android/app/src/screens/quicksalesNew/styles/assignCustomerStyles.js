@@ -2,23 +2,27 @@ import { StyleSheet } from 'react-native';
 
 export default StyleSheet.create({
   container: {
-    paddingTop: 40,
     flex: 1,
     backgroundColor: '#F6F8FB',
   },
 
   // ---------- HEADER ----------
   header: {
-        paddingHorizontal: 16,
-        paddingBottom: 8,
-        backgroundColor: '#F6F8FB',
-        flexDirection: 'row',
+    paddingTop: 50,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    backgroundColor: '#007AFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    marginBottom: 10,
     },
 
     title: {
         fontSize: 22,
         fontWeight: '800',
-        color: '#111',
+        color: '#fff',
         paddingLeft: 10,
     },
 

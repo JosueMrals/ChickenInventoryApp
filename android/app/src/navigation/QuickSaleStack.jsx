@@ -50,7 +50,6 @@ export default function QuickSaleStack() {
           headerShadowVisible: false,
           headerBackTitleVisible: false,
           headerLeft: () => <BackButton />,
-          headerTitleStyle: { fontSize: 18, fontWeight: "700" },
         }}
       >
         <Stack.Screen
@@ -58,7 +57,6 @@ export default function QuickSaleStack() {
           component={QuickSaleProductsScreen}
           initialParams={{ role: null, user: null }}
           options={{
-            title: "Venta Rápida",
             headerLeft: () => <BackToDashboardButton />,
           }}
         />
@@ -70,7 +68,10 @@ export default function QuickSaleStack() {
         <Stack.Screen
           name="QuickSalePayment"
           component={QuickSalePaymentScreen}
-          options={{ title: "Pagar" }}
+          options={{
+			  title: "Pagar",
+			  headerLeft: () => <BackButton />,
+			  }}
         />
         <Stack.Screen
           name="QuickSaleDone"

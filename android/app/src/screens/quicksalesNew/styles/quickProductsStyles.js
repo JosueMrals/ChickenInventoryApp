@@ -2,25 +2,27 @@ import { StyleSheet } from 'react-native';
 
 export default StyleSheet.create({
   container: {
-    paddingTop: 40,
     flex: 1,
-    backgroundColor: '#F6F8FB',
-
+    backgroundColor: '#F5F6FA',
   },
 
   // -------- HEADER --------
   header: {
+    paddingTop: 50,
     paddingHorizontal: 16,
-    paddingBottom: 20,
-    backgroundColor: '#F6F8FB',
+    paddingBottom: 10,
+    backgroundColor: '#007AFF',
     flexDirection: 'row',
     alignItems: 'center',
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    marginBottom: 10,
   },
 
   title: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#111',
+    color: '#fff',
     paddingLeft: 10,
   },
 
@@ -101,7 +103,7 @@ export default StyleSheet.create({
   // -------- CART BUTTON --------
   cartButton: {
     position: 'absolute',
-    bottom: 20,
+    bottom: 30,
     left: 20,
     right: 20,
     backgroundColor: '#007AFF',

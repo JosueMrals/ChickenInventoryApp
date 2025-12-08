@@ -2,7 +2,6 @@ import { StyleSheet } from 'react-native';
 
 export default StyleSheet.create({
   container: {
-    paddingTop: 40,
     flex: 1,
     backgroundColor: '#F6F8FB',
   },
@@ -10,17 +9,21 @@ export default StyleSheet.create({
   // ---------- HEADER ----------
   headerRow: {
     paddingHorizontal: 16,
+    paddingTop: 50,
     paddingBottom: 8,
-    backgroundColor: '#F6F8FB',
+    backgroundColor: '#007AFF',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    marginBottom: 10,
   },
 
   headerTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#111',
+    color: '#fff',
     paddingRight: 240,
   },
 
@@ -65,6 +68,7 @@ export default StyleSheet.create({
 
   // ---------- SUMMARY BOX ----------
   summary: {
+    paddingBottom: 30,
     position: 'absolute',
     left: 0,
     right: 0,

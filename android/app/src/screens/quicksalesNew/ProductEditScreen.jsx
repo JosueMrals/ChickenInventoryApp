@@ -6,6 +6,8 @@ import {
   Alert,
   TextInput,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "./styles/productEditStyles";
@@ -76,62 +78,65 @@ export default function ProductEditScreen({ navigation, route }) {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1, backgroundColor: "#fff" }}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
+    >
+      <View style={styles.container}>
 
-      {/* HEADER */}
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="chevron-back" size={26} color="#111" />
-        </TouchableOpacity>
+        {/* HEADER */}
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Icon name="chevron-back" size={26} color="#111" />
+          </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>{item.product.name}</Text>
+          <Text style={styles.headerTitle}>{item.product.name}</Text>
 
-        <TouchableOpacity onPress={remove}>
-          <Icon name="trash-outline" size={24} color="#FF3B30" />
+          <TouchableOpacity onPress={remove}>
+            <Icon name="trash-outline" size={24} color="#FF3B30" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ paddingBottom: 100 }}
+            keyboardShouldPersistTaps="handled"
+        >
+
+          {/* CANTIDAD */}
+          <Text style={styles.label}>Cantidad</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={quantity}
+            onChangeText={setQuantity}
+          />
+
+          {/* PRECIO UNITARIO */}
+          <Text style={styles.label}>Precio Unitario</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={unitPrice}
+            onChangeText={setUnitPrice}
+          />
+
+          {/* DESCUENTO INDIVIDUAL */}
+          <Text style={styles.label}>Descuento</Text>
+          <TextInput
+            style={styles.input}
+            keyboardType="numeric"
+            value={discount}
+            onChangeText={setDiscount}
+          />
+        </ScrollView>
+
+        {/* GUARDAR */}
+        <TouchableOpacity style={styles.saveBtn} onPress={save}>
+          <Text style={styles.saveText}>Guardar Cambios</Text>
         </TouchableOpacity>
       </View>
-
-      <ScrollView style={{ flex: 1 }}>
-
-        {/* CANTIDAD */}
-        <Text style={styles.label}>Cantidad</Text>
-        <TextInput
-          style={styles.input}
-          keyboardType="numeric"
-          value={quantity}
-          onChangeText={setQuantity}
-        />
-
-        {/* PRECIO UNITARIO */}
-        <Text style={styles.label}>Precio Unitario</Text>
-        <TextInput
-          style={styles.input}
-          keyboardType="numeric"
-          value={unitPrice}
-          onChangeText={setUnitPrice}
-        />
-
-        {/* DESCUENTO INDIVIDUAL */}
-        <Text style={styles.label}>Descuento</Text>
-        <TextInput
-          style={styles.input}
-          keyboardType="numeric"
-          value={discount}
-          onChangeText={setDiscount}
-        />
-      </ScrollView>
-
-      {/* NUMERIC KEYBOARD */}
-      <NumericKeyboard
-        value={quantity}
-        onChange={setQuantity}
-        onSubmit={save}
-      />
-
-      {/* GUARDAR */}
-      <TouchableOpacity style={styles.saveBtn} onPress={save}>
-        <Text style={styles.saveText}>Guardar Cambios</Text>
-      </TouchableOpacity>
-    </View>
+    </KeyboardAvoidingView>
   );
 }

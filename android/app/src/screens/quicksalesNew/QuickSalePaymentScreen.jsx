@@ -98,7 +98,7 @@ export default function QuickSalePaymentScreen({ navigation, route }) {
       {/* 🔹 HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="chevron-back" size={26} color="#111" />
+          <Icon name="chevron-back" size={26} color="#fff" />
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>Pago</Text>

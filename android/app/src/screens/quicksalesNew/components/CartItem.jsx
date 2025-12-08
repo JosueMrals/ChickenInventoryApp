@@ -22,15 +22,15 @@ export default function CartItem({ item, onEdit, onDiscount, onRemove }) {
       {/* ACCIONES */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.btn} onPress={onEdit}>
-          <Icon name="create-outline" size={22} color="#007AFF" />
+          <Icon name="create-outline" size={24} color="#007AFF" />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.btn} onPress={onDiscount}>
-          <Icon name="pricetag-outline" size={22} color="#34C759" />
+          <Icon name="pricetag-outline" size={24} color="#34C759" />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.btn} onPress={onRemove}>
-          <Icon name="trash-outline" size={22} color="#FF3B30" />
+          <Icon name="trash-outline" size={24} color="#FF3B30" />
         </TouchableOpacity>
       </View>
     </View>

@@ -196,6 +196,7 @@ export default function RegisterScreen({ route, navigation }) {
       {/* Header */}
       <View
         style={{
+		  paddingTop:50,
           padding: 16,
           backgroundColor: '#007AFF',
           flexDirection: 'row',

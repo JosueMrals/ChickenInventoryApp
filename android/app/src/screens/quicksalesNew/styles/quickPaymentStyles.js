@@ -3,25 +3,25 @@ import { StyleSheet } from "react-native";
 export default StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8F9FB",
-    paddingTop: 10,
+    backgroundColor: "#F5F6FA",
   },
 
   // 🔹 HEADER
   header: {
-    paddingTop: 40,
+    paddingTop: 50,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 18,
     paddingBottom: 10,
+    backgroundColor: "#007AFF",
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
   },
   headerTitle: {
-    flex: 1,
-    textAlign: "center",
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#333",
-    marginLeft: -28, // centra el texto ya que hay un botón a la derecha
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#fff',
+    paddingLeft: 10,
   },
   customerButton: {
     paddingHorizontal: 6,

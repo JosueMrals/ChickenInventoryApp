@@ -15,19 +15,19 @@ export default StyleSheet.create({
   },
 
   title: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "600",
     color: "#111",
   },
 
   subtitle: {
-    fontSize: 14,
+    fontSize: 16,
     color: "#666",
     marginTop: 4,
   },
 
   totalText: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: "700",
     color: "#007AFF",
     marginTop: 6,
@@ -39,7 +39,7 @@ export default StyleSheet.create({
   },
 
   btn: {
-    padding: 6,
+    padding: 5,
   },
 });
 
