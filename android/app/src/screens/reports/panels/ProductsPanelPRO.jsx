@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, FlatList, ActivityIndicator, Image } from "react-native";
-import firestore from "@react-native-firebase/firestore";
+import firestore, { Timestamp } from "@react-native-firebase/firestore";
 import styles from "../styles/productsPanelStyles";
 
 export default function ProductsPanelPRO({ dateFrom, dateTo }) {
@@ -14,8 +14,8 @@ export default function ProductsPanelPRO({ dateFrom, dateTo }) {
     try {
       let q = firestore().collection("sales").orderBy("createdAt");
 
-      if (dateFrom) q = q.where("createdAt", ">=", firestore.Timestamp.fromDate(dateFrom));
-      if (dateTo) q = q.where("createdAt", "<=", firestore.Timestamp.fromDate(dateTo));
+      if (dateFrom) q = q.where("createdAt", ">=", Timestamp.fromDate(dateFrom));
+      if (dateTo) q = q.where("createdAt", "<=", Timestamp.fromDate(dateTo));
 
       const snap = await q.get();
       const counter = {};

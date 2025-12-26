@@ -90,7 +90,9 @@ function AppDrawer({ route }) {
     <Drawer.Screen name="ProductsStack"
         component={ProductsStack}
         options={{ headerShown: false
-            }} />
+            }}
+        initialParams={{ role, user }}
+		/>
 
     </Drawer.Navigator>
   );

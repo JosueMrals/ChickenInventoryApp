@@ -14,6 +14,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { fetchCustomers, createCustomer, deleteCustomer } from '../services/customersService';
 import styles from '../styles/CustomersStyles';
 import { useNavigation } from '@react-navigation/native';
+import CreateAddButton from '../components/CreateAddButton';
 
 export default function CustomersScreen({ route }) {
   const { role } = route.params;
@@ -142,23 +143,9 @@ export default function CustomersScreen({ route }) {
 
       {/* ➕ Botón flotante para agregar cliente */}
       {(role === 'admin' || role === 'user') && (
-        <TouchableOpacity
-          onPress={() => setModalVisible(true)}
-          style={{
-            position: 'absolute',
-            bottom: 30,
-            right: 20,
-            backgroundColor: '#007AFF',
-            width: 60,
-            height: 60,
-            borderRadius: 30,
-            justifyContent: 'center',
-            alignItems: 'center',
-            elevation: 6,
-          }}
-        >
-          <Text style={{ color: '#fff', fontSize: 30, fontWeight: '700' }}>+</Text>
-        </TouchableOpacity>
+		  <CreateAddButton
+		  onPress={() => setModalVisible(true)}
+        />
       )}
 
       {/* 🧾 Modal para agregar cliente */}

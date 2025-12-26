@@ -1,4 +1,4 @@
-import firestore from '@react-native-firebase/firestore';
+import firestore, { serverTimestamp } from '@react-native-firebase/firestore';
 
 const COLLECTION = 'products';
 
@@ -31,7 +31,7 @@ export async function getProductByBarcode(barcode) {
 
 // Crear
 export async function createProduct(data) {
-  data.createdAt = firestore.FieldValue.serverTimestamp();
+  data.createdAt = serverTimestamp();
   return await firestore().collection(COLLECTION).add(data);
 }
 

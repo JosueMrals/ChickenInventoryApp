@@ -70,6 +70,29 @@ service cloud.firestore {
     }
 
     // =====================================================
+    //  📝 PRODUCT MOVEMENTS — log de cambios en productos
+    // =====================================================
+    match /product_movements/{movementId} {
+      // Cualquiera autenticado puede leer el historial
+      allow read: if request.auth != null;
+
+      // Crear registros de operación: admin o user
+      allow create: if isAdmin() || isUser();
+
+      // Los registros no se pueden modificar ni eliminar
+      allow update, delete: if false;
+    }
+
+    // =====================================================
+    //  📦 INVENTORY MOVEMENTS — log de movimientos de stock
+    // =====================================================
+    match /inventoryMovements/{movementId} {
+      allow read: if request.auth != null;
+      allow create: if isAdmin() || isUser();
+      allow update, delete: if false;
+    }
+
+    // =====================================================
     //  🧾 SALES — multi-producto, carrito
     // =====================================================
     match /sales/{saleId} {
@@ -78,7 +101,28 @@ service cloud.firestore {
       // Crear: admin o user
       allow create: if isAdmin() || isUser();
 
-      // Ventas NO pueden editarse ni borrarse
+      // Permitir actualización solo para receiptImageUrl
+      allow update: if request.resource.data.keys().hasOnly(['receiptImageUrl']);
+
+      // Ventas NO pueden borrarse
+      allow delete: if false;
+    }
+
+    // =====================================================
+    //  🧾 SALES OPERATIONS — log de ventas para reportes
+    // =====================================================
+    match /sales_operations/{operationId} {
+      allow read: if request.auth != null;
+      allow create: if isAdmin() || isUser();
+      allow update, delete: if false;
+    }
+    
+    // =====================================================
+    //  FINANCIALS — ingresos y egresos
+    // =====================================================
+    match /financials/{financialId} {
+      allow read: if request.auth != null;
+      allow create: if isAdmin() || isUser();
       allow update, delete: if false;
     }
 

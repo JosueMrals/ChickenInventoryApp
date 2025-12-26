@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, TextInput, Button, Text, Alert, ActivityIndicator, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TextInput, Button, Text, Alert, ActivityIndicator, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { db } from '../../../services/firebase'; 
-import firestore from '@react-native-firebase/firestore';
+import firestore, { serverTimestamp, increment } from '@react-native-firebase/firestore';
+import globalStyles from '../../../styles/globalStyles';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function AddStockScreen({ route, navigation }) {
   const { productId } = route.params;
@@ -79,8 +81,8 @@ export default function AddStockScreen({ route, navigation }) {
               const incrementValue = isAdding ? qty : -qty;
               
               await docRef.update({
-                stock: firestore.FieldValue.increment(incrementValue),
-                updatedAt: firestore.FieldValue.serverTimestamp()
+                stock: increment(incrementValue),
+                updatedAt: serverTimestamp()
               });
               navigation.goBack();
             } catch (err) {
@@ -98,8 +100,8 @@ export default function AddStockScreen({ route, navigation }) {
   if (loadingProduct) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={{ marginTop: 10 }}>Cargando producto...</Text>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={{ marginTop: 10, color: '#666' }}>Cargando producto...</Text>
       </View>
     );
   }
@@ -107,93 +109,176 @@ export default function AddStockScreen({ route, navigation }) {
   const isAdding = operation === 'add';
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>Producto:</Text>
-      <Text style={styles.productName}>{product?.name ?? '—'}</Text>
+    <View style={globalStyles.container}>
+		<View style={globalStyles.header}>
+			<TouchableOpacity onPress={() => {
+				navigation.goBack();
+			  }}>
+			  <Icon name="chevron-back" size={26} color="#fff" />
+			</TouchableOpacity>
+			<Text style={globalStyles.title}>Stock del Producto</Text>
+		</View>
 
-      <Text style={styles.label}>Stock actual: {product?.stock ?? 0}</Text>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        style={styles.content}
+      >
+        <View style={styles.card}>
+            <Text style={styles.label}>Producto</Text>
+            <Text style={styles.productName}>{product?.name ?? '—'}</Text>
+            
+            <View style={styles.divider} />
 
-      <View style={styles.toggleContainer}>
-        <TouchableOpacity 
-          style={[styles.toggleBtn, isAdding && styles.toggleBtnActiveAdd]} 
-          onPress={() => setOperation('add')}
-        >
-          <Text style={[styles.toggleText, isAdding && styles.toggleTextActive]}>Agregar (+)</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.toggleBtn, !isAdding && styles.toggleBtnActiveRemove]} 
-          onPress={() => setOperation('remove')}
-        >
-          <Text style={[styles.toggleText, !isAdding && styles.toggleTextActive]}>Disminuir (-)</Text>
-        </TouchableOpacity>
-      </View>
+            <Text style={styles.label}>Stock actual</Text>
+            <Text style={styles.stockValue}>{product?.stock ?? 0}</Text>
+        </View>
 
-      <TextInput
-        keyboardType="numeric"
-        value={amount}
-        onChangeText={setAmount}
-        placeholder={isAdding ? "Cantidad a agregar" : "Cantidad a disminuir"}
-        editable={!saving}
-        style={styles.input}
-      />
+        <View style={styles.toggleContainer}>
+            <TouchableOpacity 
+            style={[styles.toggleBtn, isAdding && styles.toggleBtnActiveAdd]} 
+            onPress={() => setOperation('add')}
+            >
+            <Text style={[styles.toggleText, isAdding && styles.toggleTextActiveAdd]}>Agregar (+)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+            style={[styles.toggleBtn, !isAdding && styles.toggleBtnActiveRemove]} 
+            onPress={() => setOperation('remove')}
+            >
+            <Text style={[styles.toggleText, !isAdding && styles.toggleTextActiveRemove]}>Disminuir (-)</Text>
+            </TouchableOpacity>
+        </View>
 
-      {saving ? (
-        <ActivityIndicator />
-      ) : (
-        <>
-          <Button 
-            title={isAdding ? "Confirmar Ingreso" : "Confirmar Salida"} 
-            onPress={handleUpdateStock} 
-            disabled={!amount}
-            color={isAdding ? "#2196F3" : "#F44336"} 
-          />
-          <View style={{ height: 16 }} />
-          <Button title="Cancelar" onPress={() => navigation.goBack()} color="#888" />
-        </>
-      )}
+        <TextInput
+            keyboardType="numeric"
+            value={amount}
+            onChangeText={setAmount}
+            placeholder={isAdding ? "Cantidad a agregar" : "Cantidad a disminuir"}
+            placeholderTextColor="#999"
+            editable={!saving}
+            style={styles.input}
+        />
+
+        {saving ? (
+            <ActivityIndicator size="large" color={isAdding ? "#2196F3" : "#F44336"} />
+        ) : (
+            <View style={{ marginTop: 10 }}>
+                <TouchableOpacity 
+                    style={[
+                        styles.actionButton, 
+                        { backgroundColor: isAdding ? "#007AFF" : "#FF3B30", opacity: !amount ? 0.6 : 1 }
+                    ]}
+                    onPress={handleUpdateStock}
+                    disabled={!amount}
+                >
+                    <Text style={styles.actionButtonText}>
+                        {isAdding ? "Confirmar Ingreso" : "Confirmar Salida"}
+                    </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                    style={styles.cancelButton} 
+                    onPress={() => navigation.goBack()}
+                >
+                    <Text style={styles.cancelButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+            </View>
+        )}
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, flex: 1, backgroundColor: '#fff' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  label: { fontSize: 14, color: '#666', marginBottom: 4 },
-  productName: { fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
+  content: {
+      padding: 16,
+      flex: 1
+  },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F6FA' },
+  
+  card: {
+      backgroundColor: '#fff',
+      padding: 20,
+      borderRadius: 16,
+      marginBottom: 24,
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      shadowOffset: {width:0, height: 2}
+  },
+  label: { fontSize: 13, color: '#888', marginBottom: 6, fontWeight: '600', textTransform: 'uppercase' },
+  productName: { fontSize: 20, fontWeight: '700', color: '#333' },
+  stockValue: { fontSize: 28, fontWeight: '800', color: '#333' },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 16 },
+
   input: {
+    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-    fontSize: 16
+    borderColor: '#ddd',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 24,
+    fontSize: 18,
+    color: '#333'
   },
   toggleContainer: {
     flexDirection: 'row',
     marginBottom: 20,
-    marginTop: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    overflow: 'hidden',
+    backgroundColor: '#EFEFEF',
+    borderRadius: 12,
+    padding: 4,
   },
   toggleBtn: {
     flex: 1,
     paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: '#f9f9f9'
+    borderRadius: 10,
   },
   toggleBtnActiveAdd: {
-    backgroundColor: '#E3F2FD'
+    backgroundColor: '#fff',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   toggleBtnActiveRemove: {
-    backgroundColor: '#FFEBEE'
+    backgroundColor: '#fff',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   toggleText: {
     fontWeight: '600',
-    color: '#999'
+    color: '#999',
+    fontSize: 15
   },
-  toggleTextActive: {
-    color: '#333'
+  toggleTextActiveAdd: {
+    color: '#007AFF'
+  },
+  toggleTextActiveRemove: {
+    color: '#FF3B30'
+  },
+
+  actionButton: {
+      paddingVertical: 16,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginBottom: 12,
+      elevation: 2
+  },
+  actionButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '700'
+  },
+  cancelButton: {
+      paddingVertical: 16,
+      alignItems: 'center'
+  },
+  cancelButtonText: {
+      color: '#888',
+      fontSize: 16,
+      fontWeight: '600'
   }
 });

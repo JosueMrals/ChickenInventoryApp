@@ -1,11 +1,10 @@
-// screens/EditProductScreen.jsx
+
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
   Switch,
-  Button,
   Alert,
   ActivityIndicator,
   ScrollView,
@@ -16,42 +15,47 @@ import {
   Keyboard,
   Dimensions
 } from 'react-native';
-import { db } from '../../../services/firebase'; // ajusta la ruta si hace falta
-import firestore from '@react-native-firebase/firestore';
+import { db } from '../../../services/firebase';
+import firestore, { serverTimestamp } from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 import { useFocusEffect } from '@react-navigation/native';
+import globalStyles from '../../../styles/globalStyles';
+import Icon from 'react-native-vector-icons/Ionicons';
+import productsService from '../services/productsService';
+import { createProductOperation } from '../../../services/operations/productOperations';
 
 export default function EditProductScreen({ route, navigation }) {
   const { productId } = route.params ?? {};
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [product, setProduct] = useState(null);
+
+  // Estado principal
   const [values, setValues] = useState({
     name: '',
     barcode: '',
     description: '',
-    purchasePrice: '',
-    profitMargin: '',
-    autoSalePrice: true,
-    salePrice: '',
+    purchasePrice: '',    // Costo
+    profitMargin: '',     // % ganancia
+    autoSalePrice: true,  // Si es true, salePrice se calcula
+    salePrice: '',        // Precio venta final
     measureType: 'unit',
     wholesalePrices: [],
   });
 
   const initialRef = useRef(null);
 
-  // ---------------------
-  // Refs y estado para manejar teclado y scroll (NUEVO)
-  // ---------------------
+  // Scroll y Teclado
   const scrollRef = useRef(null);
-  const inputsRef = useRef({}); // guardará refs: inputsRef.current['name'] = ref
-  const focusedField = useRef(null); // nombre del campo enfocado
+  const inputsRef = useRef({});
+  const focusedField = useRef(null);
   const keyboardHeightRef = useRef(0);
 
-  // Helper para asignar refs a los TextInput de forma dinámica
   const assignRef = (field) => (r) => {
     inputsRef.current[field] = r;
   };
 
+  // Carga inicial
   useEffect(() => {
     if (!productId) {
       Alert.alert('Error', 'No se recibió productId');
@@ -73,27 +77,55 @@ export default function EditProductScreen({ route, navigation }) {
         }
         const data = snap.data();
 
+        // 1. Cargar Precios Mayoristas
         let loadedWholesalePrices = [];
         if (Array.isArray(data.wholesalePrices)) {
-          loadedWholesalePrices = data.wholesalePrices;
+          loadedWholesalePrices = data.wholesalePrices.map(wp => ({
+              ...wp,
+              margin: '' // Se calculará después si es posible
+          }));
         } else if (data.wholesalePrice && data.wholesaleThreshold) {
           loadedWholesalePrices = [{
             price: data.wholesalePrice,
-            quantity: data.wholesaleThreshold
+            quantity: data.wholesaleThreshold,
+            margin: ''
           }];
+        }
+
+        // 2. Calcular Márgenes (Principal y Mayoristas)
+        // Margen Principal
+        let initialMargin = data.profitMargin ? String(data.profitMargin) : '';
+        const cost = Number(data.purchasePrice);
+        const sale = Number(data.salePrice);
+
+        if (cost > 0 && sale > 0 && !initialMargin) {
+             const m = ((1 - (cost / sale)) * 100).toFixed(2);
+             initialMargin = m;
+        }
+
+        // Márgenes Mayoristas
+        if(cost > 0) {
+            loadedWholesalePrices = loadedWholesalePrices.map(wp => {
+                if(wp.price > 0 && !wp.margin) {
+                    const m = ((1 - (cost / wp.price)) * 100).toFixed(2);
+                    return { ...wp, margin: m };
+                }
+                return wp;
+            });
         }
 
         const normalized = {
           name: data.name ?? '',
           barcode: data.barcode ?? '',
           description: data.description ?? '',
-          purchasePrice: data.purchasePrice ?? '',
-          profitMargin: data.profitMargin ?? '',
+          purchasePrice: data.purchasePrice ? String(data.purchasePrice) : '',
+          profitMargin: initialMargin,
           autoSalePrice: data.autoSalePrice ?? true,
-          salePrice: data.salePrice ?? '',
+          salePrice: data.salePrice ? String(data.salePrice) : '',
           measureType: data.measureType ?? 'unit',
           wholesalePrices: loadedWholesalePrices,
         };
+
         setProduct({ id: snap.id, ...data });
         setValues(normalized);
         initialRef.current = JSON.stringify(normalized);
@@ -109,42 +141,75 @@ export default function EditProductScreen({ route, navigation }) {
     return () => { mounted = false; };
   }, [productId, navigation]);
 
-  // Recalculate salePrice automatically when autoSalePrice true
-  useEffect(() => {
-    const { purchasePrice, profitMargin, autoSalePrice } = values;
-    const cost = Number(purchasePrice);
-    const margin = Number(profitMargin);
-    if (autoSalePrice && !Number.isNaN(cost) && !Number.isNaN(margin) && margin < 100) {
-      const sale = cost / (1 - (margin / 100));
-      setValues(v => ({ ...v, salePrice: Number(sale.toFixed(2)) }));
-    }
-  }, [values.purchasePrice, values.profitMargin, values.autoSalePrice]);
+  // Lógica de cálculo de precios (Bidireccional)
+  const calculateSalePriceFromMargin = (cost, margin) => {
+      if (!cost || !margin || margin >= 100) return '';
+      const c = Number(cost);
+      const m = Number(margin);
+      if (Number.isNaN(c) || Number.isNaN(m)) return '';
+      const sale = c / (1 - (m / 100));
+      return sale.toFixed(2);
+  };
 
-  // ---------------------
-  // Listeners del teclado (NUEVO)
-  // ---------------------
+  const calculateMarginFromSalePrice = (cost, sale) => {
+      if (!cost || !sale) return '';
+      const c = Number(cost);
+      const s = Number(sale);
+      if (Number.isNaN(c) || Number.isNaN(s) || s === 0) return '';
+      const margin = ((1 - (c / s)) * 100);
+      return margin.toFixed(2);
+  };
+
+  const handlePriceChange = (field, text) => {
+      setValues(prev => {
+          const newValues = { ...prev, [field]: text };
+
+          if (field === 'purchasePrice') {
+               if (newValues.autoSalePrice && newValues.profitMargin) {
+                   newValues.salePrice = calculateSalePriceFromMargin(text, newValues.profitMargin);
+               } else if (!newValues.autoSalePrice && newValues.salePrice) {
+                   newValues.profitMargin = calculateMarginFromSalePrice(text, newValues.salePrice);
+               }
+               // Recalcular márgenes mayoristas
+               newValues.wholesalePrices = prev.wholesalePrices.map(wp => {
+                   if(wp.price) {
+                       return {...wp, margin: calculateMarginFromSalePrice(text, wp.price)};
+                   }
+                   return wp;
+               });
+          }
+
+          if (field === 'profitMargin') {
+              if (newValues.purchasePrice) {
+                  newValues.salePrice = calculateSalePriceFromMargin(newValues.purchasePrice, text);
+              }
+          }
+
+          if (field === 'salePrice') {
+              if (newValues.purchasePrice) {
+                  newValues.profitMargin = calculateMarginFromSalePrice(newValues.purchasePrice, text);
+              }
+          }
+          return newValues;
+      });
+  };
+
+  // Keyboard listeners
   useEffect(() => {
-    // Cuando el teclado se muestra
     const onKeyboardShow = (e) => {
       const kbHeight = e?.endCoordinates?.height ?? 0;
       keyboardHeightRef.current = kbHeight;
-      // Intentamos desplazar el input enfocado si está cubierto
-      setTimeout(() => { // con timeout pequeño para que la medición sea correcta después de la animación del teclado
+      setTimeout(() => {
         ensureFocusedInputVisible(kbHeight);
       }, Platform.OS === 'ios' ? 50 : 0);
     };
 
     const onKeyboardHide = () => {
       keyboardHeightRef.current = 0;
-      // opcional: volver a posición original
-      // scrollRef.current?.scrollTo({ y: 0, animated: true });
     };
 
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const showSub = Keyboard.addListener(showEvent, onKeyboardShow);
-    const hideSub = Keyboard.addListener(hideEvent, onKeyboardHide);
+    const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', onKeyboardShow);
+    const hideSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', onKeyboardHide);
 
     return () => {
       showSub.remove();
@@ -152,7 +217,6 @@ export default function EditProductScreen({ route, navigation }) {
     };
   }, []);
 
-  // Mide el input enfocado y lo desplaza si queda cubierto por el teclado (NUEVO)
   const ensureFocusedInputVisible = async (keyboardHeight = keyboardHeightRef.current) => {
     try {
       const field = focusedField.current;
@@ -160,34 +224,23 @@ export default function EditProductScreen({ route, navigation }) {
       const ref = inputsRef.current[field];
       if (!ref || !scrollRef.current) return;
 
-      // Try measureInWindow from the input ref:
-      // Algunos refs tienen .measureInWindow; si no, salimos
       if (typeof ref.measureInWindow === 'function') {
         ref.measureInWindow((x, y, width, height) => {
           const windowHeight = Dimensions.get('window').height;
           const inputBottom = y + height;
-          const availableArea = windowHeight - keyboardHeight; // espacio visible sobre el teclado
-          const extraOffset = 10; // espacio extra para que no quede pegado
+          const availableArea = windowHeight - keyboardHeight;
+          const extraOffset = 20;
           if (inputBottom + extraOffset > availableArea) {
             const diff = inputBottom + extraOffset - availableArea;
-            // current scroll position not easily accessible; scrollTo diff relative to current y:
-            // Mejor: hacemos scrollTo currentY + diff; sin currentY, hacemos scrollTo diff (aprox)
-            // Para mayor precisión podemos pedir scrollResponderScrollNativeHandleToKeyboard, pero usamos scrollRef.scrollTo
             scrollRef.current.scrollTo({ y: diff + (Platform.OS === 'ios' ? 0 : 20), animated: true });
           }
         });
-      } else {
-        // fallback si ref no expone measureInWindow
-        // No hacemos nada (podrías usar UIManager.measure con findNodeHandle)
       }
     } catch (err) {
       console.warn('Error al asegurar visibilidad input:', err);
     }
   };
 
-  // ---------------------
-  // Resto de tus helpers y lógica (sin cambios significativos)
-  // ---------------------
   const hasChanges = useCallback(() => {
     const current = JSON.stringify(values);
     return initialRef.current !== null && current !== initialRef.current;
@@ -196,7 +249,7 @@ export default function EditProductScreen({ route, navigation }) {
   useFocusEffect(
     useCallback(() => {
       const onBeforeRemove = (e) => {
-        if (!hasChanges()) return;
+        if (!hasChanges() || saving) return; // Si guardando, no preguntar
         e.preventDefault();
         Alert.alert(
           'Descartar cambios?',
@@ -213,12 +266,14 @@ export default function EditProductScreen({ route, navigation }) {
       };
       navigation.addListener('beforeRemove', onBeforeRemove);
       return () => navigation.removeListener('beforeRemove', onBeforeRemove);
-    }, [navigation, hasChanges])
+    }, [navigation, hasChanges, saving])
   );
 
   function setField(field, value) {
     setValues(v => ({ ...v, [field]: value }));
   }
+
+  // ---- Wholesale Logic ----
 
   function addWholesalePrice() {
     if (values.wholesalePrices.length >= 5) {
@@ -227,7 +282,7 @@ export default function EditProductScreen({ route, navigation }) {
     }
     setValues(v => ({
       ...v,
-      wholesalePrices: [...v.wholesalePrices, { price: '', quantity: '' }]
+      wholesalePrices: [...v.wholesalePrices, { price: '', quantity: '', margin: '' }]
     }));
   }
 
@@ -242,22 +297,36 @@ export default function EditProductScreen({ route, navigation }) {
   function updateWholesalePrice(index, field, value) {
     setValues(v => {
       const newPrices = [...v.wholesalePrices];
-      newPrices[index] = { ...newPrices[index], [field]: value };
+      const currentItem = { ...newPrices[index], [field]: value };
+
+      // Lógica de margen mayorista
+      if (field === 'price') {
+          // Si cambiamos precio, calculamos margen
+          if (v.purchasePrice) {
+              currentItem.margin = calculateMarginFromSalePrice(v.purchasePrice, value);
+          }
+      } else if (field === 'margin') {
+          // Si cambiamos margen, calculamos precio
+          if (v.purchasePrice) {
+              currentItem.price = calculateSalePriceFromMargin(v.purchasePrice, value);
+          }
+      }
+
+      newPrices[index] = currentItem;
       return { ...v, wholesalePrices: newPrices };
     });
   }
+
+  // -------------------------
 
   function validateValues() {
     if (!values.name || values.name.toString().trim() === '') return { ok: false, msg: 'El nombre es obligatorio.' };
     const cost = Number(values.purchasePrice);
     if (Number.isNaN(cost) || cost < 0) return { ok: false, msg: 'Precio de compra inválido.' };
-    const margin = Number(values.profitMargin);
-    if (Number.isNaN(margin) || margin < 0 || margin >= 100) return { ok: false, msg: 'Margen inválido. Debe estar entre 0 y 99.' };
-    if (!values.measureType) return { ok: false, msg: 'Selecciona un tipo de medida.' };
-    if (!values.autoSalePrice) {
-      const sp = Number(values.salePrice);
-      if (Number.isNaN(sp) || sp <= 0) return { ok: false, msg: 'Precio de venta inválido.' };
-    }
+
+    // Validar venta
+    const sp = Number(values.salePrice);
+    if (Number.isNaN(sp) || sp <= 0) return { ok: false, msg: 'Precio de venta inválido.' };
 
     for (let i = 0; i < values.wholesalePrices.length; i++) {
       const item = values.wholesalePrices[i];
@@ -270,20 +339,13 @@ export default function EditProductScreen({ route, navigation }) {
     return { ok: true };
   }
 
-  async function hasDuplicate(field, value) {
-    try {
-      const q = db.collection('products').where(field, '==', value).get();
-      const snap = await q;
-      if (snap.empty) return false;
-      const others = snap.docs.filter(d => d.id !== productId);
-      return others.length > 0;
-    } catch (err) {
-      console.error('Error checking duplicates:', err);
-      return false;
-    }
-  }
-
   async function handleSave() {
+    const currentUser = auth().currentUser;
+    if (!currentUser?.email) {
+      Alert.alert('Error', 'No se pudo obtener la información del usuario para registrar la operación.');
+      return;
+    }
+
     const valCheck = validateValues();
     if (!valCheck.ok) {
       Alert.alert('Validación', valCheck.msg);
@@ -292,9 +354,15 @@ export default function EditProductScreen({ route, navigation }) {
 
     setSaving(true);
     try {
-      const ndup = await hasDuplicate('name', values.name);
-      if (ndup) {
-        Alert.alert('Duplicado', 'El nombre ya está en uso por otro producto.');
+      // Validar duplicados (excepto el actual)
+      const ndup = await productsService.validateNoDuplicates({
+          name: values.name,
+          barcode: values.barcode || null,
+          currentId: productId
+      });
+
+      if (!ndup.ok) {
+        Alert.alert('Duplicado', ndup.message || 'El producto ya existe.');
         setSaving(false);
         return;
       }
@@ -314,250 +382,544 @@ export default function EditProductScreen({ route, navigation }) {
         salePrice: Number(values.salePrice) || null,
         measureType: values.measureType,
         wholesalePrices: processedWholesale,
-        wholesalePrice: firestore.FieldValue.delete(),
-        wholesaleThreshold: firestore.FieldValue.delete(),
-        updatedAt: firestore.FieldValue.serverTimestamp()
+        updatedAt: serverTimestamp()
       };
 
       const docRef = db.doc(`products/${productId}`);
       await docRef.update(payload);
 
-      initialRef.current = JSON.stringify({
-        name: values.name,
-        barcode: values.barcode,
-        description: values.description,
-        purchasePrice: values.purchasePrice,
-        profitMargin: values.profitMargin,
-        autoSalePrice: values.autoSalePrice,
-        salePrice: values.salePrice,
-        measureType: values.measureType,
-        wholesalePrices: values.wholesalePrices
+      // Registrar operación de actualización
+      const initialValues = JSON.parse(initialRef.current);
+      const changes = {};
+      Object.keys(values).forEach(key => {
+        const oldValue = initialValues[key];
+        const newValue = values[key];
+
+        if (key === 'wholesalePrices') {
+          if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+            changes[key] = { from: oldValue, to: newValue };
+          }
+          return;
+        }
+
+        if (String(oldValue) !== String(newValue)) {
+          changes[key] = { from: oldValue, to: newValue };
+        }
       });
+
+      if (Object.keys(changes).length > 0) {
+        await createProductOperation({
+          productId: productId,
+          productName: values.name,
+          operationType: 'update',
+          userEmail: currentUser.email, // Use the user's email
+          details: {
+            description: `Se actualizaron los campos: ${Object.keys(changes).join(', ')}.`,
+            changes: changes
+          }
+        });
+      }
+
+      // Actualizar ref para evitar prompt de descartar
+      initialRef.current = JSON.stringify({
+          ...values,
+          wholesalePrices: values.wholesalePrices.map(wp => ({
+              price: Number(wp.price),
+              quantity: Number(wp.quantity)
+              // margin no se guarda en BD, así que lo "limpiamos" en la ref teórica o lo incluimos si es consistente
+          }))
+      });
+
       setProduct(prev => ({ ...prev, ...payload, wholesalePrices: processedWholesale }));
       Alert.alert('Guardado', 'Producto actualizado correctamente.',[
-        { text: 'Ver producto', onPress: () => navigation.navigate('EditProduct') },
-        { text: 'Ir a lista', onPress: () => navigation.navigate('ProductsList') },
+        { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (err) {
       console.error('Error guardando producto:', err);
       Alert.alert('Error', 'No se pudo guardar el producto. Intenta de nuevo.');
     } finally {
-      setSaving(false);
+      // Delay pequeño para asegurar que el estado se actualice antes de desmontar si es muy rápido
+      setTimeout(() => {
+           if (navigation.isFocused()) setSaving(false);
+      }, 500);
     }
   }
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text>Cargando producto...</Text>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={{ marginTop: 10, color: '#666' }}>Cargando producto...</Text>
       </View>
     );
   }
 
-  // ---------------------
-  // Render: usamos KeyboardAvoidingView para iOS pero el scroll real lo manejamos con listeners (NUEVO)
-  // ---------------------
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1, backgroundColor: '#fff' }}
+      style={{ flex: 1, backgroundColor: '#F5F6FA' }}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
+        <View style={globalStyles.header}>
+			<TouchableOpacity onPress={() => {
+                if(hasChanges()) {
+                     Alert.alert(
+                      'Descartar cambios?',
+                      'Tienes cambios sin guardar. ¿Deseas descartarlos y salir?',
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { text: 'Descartar', style: 'destructive', onPress: () => navigation.goBack() },
+                      ]
+                    );
+                } else {
+                    navigation.goBack();
+                }
+			  }}>
+			  <Icon name="chevron-back" size={26} color="#fff" />
+			</TouchableOpacity>
+			<Text style={globalStyles.title}>Editar producto</Text>
+            {/* Espaciador para balancear header */}
+            <View style={{width: 26}} />
+		</View>
+
       <ScrollView
         ref={scrollRef}
-        style={styles.container}
-        contentContainerStyle={{ paddingBottom: 24 }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 100, flexGrow: 1 }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.label}>Nombre</Text>
-        <TextInput
-          ref={assignRef('name')} // asignamos ref
-          style={styles.input}
-          value={values.name}
-          onFocus={() => { focusedField.current = 'name'; }}
-          onBlur={() => { if (focusedField.current === 'name') focusedField.current = null; }}
-          onChangeText={t => setField('name', t)}
-        />
+        <View
+          style={{flex: 1}}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderRelease={() => Keyboard.dismiss()}
+        >
 
-        <Text style={styles.label}>Código de barras</Text>
-        <TextInput
-          ref={assignRef('barcode')}
-          style={styles.input}
-          value={values.barcode}
-          onFocus={() => { focusedField.current = 'barcode'; }}
-          onBlur={() => { if (focusedField.current === 'barcode') focusedField.current = null; }}
-          onChangeText={t => setField('barcode', t)}
-        />
+          {/* Section: Información Básica */}
+          <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Información Básica</Text>
 
-        <Text style={styles.label}>Descripción</Text>
-        <TextInput
-          ref={assignRef('description')}
-          style={[styles.input, { height: 80 }]}
-          multiline
-          value={values.description}
-          onFocus={() => { focusedField.current = 'description'; }}
-          onBlur={() => { if (focusedField.current === 'description') focusedField.current = null; }}
-          onChangeText={t => setField('description', t)}
-        />
+              <Text style={styles.label}>Nombre del producto</Text>
+              <TextInput
+                ref={assignRef('name')}
+                style={styles.input}
+                value={values.name}
+                onFocus={() => { focusedField.current = 'name'; }}
+                onBlur={() => { if (focusedField.current === 'name') focusedField.current = null; }}
+                onChangeText={t => setField('name', t)}
+                placeholder="Ej. Pechuga de Pollo"
+                placeholderTextColor="#999"
+              />
 
-        <Text style={styles.label}>Precio de compra</Text>
-        <TextInput
-          ref={assignRef('purchasePrice')}
-          style={styles.input}
-          keyboardType="numeric"
-          value={String(values.purchasePrice)}
-          onFocus={() => { focusedField.current = 'purchasePrice'; }}
-          onBlur={() => { if (focusedField.current === 'purchasePrice') focusedField.current = null; }}
-          onChangeText={t => setField('purchasePrice', t)}
-        />
-
-        <Text style={styles.label}>Margen de ganancia (%)</Text>
-        <TextInput
-          ref={assignRef('profitMargin')}
-          style={styles.input}
-          keyboardType="numeric"
-          value={String(values.profitMargin)}
-          onFocus={() => { focusedField.current = 'profitMargin'; }}
-          onBlur={() => { if (focusedField.current === 'profitMargin') focusedField.current = null; }}
-          onChangeText={t => setField('profitMargin', t)}
-        />
-
-        <View style={styles.row}>
-          <Text style={{ flex: 1, marginTop: 6 }}>Calcular precio de venta automáticamente</Text>
-          <Switch value={values.autoSalePrice} onValueChange={v => setField('autoSalePrice', v)} />
-        </View>
-
-        {!values.autoSalePrice && (
-          <>
-            <Text style={styles.label}>Precio de venta (manual)</Text>
-            <TextInput
-              ref={assignRef('salePrice')}
-              style={styles.input}
-              keyboardType="numeric"
-              value={String(values.salePrice)}
-              onFocus={() => { focusedField.current = 'salePrice'; }}
-              onBlur={() => { if (focusedField.current === 'salePrice') focusedField.current = null; }}
-              onChangeText={t => setField('salePrice', t)}
-            />
-          </>
-        )}
-
-        {values.autoSalePrice && (
-          <Text style={{ marginVertical: 8 }}>Precio de venta calculado: {values.salePrice ?? '—'}</Text>
-        )}
-
-        <Text style={styles.label}>Tipo de medida</Text>
-        <View style={{ flexDirection: 'row', marginBottom: 12 }}>
-          <Button title="Unidad" onPress={() => setField('measureType', 'unit')} color={values.measureType === 'unit' ? undefined : '#888'} />
-          <View style={{ width: 8 }} />
-          <Button title="Peso" onPress={() => setField('measureType', 'weight')} color={values.measureType === 'weight' ? undefined : '#888'} />
-        </View>
-
-        <View style={{ marginTop: 20, marginBottom: 10 }}>
-          <Text style={{ fontSize: 16, fontWeight: 'bold' }}>Precios de Mayorista</Text>
-          <Text style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
-            Puedes agregar hasta 5 precios por volumen.
-          </Text>
-
-          {values.wholesalePrices.map((wp, index) => (
-            <View key={index} style={styles.wholesaleRow}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={styles.subLabel}>Precio</Text>
-                <TextInput
-                  ref={assignRef(`wholesale_price_${index}`)}
-                  style={styles.input}
-                  keyboardType="numeric"
-                  placeholder="0.00"
-                  value={String(wp.price)}
-                  onFocus={() => { focusedField.current = `wholesale_price_${index}`; }}
-                  onBlur={() => { if (focusedField.current === `wholesale_price_${index}`) focusedField.current = null; }}
-                  onChangeText={t => updateWholesalePrice(index, 'price', t)}
-                />
+              <View style={styles.rowInputs}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.label}>Código de barras</Text>
+                      <View style={styles.inputWithIconContainer}>
+                          <TextInput
+                            ref={assignRef('barcode')}
+                            style={[styles.inputNoBorder, {flex: 1}]}
+                            value={values.barcode}
+                            onFocus={() => { focusedField.current = 'barcode'; }}
+                            onBlur={() => { if (focusedField.current === 'barcode') focusedField.current = null; }}
+                            onChangeText={t => setField('barcode', t)}
+                            placeholder="Opcional"
+                            placeholderTextColor="#999"
+                          />
+                           <TouchableOpacity
+                            onPress={() => navigation.navigate('BarcodeScanner', { onScanned: (code) => setField('barcode', code) })}
+                            style={styles.iconButton}
+                          >
+                             <Icon name="scan" size={20} color="#666" />
+                          </TouchableOpacity>
+                      </View>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={styles.label}>Unidad de Medida</Text>
+                      <View style={styles.toggleContainer}>
+                        <TouchableOpacity
+                            style={[styles.toggleBtn, values.measureType === 'unit' && styles.toggleBtnActive]}
+                            onPress={() => setField('measureType', 'unit')}
+                        >
+                            <Text style={[styles.toggleText, values.measureType === 'unit' && styles.toggleTextActive]}>Unid.</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.toggleBtn, values.measureType === 'weight' && styles.toggleBtnActive]}
+                            onPress={() => setField('measureType', 'weight')}
+                        >
+                            <Text style={[styles.toggleText, values.measureType === 'weight' && styles.toggleTextActive]}>Peso</Text>
+                        </TouchableOpacity>
+                      </View>
+                  </View>
               </View>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={styles.subLabel}>Umbral (Cant.)</Text>
-                <TextInput
-                  ref={assignRef(`wholesale_qty_${index}`)}
-                  style={styles.input}
-                  keyboardType="numeric"
-                  placeholder="10"
-                  value={String(wp.quantity)}
-                  onFocus={() => { focusedField.current = `wholesale_qty_${index}`; }}
-                  onBlur={() => { if (focusedField.current === `wholesale_qty_${index}`) focusedField.current = null; }}
-                  onChangeText={t => updateWholesalePrice(index, 'quantity', t)}
-                />
-              </View>
-              <View style={{ justifyContent: 'flex-end', paddingBottom: 2 }}>
-                <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}>
-                  <Text style={{ color: 'white', fontWeight: 'bold' }}>X</Text>
-                </TouchableOpacity>
-              </View>
+
+              <Text style={styles.label}>Descripción</Text>
+              <TextInput
+                ref={assignRef('description')}
+                style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+                multiline
+                value={values.description}
+                onFocus={() => { focusedField.current = 'description'; }}
+                onBlur={() => { if (focusedField.current === 'description') focusedField.current = null; }}
+                onChangeText={t => setField('description', t)}
+                placeholder="Breve descripción del producto..."
+                placeholderTextColor="#999"
+              />
+          </View>
+
+          {/* Section: Precios y Costos */}
+          <View style={styles.section}>
+             <Text style={styles.sectionTitle}>Precios y Costos</Text>
+
+             <Text style={styles.label}>Costo de Compra ($)</Text>
+             <TextInput
+                ref={assignRef('purchasePrice')}
+                style={styles.input}
+                keyboardType="numeric"
+                value={values.purchasePrice}
+                onFocus={() => { focusedField.current = 'purchasePrice'; }}
+                onBlur={() => { if (focusedField.current === 'purchasePrice') focusedField.current = null; }}
+                onChangeText={t => handlePriceChange('purchasePrice', t)}
+                placeholder="0.00"
+                placeholderTextColor="#999"
+             />
+
+             <View style={styles.rowInputs}>
+                 <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={styles.label}>Margen (%)</Text>
+                    <View style={styles.percentInputContainer}>
+                        <TextInput
+                        ref={assignRef('profitMargin')}
+                        style={styles.percentInput}
+                        keyboardType="numeric"
+                        value={values.profitMargin}
+                        onFocus={() => { focusedField.current = 'profitMargin'; }}
+                        onBlur={() => { if (focusedField.current === 'profitMargin') focusedField.current = null; }}
+                        onChangeText={t => handlePriceChange('profitMargin', t)}
+                        placeholder="0"
+                        placeholderTextColor="#999"
+                        />
+                        <Text style={styles.percentSymbol}>%</Text>
+                    </View>
+                 </View>
+                 <View style={{ flex: 1, marginLeft: 8 }}>
+                    <Text style={styles.label}>Precio Venta ($)</Text>
+                    <TextInput
+                        ref={assignRef('salePrice')}
+                        style={[styles.input, { fontWeight: 'bold', color: '#007AFF' }]}
+                        keyboardType="numeric"
+                        value={values.salePrice}
+                        onFocus={() => { focusedField.current = 'salePrice'; }}
+                        onBlur={() => { if (focusedField.current === 'salePrice') focusedField.current = null; }}
+                        onChangeText={t => handlePriceChange('salePrice', t)}
+                        placeholder="0.00"
+                        placeholderTextColor="#999"
+                    />
+                 </View>
+             </View>
+
+             <View style={styles.infoRow}>
+                 <Icon name="information-circle-outline" size={16} color="#666" />
+                 <Text style={styles.infoText}>
+                    Modifica el margen o el precio final y el otro se calculará automáticamente.
+                 </Text>
+             </View>
+          </View>
+
+          {/* Section: Precios Mayorista */}
+          <View style={styles.section}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <Text style={styles.sectionTitle}>Precios Mayorista</Text>
+                {values.wholesalePrices.length < 5 && (
+                    <TouchableOpacity onPress={addWholesalePrice} style={styles.addBtn}>
+                        <Icon name="add" size={18} color="#fff" />
+                        <Text style={styles.addBtnText}>Agregar</Text>
+                    </TouchableOpacity>
+                )}
             </View>
-          ))}
 
-          {values.wholesalePrices.length < 5 && (
-              <Button title="+ Agregar precio mayorista" onPress={addWholesalePrice} />
-          )}
+            {values.wholesalePrices.map((wp, index) => (
+              <View key={index} style={styles.wholesaleRow}>
+                <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.subLabel}>Cant. Mínima</Text>
+                        <TextInput
+                            ref={assignRef(`wholesale_qty_${index}`)}
+                            style={styles.inputSmall}
+                            keyboardType="numeric"
+                            placeholder="Ej. 10"
+                            placeholderTextColor="#999"
+                            value={String(wp.quantity)}
+                            onFocus={() => { focusedField.current = `wholesale_qty_${index}`; }}
+                            onBlur={() => { if (focusedField.current === `wholesale_qty_${index}`) focusedField.current = null; }}
+                            onChangeText={t => updateWholesalePrice(index, 'quantity', t)}
+                        />
+                    </View>
+
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.subLabel}>Margen (%)</Text>
+                        <TextInput
+                            ref={assignRef(`wholesale_margin_${index}`)}
+                            style={styles.inputSmall}
+                            keyboardType="numeric"
+                            placeholder="%"
+                            placeholderTextColor="#999"
+                            value={String(wp.margin)}
+                            onFocus={() => { focusedField.current = `wholesale_margin_${index}`; }}
+                            onBlur={() => { if (focusedField.current === `wholesale_margin_${index}`) focusedField.current = null; }}
+                            onChangeText={t => updateWholesalePrice(index, 'margin', t)}
+                        />
+                    </View>
+
+                    <View style={{ flex: 1, marginRight: 4 }}>
+                        <Text style={styles.subLabel}>Precio ($)</Text>
+                        <TextInput
+                            ref={assignRef(`wholesale_price_${index}`)}
+                            style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]}
+                            keyboardType="numeric"
+                            placeholder="$"
+                            placeholderTextColor="#999"
+                            value={String(wp.price)}
+                            onFocus={() => { focusedField.current = `wholesale_price_${index}`; }}
+                            onBlur={() => { if (focusedField.current === `wholesale_price_${index}`) focusedField.current = null; }}
+                            onChangeText={t => updateWholesalePrice(index, 'price', t)}
+                        />
+                    </View>
+
+                    <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}>
+                        <Icon name="trash-outline" size={20} color="#FF3B30" />
+                    </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+
+            {values.wholesalePrices.length === 0 && (
+                <Text style={styles.emptyText}>No hay precios mayoristas configurados.</Text>
+            )}
+          </View>
         </View>
-
-        <View style={{ height: 12 }} />
-
-        {saving ? (
-          <ActivityIndicator />
-        ) : (
-          <>
-            <Button title="Guardar cambios" onPress={handleSave} />
-            <View style={{ height: 8 }} />
-            <Button title="Cancelar" color="#888" onPress={() => {
-              if (hasChanges()) {
-                Alert.alert('Descartar cambios?', 'Estás a punto de descartar los cambios.', [
-                  { text: 'Cancelar', style: 'cancel' },
-                  { text: 'Descartar', style: 'destructive', onPress: () => navigation.goBack() }
-                ]);
-              } else navigation.goBack();
-            }} />
-          </>
-        )}
       </ScrollView>
+
+      {/* Floating Save Button */}
+      <View style={styles.bottomContainer}>
+          <TouchableOpacity
+            style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+              {saving ? (
+                  <ActivityIndicator color="#fff" />
+              ) : (
+                  <>
+                    <Icon name="save-outline" size={22} color="#fff" style={{marginRight: 8}} />
+                    <Text style={styles.saveBtnText}>Guardar Cambios</Text>
+                  </>
+              )}
+          </TouchableOpacity>
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, backgroundColor: '#fff' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  label: { marginTop: 12, marginBottom: 6, fontWeight: '600' },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 10,
-    borderRadius: 6,
-    backgroundColor: '#fff'
+  section: {
+      backgroundColor: '#fff',
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 16,
+      elevation: 1,
+      shadowColor: '#000',
+      shadowOpacity: 0.05,
+      shadowRadius: 5,
+      shadowOffset: { width: 0, height: 2 }
   },
-  row: { flexDirection: 'row', alignItems: 'center', marginTop: 12, marginBottom: 8 },
-  wholesaleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    backgroundColor: '#f9f9f9',
-    padding: 8,
-    borderRadius: 6,
+  sectionTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: '#111',
+      marginBottom: 16,
+  },
+  label: {
+      fontSize: 13,
+      color: '#666',
+      marginBottom: 6,
+      fontWeight: '600',
+      textTransform: 'uppercase'
+  },
+  subLabel: {
+      fontSize: 11,
+      color: '#888',
+      marginBottom: 4,
+      fontWeight: '600'
+  },
+  input: {
+    backgroundColor: '#F5F6FA',
+    padding: 12,
+    borderRadius: 10,
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#F0F0F0'
+  },
+  inputSmall: {
+    backgroundColor: '#F5F6FA',
+    padding: 10,
+    borderRadius: 8,
+    fontSize: 14,
+    color: '#333',
     borderWidth: 1,
     borderColor: '#eee'
   },
-  subLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      marginBottom: 4
+  inputWithIconContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#F5F6FA',
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: '#F0F0F0',
+      marginBottom: 16,
+      paddingRight: 8
+  },
+  inputNoBorder: {
+      padding: 12,
+      fontSize: 16,
+      color: '#333'
+  },
+  iconButton: { padding: 8 },
+  rowInputs: {
+      flexDirection: 'row',
+      marginBottom: 16
+  },
+
+  // Percent Input
+  percentInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F6FA',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    paddingRight: 12,
+    marginBottom: 16
+  },
+  percentInput: {
+    flex: 1,
+    padding: 12,
+    fontSize: 16,
+    color: '#333'
+  },
+  percentSymbol: {
+    fontSize: 16,
+    color: '#999',
+    fontWeight: 'bold'
+  },
+
+  // Toggles
+  toggleContainer: {
+      flexDirection: 'row',
+      backgroundColor: '#F0F0F0',
+      borderRadius: 10,
+      padding: 3,
+      marginBottom: 16,
+      height: 48
+  },
+  toggleBtn: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderRadius: 8
+  },
+  toggleBtnActive: {
+      backgroundColor: '#fff',
+      shadowColor: '#000',
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+      elevation: 2
+  },
+  toggleText: {
+      fontSize: 13,
+      color: '#888',
+      fontWeight: '600'
+  },
+  toggleTextActive: {
+      color: '#007AFF',
+      fontWeight: '700'
+  },
+
+  // Wholesale
+  addBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#007AFF',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 20
+  },
+  addBtnText: { color: '#fff', fontSize: 12, fontWeight: '700', marginLeft: 4 },
+  wholesaleRow: {
+      marginBottom: 12,
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: '#f0f0f0'
   },
   deleteButton: {
-      backgroundColor: '#ff4444',
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      borderRadius: 6,
+      padding: 8,
       justifyContent: 'center',
       alignItems: 'center',
       marginTop: 18
+  },
+  emptyText: {
+      fontSize: 13,
+      color: '#999',
+      fontStyle: 'italic',
+      textAlign: 'center',
+      marginTop: 10
+  },
+  infoRow: {
+      flexDirection: 'row',
+      backgroundColor: '#E3F2FD',
+      padding: 10,
+      borderRadius: 8,
+      alignItems: 'center',
+      marginTop: -8
+  },
+  infoText: {
+      color: '#1565C0',
+      fontSize: 12,
+      marginLeft: 6,
+      flex: 1
+  },
+
+  // New Button Styles
+  bottomContainer: {
+      padding: 16,
+      backgroundColor: '#fff',
+      borderTopWidth: 1,
+      borderTopColor: '#eee',
+      paddingBottom: Platform.OS === 'ios' ? 30 : 16 // Extra padding for iPhone X+
+  },
+  saveBtn: {
+      backgroundColor: '#007AFF',
+      borderRadius: 14,
+      paddingVertical: 16,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      elevation: 4,
+      shadowColor: '#007AFF',
+      shadowOpacity: 0.3,
+      shadowRadius: 5,
+      shadowOffset: { width: 0, height: 3 }
+  },
+  saveBtnDisabled: {
+      backgroundColor: '#A0A0A0',
+      elevation: 0
+  },
+  saveBtnText: {
+      color: '#fff',
+      fontSize: 18,
+      fontWeight: 'bold'
   }
 });

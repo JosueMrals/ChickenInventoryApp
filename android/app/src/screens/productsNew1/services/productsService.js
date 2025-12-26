@@ -1,5 +1,5 @@
 import { db } from '../../../services/firebase';
-import firestore from '@react-native-firebase/firestore';
+import firestore, { serverTimestamp, increment } from '@react-native-firebase/firestore';
 
 const COLLECTION = 'products';
 
@@ -15,8 +15,8 @@ export async function createProduct(payload) {
     // helpful derived fields:
     name_lower: payload.name ? payload.name.toString().toLowerCase() : '',
     stock: 0,
-    createdAt: firestore.FieldValue.serverTimestamp(),
-    updatedAt: firestore.FieldValue.serverTimestamp(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   };
   await docRef.set(data);
   return docRef.id;
@@ -28,7 +28,7 @@ export async function updateProduct(productId, updates) {
   const data = {
     ...updates,
     ...(updates.name ? { name_lower: updates.name.toString().toLowerCase() } : {}),
-    updatedAt: firestore.FieldValue.serverTimestamp(),
+    updatedAt: serverTimestamp(),
   };
   await docRef.update(data);
 }
@@ -162,8 +162,8 @@ export async function incrementStock(productId, amount) {
   if (Number.isNaN(Number(amount))) throw new Error('amount must be numeric');
   const docRef = db.collection(COLLECTION).doc(productId);
   await docRef.update({
-    stock: firestore.FieldValue.increment(Number(amount)),
-    updatedAt: firestore.FieldValue.serverTimestamp(),
+    stock: increment(Number(amount)),
+    updatedAt: serverTimestamp(),
   });
 }
 
@@ -172,7 +172,7 @@ export async function setStock(productId, newStock) {
   const docRef = db.collection(COLLECTION).doc(productId);
   await docRef.update({
     stock: Number(newStock),
-    updatedAt: firestore.FieldValue.serverTimestamp(),
+    updatedAt: serverTimestamp(),
   });
 }
 

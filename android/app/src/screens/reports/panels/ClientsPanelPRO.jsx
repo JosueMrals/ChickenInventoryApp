@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, FlatList, ActivityIndicator } from "react-native";
-import firestore from "@react-native-firebase/firestore";
+import firestore, { Timestamp } from "@react-native-firebase/firestore";
 import styles from "../styles/clientsPanelStyles";
 
 export default function ClientsPanelPRO({ dateFrom, dateTo }) {
@@ -15,8 +15,8 @@ export default function ClientsPanelPRO({ dateFrom, dateTo }) {
       const snap = await firestore()
         .collection("sales")
         .orderBy("createdAt")
-        .where("createdAt", ">=", dateFrom ? firestore.Timestamp.fromDate(dateFrom) : new Date(0))
-        .where("createdAt", "<=", dateTo ? firestore.Timestamp.fromDate(dateTo) : new Date())
+        .where("createdAt", ">=", dateFrom ? Timestamp.fromDate(dateFrom) : new Date(0))
+        .where("createdAt", "<=", dateTo ? Timestamp.fromDate(dateTo) : new Date())
         .get();
 
       const totals = {};

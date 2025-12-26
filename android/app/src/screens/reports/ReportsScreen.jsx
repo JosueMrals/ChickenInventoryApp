@@ -8,26 +8,24 @@ import {
   Dimensions
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
-import Icon from "react-native-vector-icons/Ionicons";
-
-import firestore from "@react-native-firebase/firestore";
 import styles from "./styles/reportsStyles";
-import FilterBar from "./components/FilterBar";
 import { getQuickRange } from "./utils/dateRanges";
-import { getSalesSummaryOptimized } from "./services/reportsService";
+import { useReportsData } from "./hooks/useReportsData";
 
 // Paneles
 import DashboardPanel from "./panels/DashboardPanel";
-import SalesPanelPRO from "./panels/SalesPanelPRO";
 import FinancialPanelPRO from "./panels/FinancialPanelPRO";
 import ProductsPanelPRO from "./panels/ProductsPanelPRO";
 import EmployeesPanelPRO from "./panels/EmployeesPanelPRO";
 import ClientsPanelPRO from "./panels/ClientsPanelPRO";
+import ProductOperationsPanel from "./panels/ProductOperationsPanel";
+import SalesPanel from "./panels/SalesPanel";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
 const TABS = [
   { id: "dashboard", label: "Resumen" },
+  { id: "product-operations", label: "Operaciones de Producto" },
   { id: "sales", label: "Ventas" },
   { id: "financial", label: "Finanzas" },
   { id: "products", label: "Productos" },
@@ -36,84 +34,47 @@ const TABS = [
 ];
 
 export default function ReportsScreen() {
-
-  /**********************************************
-   * ESTADOS PRINCIPALES
-   **********************************************/
-
   const [activeTab, setActiveTab] = useState("dashboard");
-
-  // Lazy load storage (solo se cargan paneles una vez)
   const [loadedTabs, setLoadedTabs] = useState(["dashboard"]);
 
-  const [dateFrom, setDateFrom] = useState(null);
-  const [dateTo, setDateTo] = useState(null);
+  const initialDates = getQuickRange("today");
+  const [dateFrom, setDateFrom] = useState(initialDates.from);
+  const [dateTo, setDateTo] = useState(initialDates.to);
 
-  // Datos del panel de ventas
-  const [salesSummary, setSalesSummary] = useState(null);
-  const [loadingSales, setLoadingSales] = useState(false);
+  const {
+    summary,
+    financial,
+    operations,
+    loading,
+    loadingMore,
+    loadMoreOperations,
+    hasMore,
+  } = useReportsData(dateFrom, dateTo);
 
   const slideX = useRef(new Animated.Value(0)).current;
-  const currentIndex = TABS.findIndex(t => t.id === activeTab);
+  const currentIndex = TABS.findIndex((t) => t.id === activeTab);
 
-  /**********************************************
-   * 🔥 RESET SIEMPRE A DASHBOARD AL ENTRAR
-   **********************************************/
   useFocusEffect(
     useCallback(() => {
-      setActiveTab("dashboard");
+      // No es necesario resetear el tab activo aquí
     }, [])
   );
 
-  /**********************************************
-   * 🔥 LAZY LOADING: MARCAR PANEL COMO CARGADO
-   **********************************************/
   useEffect(() => {
     if (!loadedTabs.includes(activeTab)) {
-      setLoadedTabs(prev => [...prev, activeTab]);
+      setLoadedTabs((prev) => [...prev, activeTab]);
     }
   }, [activeTab]);
 
-  /**********************************************
-   * 🔥 ANIMACIÓN ENTRE PANELES
-   **********************************************/
   useEffect(() => {
     Animated.spring(slideX, {
       toValue: -currentIndex * SCREEN_WIDTH,
-      useNativeDriver: true
+      useNativeDriver: true,
     }).start();
   }, [currentIndex]);
 
-  /**********************************************
-   * 🔥 CARGAR DATOS SOLO CUANDO SE NECESITAN
-   **********************************************/
-  useEffect(() => {
-    async function loadSales() {
-      if (!loadedTabs.includes("sales")) return; // Lazy loading real
-
-      setLoadingSales(true);
-
-      const summary = await getSalesSummaryOptimized({
-        from: dateFrom,
-        to: dateTo
-      });
-
-      setSalesSummary(summary);
-
-      setLoadingSales(false);
-    }
-
-    loadSales();
-  }, [dateFrom, dateTo, loadedTabs]);
-
-
-  /**********************************************
-   * 🔥 RENDER DE PANEL LAZY
-   **********************************************/
   const renderTab = (id) => {
-    const isLoaded = loadedTabs.includes(id);
-
-    if (!isLoaded) {
+    if (!loadedTabs.includes(id)) {
       return (
         <View style={{ padding: 20 }}>
           <Text style={{ color: "#777" }}>Cargando...</Text>
@@ -121,60 +82,37 @@ export default function ReportsScreen() {
       );
     }
 
+    const combinedSalesData = {
+      summary: summary,
+      operations: operations,
+    };
+
     switch (id) {
       case "dashboard":
-        return <DashboardPanel dateFrom={dateFrom} dateTo={dateTo} />;
-
+        return <DashboardPanel summary={summary} financial={financial} loading={loading} />;
+      case "product-operations":
+        return <ProductOperationsPanel operations={operations} loading={loading} />;
       case "sales":
-        return (
-          <SalesPanelPRO
-            data={salesSummary}
-            loading={loadingSales}
-          />
-        );
-
+        return <SalesPanel data={combinedSalesData} loading={loading || loadingMore} loadMore={loadMoreOperations} hasMore={hasMore} />;
       case "financial":
-        return <FinancialPanelPRO dateFrom={dateFrom} dateTo={dateTo} />;
-
+        return <FinancialPanelPRO data={financial} loading={loading} />;
       case "products":
-        return <ProductsPanelPRO dateFrom={dateFrom} dateTo={dateTo} />;
-
+        return <ProductsPanelPRO data={summary?.topProducts} loading={loading} />;
       case "employees":
-        return <EmployeesPanelPRO dateFrom={dateFrom} dateTo={dateTo} />;
-
+        return <EmployeesPanelPRO data={summary?.salesByEmployee} loading={loading} />;
       case "clients":
-        return <ClientsPanelPRO dateFrom={dateFrom} dateTo={dateTo} />;
+        return <ClientsPanelPRO data={summary?.bestClients} loading={loading} />;
     }
   };
 
-
   return (
     <View style={styles.container}>
-
-      {/* HEADER */}
       <View style={styles.header}>
         <Text style={styles.title}>Informes & Análisis</Text>
       </View>
-
-      {/* FILTER BAR */}
-      <FilterBar
-        onQuickFilter={(key) => {
-          const { from, to } = getQuickRange(key);
-          setDateFrom(from);
-          setDateTo(to);
-        }}
-        onRangeChange={(from, to) => {
-          setDateFrom(from);
-          setDateTo(to);
-        }}
-      />
-
-      {/* TAB BAR */}
       <ScrollView
         horizontal
-        nestedScrollEnabled
         showsHorizontalScrollIndicator={false}
-        scrollEventThrottle={16}
         style={styles.tabsContainer}
       >
         {TABS.map((t) => (
@@ -183,41 +121,26 @@ export default function ReportsScreen() {
             style={[styles.tabButton, activeTab === t.id && styles.tabButtonActive]}
             onPress={() => setActiveTab(t.id)}
           >
-            <Text
-              style={[
-                styles.tabLabel,
-                activeTab === t.id && styles.tabLabelActive
-              ]}
-            >
+            <Text style={[styles.tabLabel, activeTab === t.id && styles.tabLabelActive]}>
               {t.label}
             </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
-
-      {/* SLIDE PANELS */}
       <Animated.View
         style={{
           flexDirection: "row",
           width: SCREEN_WIDTH * TABS.length,
           transform: [{ translateX: slideX }],
-          flex: 1
+          flex: 1,
         }}
       >
         {TABS.map((t) => (
-          <ScrollView      // 👈 SCROLL ÚNICO POR PANEL
-            key={t.id}
-            style={{ width: SCREEN_WIDTH }}
-            contentContainerStyle={{ paddingBottom: 80 }}
-            nestedScrollEnabled={true}
-            showsVerticalScrollIndicator={true}
-          >
+          <View key={t.id} style={{ width: SCREEN_WIDTH, flex: 1 }}>
             {renderTab(t.id)}
-          </ScrollView>
+          </View>
         ))}
       </Animated.View>
-
-
     </View>
   );
 }

@@ -79,12 +79,30 @@ export default function QuickSaleProductsScreen({ navigation }) {
           )}
 
           {/* SEARCH */}
-          <TextInput
-            placeholder="Buscar producto..."
-            style={styles.search}
-            value={search}
-            onChangeText={setSearch}
-          />
+          <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
+			  <View style={{
+				  flexDirection: 'row',
+				  backgroundColor: '#fff',
+				  borderRadius: 12,
+				  paddingHorizontal: 12,
+				  alignItems: 'center',
+				  height: 48,
+				  elevation: 4,
+				  shadowColor: '#000',
+				  shadowOpacity: 0.1,
+				  shadowRadius: 4,
+				  shadowOffset: { width: 0, height: 2 }
+			  }}>
+		      <Icon name="search" size={20} color="#999" style={{ marginRight: 8 }} />
+			  <TextInput
+				placeholder="Buscar producto..."
+				style={{ flex: 1, fontSize: 16, color: '#333' }}
+				placeholderTextColor="#999"
+				value={search}
+				onChangeText={setSearch}
+			  />
+		  </View>
+		</View>
 
           {/* PRODUCT LIST */}
           <FlatList

@@ -1,16 +1,28 @@
 // src/screens/AddProductStep1Screen.jsx
-import React, { useCallback, useRef, useState } from 'react';
-import { View, Alert, ActivityIndicator } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
+import { View, Alert, ActivityIndicator, TouchableOpacity, Text } from 'react-native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import ProductFormStep1 from '../components/ProductFormStep1';
 import { useProductForm } from '../hooks/useProductForm';
 import productsService from '../services/productsService';
+import globalStyles from '../../../styles/globalStyles';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function AddProductStep1Screen() {
   const navigation = useNavigation();
+  const route = useRoute();
+  const { scannedCode } = route.params || {};
+
   const { values, setField, reset } = useProductForm();
   const [checking, setChecking] = useState(false);
   const initialRef = useRef(JSON.stringify(values));
+
+  // Efecto para asignar código escaneado si viene de la lista
+  useEffect(() => {
+      if (scannedCode) {
+          setField('barcode', scannedCode);
+      }
+  }, [scannedCode]);
 
   const hasChanges = useCallback(() => {
     try {
@@ -79,6 +91,16 @@ export default function AddProductStep1Screen() {
 
   return (
     <View style={{ flex: 1 }}>
+		<View style={globalStyles.header}>
+			<TouchableOpacity onPress={() => {
+				//resetQuickSale();
+				navigation.goBack();
+			  }}>
+			  <Icon name="chevron-back" size={26} color="#fff" />
+			</TouchableOpacity>
+			<Text style={globalStyles.title}>Detalles del producto</Text>
+
+		</View>
       <ProductFormStep1 values={values} setField={setField} onNext={handleNext} onCancel={handleCancel} onOpenScanner={handleOpenScanner} />
     </View>
   );

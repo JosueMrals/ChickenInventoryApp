@@ -42,7 +42,6 @@ export default function ProductFormStep2({
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.container}>
-        <Text style={styles.title}>Nuevo producto — Paso 2</Text>
 
         <Text style={styles.label}>Precio de compra *</Text>
         <TextInput
@@ -97,7 +96,6 @@ export default function ProductFormStep2({
         <View style={{ height: 12 }} />
 
         <View style={styles.actionsRow}>
-          <Button title="Atras" onPress={onBack} />
           <View style={{ width: 12 }} />
           <Button title="Cancelar" color="#777" onPress={onCancel} />
           <View style={{ width: 12 }} />

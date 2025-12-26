@@ -1,10 +1,12 @@
 // src/screens/AddProductStep2Screen.jsx
 import React, { useCallback, useRef, useState } from 'react';
-import { View, Alert, ActivityIndicator } from 'react-native';
+import { View, Alert, ActivityIndicator, TouchableOpacity, Text  } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import ProductFormStep2 from '../components/ProductFormStep2';
 import { useProductForm } from '../hooks/useProductForm';
 import productsService from '../services/productsService';
+import globalStyles from '../../../styles/globalStyles';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function AddProductStep2Screen() {
   const navigation = useNavigation();
@@ -113,6 +115,16 @@ export default function AddProductStep2Screen() {
 
   return (
     <View style={{ flex: 1 }}>
+		<View style={globalStyles.header}>
+			<TouchableOpacity onPress={() => {
+				//resetQuickSale();
+				navigation.goBack();
+			  }}>
+			  <Icon name="chevron-back" size={26} color="#fff" />
+			</TouchableOpacity>
+			<Text style={globalStyles.title}>Detalles del producto</Text>
+
+		</View>
       <ProductFormStep2 values={values} setField={setField} onBack={handleBack} onSubmit={handleSubmit} onCancel={handleCancel} />
     </View>
   );

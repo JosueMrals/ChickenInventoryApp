@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect } from "react";
-import { View, Text, TextInput, FlatList, TouchableOpacity, ActivityIndicator, SafeAreaView, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, TextInput, FlatList, TouchableOpacity, ActivityIndicator, SafeAreaView, KeyboardAvoidingView, Platform, StyleSheet } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import firestore from "@react-native-firebase/firestore";
 import styles from "./styles/assignCustomerStyles";
@@ -31,55 +31,111 @@ export default function AssignCustomerScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={styles.container}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#007AFF' }}>
+      <View style={{ flex: 1, backgroundColor: '#F6F8FB' }}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity onPress={() => navigation.goBack()}>
-              <Icon name="arrow-back" size={26} color="#333" />
+              <Icon name="chevron-back" size={28} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.title}>Seleccionar Cliente</Text>
-            <View style={{ width: 26 }} />
+            <View style={{ width: 28 }} />
           </View>
 
-          <View style={styles.searchBox}>
-            <Icon name="search" size={20} color="#999" style={{ marginRight: 8 }} />
-            <TextInput
-              style={styles.input}
-              placeholder="Buscar cliente..."
-              value={search}
-              onChangeText={setSearch}
-            />
+          {/* Search */}
+          <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
+            <View style={{
+                flexDirection: 'row',
+                backgroundColor: '#fff',
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                alignItems: 'center',
+                height: 48,
+                elevation: 4,
+                shadowColor: '#000',
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+                shadowOffset: { width: 0, height: 2 }
+            }}>
+                <Icon name="search" size={20} color="#999" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={{ flex: 1, fontSize: 16, color: '#333' }}
+                  placeholder="Buscar cliente..."
+                  placeholderTextColor="#999"
+                  value={search}
+                  onChangeText={setSearch}
+                />
+            </View>
           </View>
 
           {loading ? (
-            <ActivityIndicator size="large" style={{ marginTop: 20 }} />
+            <ActivityIndicator size="large" style={{ marginTop: 40 }} color="#007AFF" />
           ) : (
             <FlatList
               data={filtered}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={{ paddingBottom: 20 }}
+              contentContainerStyle={{ paddingBottom: 20, paddingTop: 4 }}
               keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <TouchableOpacity style={styles.item} onPress={() => selectCustomer(item)}>
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{item.firstName[0]}</Text>
+              ListEmptyComponent={
+                  <View style={styles.emptyBox}>
+                      <Icon name="people-outline" size={48} color="#ccc" />
+                      <Text style={[styles.emptyText, { marginTop: 10 }]}>No se encontraron clientes</Text>
                   </View>
-                  <View>
-                    <Text style={styles.name}>{item.firstName} {item.lastName}</Text>
-                    {item.discount > 0 && (
-                      <Text style={styles.discount}>Descuento: {item.discount}%</Text>
-                    )}
+              }
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                    style={styles.card}
+                    onPress={() => selectCustomer(item)}
+                    activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{
+                          width: 44,
+                          height: 44,
+                          borderRadius: 22,
+                          backgroundColor: '#E3F2FD',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginRight: 12
+                      }}>
+                          <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#007AFF' }}>
+                              {item.firstName ? item.firstName[0].toUpperCase() : '?'}
+                          </Text>
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.name}>{item.firstName} {item.lastName}</Text>
+                        {item.phone ? (
+                             <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                                <Icon name="call-outline" size={14} color="#666" style={{ marginRight: 4 }} />
+                                <Text style={{ color: '#666', fontSize: 13 }}>{item.phone}</Text>
+                             </View>
+                        ) : null}
+                      </View>
+
+                       {item.discount > 0 && (
+                          <View style={{
+                              backgroundColor: '#E8F5E9',
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              borderRadius: 6
+                          }}>
+                            <Text style={{ color: '#2E7D32', fontSize: 12, fontWeight: '700' }}>
+                                -{item.discount}%
+                            </Text>
+                          </View>
+                        )}
                   </View>
                 </TouchableOpacity>
               )}
             />
           )}
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
