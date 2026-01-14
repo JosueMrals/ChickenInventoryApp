@@ -7,39 +7,83 @@ export default StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 12,
     marginBottom: 10,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#EAECEE',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
+  // --- Estilos para Bonificaciones ---
+  bonusCard: {
+    backgroundColor: '#E6F7FF', // Un color de fondo suave para destacar
+    borderColor: '#91D5FF',
+  },
+  bonusTag: {
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    alignSelf: 'flex-start',
+    marginBottom: 6,
+  },
+  bonusTagText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  // --- Fin Estilos Bonificaciones ---
 
   left: {
     flex: 1,
+    justifyContent: 'center',
   },
 
   title: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#111",
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#2C3E50",
   },
 
   subtitle: {
-    fontSize: 16,
-    color: "#666",
+    fontSize: 14,
+    color: "#7F8C8D",
+    marginTop: 4,
+  },
+
+  discountText: {
+    fontSize: 13,
+    color: '#E74C3C',
+    fontStyle: 'italic',
     marginTop: 4,
   },
 
   totalText: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#007AFF",
-    marginTop: 6,
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#2980B9",
+    marginTop: 8,
   },
 
   actions: {
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 10,
+  },
+  
+  quantityDisplay: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#34495E',
+    minWidth: 30,
+    textAlign: 'center',
   },
 
   btn: {
-    padding: 5,
+    padding: 8,
+    borderRadius: 20,
+    marginHorizontal: 2,
   },
 });
-

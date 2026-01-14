@@ -9,6 +9,8 @@ const extractProductId = (it) => {
 };
 
 export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
+  console.log("Fetching sales summary from:", from, "to:", to); // LOG 1: Verificar rango de fechas
+
   try {
     let q = col("sales_operations").orderBy("createdAt");
     if (from) q = q.where("createdAt", ">=", toTs(from));
@@ -16,24 +18,71 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
 
     const snap = await q.get();
     if (snap.empty) {
+      console.log("No sales documents found for the selected date range."); // LOG 2: Verificar si se encontraron ventas
       return { totalIncome: 0, totalCost: 0, profit: 0, avgPerSale: 0, totalSalesCount: 0, topProducts: [], timeseries: [], salesByEmployee: [], bestClients: [] };
     }
+    
+    console.log(`Found ${snap.size} sales documents.`); // LOG 3: Confirmar número de ventas
 
-    let totalIncome = 0, totalCost = 0;
-    const productCount = {}, employeeTotals = {}, clientTotals = {};
+    let totalIncome = 0;
+    let totalCost = 0;
+    const productCount = {};
+    const employeeTotals = {};
+    const clientTotals = {};
+    const productIds = new Set();
 
     snap.forEach((doc) => {
       const sale = doc.data();
+      (sale.items || []).forEach((it) => {
+        const productId = extractProductId(it);
+        if (productId) {
+          productIds.add(productId);
+        }
+      });
+    });
+
+    console.log("Product IDs extracted from sales:", Array.from(productIds)); // LOG 4: Verificar IDs de productos
+
+    const productPrices = {};
+    if (productIds.size > 0) {
+      // Firestore 'in' query supports a maximum of 10 elements. If you have more, this will fail.
+      // For larger sets, you'd need to batch the requests. Let's assume < 10 for now.
+      const productDocs = await col("products").where(firestore.FieldPath.documentId(), 'in', Array.from(productIds)).get();
+      productDocs.forEach(doc => {
+        productPrices[doc.id] = doc.data().purchasePrice || 0;
+      });
+    }
+
+    console.log("Product prices fetched:", productPrices); // LOG 5: Verificar precios de compra obtenidos
+
+    snap.forEach((doc) => {
+      const sale = doc.data();
+      // LOG 6: Inspeccionar un documento de venta
+      if(doc.id === snap.docs[0].id) { // Solo loguear el primer documento para no saturar
+          console.log("Sample sale document:", sale);
+      }
+      
       const saleTotal = Number(sale.total ?? sale.subtotal ?? 0);
       totalIncome += saleTotal;
+
+      let saleCost = 0;
       (sale.items || []).forEach((it) => {
         const qty = Number(it.quantity ?? it.qty ?? 0);
         const productId = extractProductId(it);
-        if (productId && qty > 0) productCount[productId] = (productCount[productId] || 0) + qty;
+        if (productId && qty > 0) {
+          productCount[productId] = (productCount[productId] || 0) + qty;
+          const purchasePrice = productPrices[productId] || 0;
+          saleCost += purchasePrice * qty;
+          
+          if(doc.id === snap.docs[0].id) { // Loguear items de la primera venta
+             console.log(`Item: ${productId}, Qty: ${qty}, Purchase Price: ${purchasePrice}, Item Cost: ${purchasePrice * qty}`);
+          }
+        }
       });
-      if (sale.soldById) employeeTotals[sale.soldById] = (employeeTotals[sale.soldById] || 0) + saleTotal;
-      if (sale.customerId) clientTotals[sale.customerId] = (clientTotals[sale.customerId] || 0) + saleTotal;
+      totalCost += saleCost;
     });
+
+    console.log("Final calculations:", { totalIncome, totalCost, profit: totalIncome - totalCost }); // LOG 7: Verificar cálculos finales
 
     return {
       totalIncome,
@@ -46,7 +95,7 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
       bestClients: Object.entries(clientTotals).map(([customerId, total]) => ({ customerId, total })).sort((a, b) => b.total - a.total).slice(0, topN),
     };
   } catch (e) {
-    console.log("ERROR getSalesSummaryOptimized:", e);
+    console.error("CRITICAL ERROR in getSalesSummaryOptimized:", e); // LOG 8: Capturar cualquier error
     return null;
   }
 }

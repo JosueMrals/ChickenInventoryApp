@@ -17,6 +17,8 @@ export default function DashboardScreen({ user, role }) {
   const modules = [
     { key: 'products-new',label: 'Inventario', icon: 'cube-outline', color: '#007AFF', screen: 'ProductsStack', roles: ['admin', 'user'] },
     { key: 'quick-sale', label: 'Venta Rápida', icon: 'flash-outline', color: '#FF9500', screen: 'QuickSales', roles: ['admin', 'user'] },
+    { key: 'pre-sale', label: 'Pre-Venta', icon: 'cart-outline', color: '#4CAF50', screen: 'PreSales', roles: ['admin', 'user'] },
+    { key: 'pre-sale-list', label: 'Lista de Pre-Ventas', icon: 'list-outline', color: '#2196F3', screen: 'PreSalesList', roles: ['admin', 'user'] },
     { key: 'customers', label: 'Clientes', icon: 'person-sharp', color: '#FF9500', screen: 'Customer', roles: ['admin', 'user'] },
     { key: 'credits', label: 'Créditos', icon: 'card-outline', color: '#FF3B30', screen: 'Credits', roles: ['admin', 'user'] },
     { key: 'reports', label: 'Reportes', icon: 'bar-chart-outline', color: '#5856D6', screen: 'Reports', roles: ['admin', 'user'] },

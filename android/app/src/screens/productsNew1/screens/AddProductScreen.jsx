@@ -10,15 +10,18 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  Switch,
   Keyboard,
   Dimensions
 } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 import Icon from 'react-native-vector-icons/Ionicons';
 
 import globalStyles from '../../../styles/globalStyles';
 import productsService from '../services/productsService';
+import { createProductOperation } from '../../../services/operations/productOperations';
+
 
 export default function AddProductScreen() {
   const navigation = useNavigation();
@@ -38,6 +41,11 @@ export default function AddProductScreen() {
     salePrice: '',
     measureType: 'unit',
     wholesalePrices: [],
+    initialStock: '',
+    // --- Bonificaciones ---
+    bonusEnabled: false,
+    bonusThreshold: '', // Cantidad mínima para bonificar
+    bonusQuantity: '',  // Cantidad de producto a regalar
   });
 
   const initialRef = useRef(JSON.stringify(values));
@@ -149,15 +157,16 @@ export default function AddProductScreen() {
   // --- Validación y Guardado ---
   function validateValues() {
     if (!values.name || values.name.trim() === '') return { ok: false, msg: 'El nombre es obligatorio.' };
-
-    // Si ingresó costo, validarlo
     if (values.purchasePrice && (Number.isNaN(Number(values.purchasePrice)) || Number(values.purchasePrice) < 0))
         return { ok: false, msg: 'Costo de compra inválido.' };
-
-    // Si ingresó venta, validarla
     if (values.salePrice && (Number.isNaN(Number(values.salePrice)) || Number(values.salePrice) < 0))
         return { ok: false, msg: 'Precio de venta inválido.' };
-
+    if (values.initialStock && (Number.isNaN(Number(values.initialStock)) || Number(values.initialStock) < 0))
+        return { ok: false, msg: 'El stock inicial es inválido.' };
+    if (values.bonusEnabled) {
+      if (!values.bonusThreshold || Number(values.bonusThreshold) <= 0) return {ok: false, msg: "La 'cantidad mínima para bonificar' debe ser mayor a 0."};
+      if (!values.bonusQuantity || Number(values.bonusQuantity) <= 0) return {ok: false, msg: "La 'cantidad a bonificar' debe ser mayor a 0."};
+    }
     return { ok: true };
   }
 
@@ -168,9 +177,14 @@ export default function AddProductScreen() {
       return;
     }
 
+    const currentUser = auth().currentUser;
+    if (!currentUser?.email) {
+      Alert.alert('Error', 'No se pudo obtener la información del usuario para registrar la operación.');
+      return;
+    }
+
     setSaving(true);
     try {
-      // 1. Validar Duplicados
       const checkRes = await productsService.validateNoDuplicates({
           name: values.name,
           barcode: values.barcode || null
@@ -182,11 +196,12 @@ export default function AddProductScreen() {
         return;
       }
 
-      // 2. Preparar Payload
       const processedWholesale = values.wholesalePrices.map(wp => ({
         price: Number(wp.price),
         quantity: Number(wp.quantity)
       }));
+
+      const initialStock = Number(values.initialStock) || 0;
 
       const payload = {
         name: values.name,
@@ -198,16 +213,29 @@ export default function AddProductScreen() {
         salePrice: values.salePrice ? Number(values.salePrice) : 0,
         measureType: values.measureType,
         wholesalePrices: processedWholesale,
-        // stock inicializa en 0 en el servicio
+        stock: initialStock,
+        // --- Bonificaciones ---
+        bonusEnabled: values.bonusEnabled,
+        bonusThreshold: values.bonusEnabled ? Number(values.bonusThreshold) : 0,
+        bonusQuantity: values.bonusEnabled ? Number(values.bonusQuantity) : 0,
       };
 
-      // 3. Crear
-      await productsService.createProduct(payload);
+      const newProductId = await productsService.createProduct(payload);
+      
+      await createProductOperation({
+        productId: newProductId,
+        productName: values.name,
+        operationType: 'create',
+        userEmail: currentUser.email,
+        details: {
+          description: `Producto creado con stock inicial de ${initialStock}.`,
+          initialStock: initialStock,
+          ...payload
+        }
+      });
 
-      // Reset ref para evitar alerta de descarte
       initialRef.current = JSON.stringify(values);
 
-      // Feedback y Salida
       Alert.alert('Éxito', 'Producto creado correctamente.',[
         { text: 'OK', onPress: () => navigation.goBack() }
       ]);
@@ -216,7 +244,6 @@ export default function AddProductScreen() {
       console.error('Error creando producto:', err);
       Alert.alert('Error', 'No se pudo crear el producto.');
     } finally {
-        // Delay pequeño para asegurar que el estado se actualice antes de desmontar si es muy rápido
         setTimeout(() => {
              if (navigation.isFocused()) setSaving(false);
         }, 500);
@@ -231,10 +258,7 @@ export default function AddProductScreen() {
   useFocusEffect(
     useCallback(() => {
       const onBeforeRemove = (e) => {
-        // Si estamos guardando (o se completo guardado y updated initialRef), no prevenir
-        // El estado 'saving' puede ser false en el finally, pero initialRef ya está actualizado.
         if (!hasChanges() || saving) return;
-
         e.preventDefault();
         Alert.alert(
           'Descartar cambios?',
@@ -249,8 +273,7 @@ export default function AddProductScreen() {
       return () => navigation.removeListener('beforeRemove', onBeforeRemove);
     }, [navigation, hasChanges, saving])
   );
-
-  // Manejo de teclado (simplificado del EditScreen)
+  
   useEffect(() => {
     const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', (e) => {
         keyboardHeightRef.current = e.endCoordinates.height;
@@ -275,7 +298,6 @@ export default function AddProductScreen() {
 			  <Icon name="chevron-back" size={26} color="#fff" />
 			</TouchableOpacity>
 			<Text style={globalStyles.title}>Nuevo Producto</Text>
-            {/* Botón superior eliminado en favor del botón inferior */}
             <View style={{width: 26}} />
 		</View>
 
@@ -286,38 +308,16 @@ export default function AddProductScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-          {/* Section: Información Básica */}
           <View style={styles.section}>
               <Text style={styles.sectionTitle}>Información Básica</Text>
-
               <Text style={styles.label}>Nombre del producto *</Text>
-              <TextInput
-                ref={assignRef('name')}
-                style={styles.input}
-                value={values.name}
-                onChangeText={t => setField('name', t)}
-                placeholder="Ej. Pechuga de Pollo"
-                placeholderTextColor="#999"
-                onFocus={() => focusedField.current = 'name'}
-              />
-
+              <TextInput ref={assignRef('name')} style={styles.input} value={values.name} onChangeText={t => setField('name', t)} placeholder="Ej. Pechuga de Pollo" placeholderTextColor="#999" onFocus={() => focusedField.current = 'name'} />
               <View style={styles.rowInputs}>
                   <View style={{ flex: 1, marginRight: 8 }}>
                       <Text style={styles.label}>Código de barras</Text>
                       <View style={styles.inputWithIconContainer}>
-                          <TextInput
-                            ref={assignRef('barcode')}
-                            style={[styles.inputNoBorder, {flex: 1}]}
-                            value={values.barcode}
-                            onChangeText={t => setField('barcode', t)}
-                            placeholder="Escanea o escribe"
-                            placeholderTextColor="#999"
-                            onFocus={() => focusedField.current = 'barcode'}
-                          />
-                          <TouchableOpacity
-                            onPress={() => navigation.navigate('BarcodeScanner', { onScanned: (code) => setField('barcode', code) })}
-                            style={styles.iconButton}
-                          >
+                          <TextInput ref={assignRef('barcode')} style={[styles.inputNoBorder, {flex: 1}]} value={values.barcode} onChangeText={t => setField('barcode', t)} placeholder="Escanea o escribe" placeholderTextColor="#999" onFocus={() => focusedField.current = 'barcode'} />
+                          <TouchableOpacity onPress={() => navigation.navigate('BarcodeScanner', { onScanned: (code) => setField('barcode', code) })} style={styles.iconButton}>
                              <Icon name="scan" size={20} color="#666" />
                           </TouchableOpacity>
                       </View>
@@ -325,85 +325,75 @@ export default function AddProductScreen() {
                   <View style={{ flex: 1, marginLeft: 8 }}>
                       <Text style={styles.label}>Unidad</Text>
                       <View style={styles.toggleContainer}>
-                        <TouchableOpacity
-                            style={[styles.toggleBtn, values.measureType === 'unit' && styles.toggleBtnActive]}
-                            onPress={() => setField('measureType', 'unit')}
-                        >
+                        <TouchableOpacity style={[styles.toggleBtn, values.measureType === 'unit' && styles.toggleBtnActive]} onPress={() => setField('measureType', 'unit')}>
                             <Text style={[styles.toggleText, values.measureType === 'unit' && styles.toggleTextActive]}>Unid.</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.toggleBtn, values.measureType === 'weight' && styles.toggleBtnActive]}
-                            onPress={() => setField('measureType', 'weight')}
-                        >
+                        <TouchableOpacity style={[styles.toggleBtn, values.measureType === 'weight' && styles.toggleBtnActive]} onPress={() => setField('measureType', 'weight')}>
                             <Text style={[styles.toggleText, values.measureType === 'weight' && styles.toggleTextActive]}>Peso</Text>
                         </TouchableOpacity>
                       </View>
                   </View>
               </View>
-
+              <Text style={styles.label}>Stock Inicial</Text>
+              <TextInput ref={assignRef('initialStock')} style={styles.input} keyboardType="numeric" value={values.initialStock} onChangeText={t => setField('initialStock', t)} placeholder="Cantidad inicial (opcional)" placeholderTextColor="#999" onFocus={() => focusedField.current = 'initialStock'} />
               <Text style={styles.label}>Descripción</Text>
-              <TextInput
-                ref={assignRef('description')}
-                style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
-                multiline
-                value={values.description}
-                onChangeText={t => setField('description', t)}
-                placeholder="Opcional"
-                placeholderTextColor="#999"
-                onFocus={() => focusedField.current = 'description'}
-              />
+              <TextInput ref={assignRef('description')} style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={values.description} onChangeText={t => setField('description', t)} placeholder="Opcional" placeholderTextColor="#999" onFocus={() => focusedField.current = 'description'} />
           </View>
-
-          {/* Section: Precios */}
+          
           <View style={styles.section}>
              <Text style={styles.sectionTitle}>Precios y Costos</Text>
-
              <Text style={styles.label}>Costo de Compra ($)</Text>
-             <TextInput
-                ref={assignRef('purchasePrice')}
-                style={styles.input}
-                keyboardType="numeric"
-                value={values.purchasePrice}
-                onChangeText={t => handlePriceChange('purchasePrice', t)}
-                placeholder="0.00"
-                placeholderTextColor="#999"
-                onFocus={() => focusedField.current = 'purchasePrice'}
-             />
-
+             <TextInput ref={assignRef('purchasePrice')} style={styles.input} keyboardType="numeric" value={values.purchasePrice} onChangeText={t => handlePriceChange('purchasePrice', t)} placeholder="0.00" placeholderTextColor="#999" onFocus={() => focusedField.current = 'purchasePrice'} />
              <View style={styles.rowInputs}>
                  <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={styles.label}>Margen (%)</Text>
                     <View style={styles.percentInputContainer}>
-                        <TextInput
-                        ref={assignRef('profitMargin')}
-                        style={styles.percentInput}
-                        keyboardType="numeric"
-                        value={values.profitMargin}
-                        onChangeText={t => handlePriceChange('profitMargin', t)}
-                        placeholder="0"
-                        placeholderTextColor="#999"
-                        onFocus={() => focusedField.current = 'profitMargin'}
-                        />
+                        <TextInput ref={assignRef('profitMargin')} style={styles.percentInput} keyboardType="numeric" value={values.profitMargin} onChangeText={t => handlePriceChange('profitMargin', t)} placeholder="0" placeholderTextColor="#999" onFocus={() => focusedField.current = 'profitMargin'} />
                         <Text style={styles.percentSymbol}>%</Text>
                     </View>
                  </View>
                  <View style={{ flex: 1, marginLeft: 8 }}>
                     <Text style={styles.label}>Precio Venta ($)</Text>
-                    <TextInput
-                        ref={assignRef('salePrice')}
-                        style={[styles.input, { fontWeight: 'bold', color: '#007AFF' }]}
-                        keyboardType="numeric"
-                        value={values.salePrice}
-                        onChangeText={t => handlePriceChange('salePrice', t)}
-                        placeholder="0.00"
-                        placeholderTextColor="#999"
-                        onFocus={() => focusedField.current = 'salePrice'}
-                    />
+                    <TextInput ref={assignRef('salePrice')} style={[styles.input, { fontWeight: 'bold', color: '#007AFF' }]} keyboardType="numeric" value={values.salePrice} onChangeText={t => handlePriceChange('salePrice', t)} placeholder="0.00" placeholderTextColor="#999" onFocus={() => focusedField.current = 'salePrice'} />
                  </View>
              </View>
           </View>
 
-          {/* Section: Mayorista */}
+          {/* SECTION: BONIFICACIONES */}
+          <View style={styles.section}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+                <Text style={styles.sectionTitle}>Bonificaciones</Text>
+                <Switch
+                  trackColor={{ false: "#767577", true: "#81b0ff" }}
+                  thumbColor={values.bonusEnabled ? "#007AFF" : "#f4f3f4"}
+                  onValueChange={() => setField('bonusEnabled', !values.bonusEnabled)}
+                  value={values.bonusEnabled}
+                />
+              </View>
+              {values.bonusEnabled && (
+                <View style={{marginTop: 16}}>
+                    <Text style={styles.label}>Por cada...</Text>
+                    <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        value={values.bonusThreshold}
+                        onChangeText={t => setField('bonusThreshold', t.replace(/[^0-9]/g, ''))}
+                        placeholder="Ej. 10 unidades vendidas"
+                        placeholderTextColor="#999"
+                    />
+                    <Text style={styles.label}>...regalar</Text>
+                    <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        value={values.bonusQuantity}
+                        onChangeText={t => setField('bonusQuantity', t.replace(/[^0-9]/g, ''))}
+                        placeholder="Ej. 1 unidad"
+                        placeholderTextColor="#999"
+                    />
+                </View>
+              )}
+          </View>
+
           <View style={styles.section}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <Text style={styles.sectionTitle}>Precios Mayorista</Text>
@@ -414,75 +404,35 @@ export default function AddProductScreen() {
                     </TouchableOpacity>
                 )}
             </View>
-
             {values.wholesalePrices.map((wp, index) => (
               <View key={index} style={styles.wholesaleRow}>
                 <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
                     <View style={{ flex: 1, marginRight: 8 }}>
                         <Text style={styles.subLabel}>Cant. Mín.</Text>
-                        <TextInput
-                            style={styles.inputSmall}
-                            keyboardType="numeric"
-                            placeholder="10"
-                            placeholderTextColor="#999"
-                            value={String(wp.quantity)}
-                            onChangeText={t => updateWholesalePrice(index, 'quantity', t)}
-                        />
+                        <TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="10" placeholderTextColor="#999" value={String(wp.quantity)} onChangeText={t => updateWholesalePrice(index, 'quantity', t)} />
                     </View>
-
                     <View style={{ flex: 1, marginRight: 8 }}>
                         <Text style={styles.subLabel}>Margen %</Text>
-                        <TextInput
-                            style={styles.inputSmall}
-                            keyboardType="numeric"
-                            placeholder="%"
-                            placeholderTextColor="#999"
-                            value={String(wp.margin)}
-                            onChangeText={t => updateWholesalePrice(index, 'margin', t)}
-                        />
+                        <TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="%" placeholderTextColor="#999" value={String(wp.margin)} onChangeText={t => updateWholesalePrice(index, 'margin', t)} />
                     </View>
-
                     <View style={{ flex: 1, marginRight: 4 }}>
                         <Text style={styles.subLabel}>Precio $</Text>
-                        <TextInput
-                            style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]}
-                            keyboardType="numeric"
-                            placeholder="$"
-                            placeholderTextColor="#999"
-                            value={String(wp.price)}
-                            onChangeText={t => updateWholesalePrice(index, 'price', t)}
-                        />
+                        <TextInput style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]} keyboardType="numeric" placeholder="$" placeholderTextColor="#999" value={String(wp.price)} onChangeText={t => updateWholesalePrice(index, 'price', t)} />
                     </View>
-
                     <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}>
                         <Icon name="trash-outline" size={20} color="#FF3B30" />
                     </TouchableOpacity>
                 </View>
               </View>
             ))}
-
-            {values.wholesalePrices.length === 0 && (
-                <Text style={styles.emptyText}>Sin precios por volumen.</Text>
-            )}
+            {values.wholesalePrices.length === 0 && (<Text style={styles.emptyText}>Sin precios por volumen.</Text>)}
           </View>
 
       </ScrollView>
 
-      {/* Floating Save Button */}
       <View style={styles.bottomContainer}>
-          <TouchableOpacity
-            style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-            onPress={handleSave}
-            disabled={saving}
-          >
-              {saving ? (
-                  <ActivityIndicator color="#fff" />
-              ) : (
-                  <>
-                    <Icon name="save-outline" size={22} color="#fff" style={{marginRight: 8}} />
-                    <Text style={styles.saveBtnText}>Guardar Producto</Text>
-                  </>
-              )}
+          <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={handleSave} disabled={saving}>
+              {saving ? (<ActivityIndicator color="#fff" />) : (<><Icon name="save-outline" size={22} color="#fff" style={{marginRight: 8}} /><Text style={styles.saveBtnText}>Guardar Producto</Text></>)}
           </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -490,124 +440,31 @@ export default function AddProductScreen() {
 }
 
 const styles = StyleSheet.create({
-  section: {
-      backgroundColor: '#fff',
-      borderRadius: 16,
-      padding: 16,
-      marginBottom: 16,
-      elevation: 1,
-      shadowColor: '#000',
-      shadowOpacity: 0.05,
-      shadowRadius: 5,
-      shadowOffset: { width: 0, height: 2 }
-  },
+  section: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
   sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 16 },
   label: { fontSize: 13, color: '#666', marginBottom: 6, fontWeight: '600', textTransform: 'uppercase' },
   subLabel: { fontSize: 11, color: '#888', marginBottom: 4, fontWeight: '600' },
-
-  input: {
-    backgroundColor: '#F5F6FA',
-    padding: 12,
-    borderRadius: 10,
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#F0F0F0'
-  },
-  inputWithIconContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: '#F5F6FA',
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: '#F0F0F0',
-      marginBottom: 16,
-      paddingRight: 8
-  },
-  inputNoBorder: {
-      padding: 12,
-      fontSize: 16,
-      color: '#333'
-  },
+  input: { backgroundColor: '#F5F6FA', padding: 12, borderRadius: 10, fontSize: 16, color: '#333', marginBottom: 16, borderWidth: 1, borderColor: '#F0F0F0' },
+  inputWithIconContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F6FA', borderRadius: 10, borderWidth: 1, borderColor: '#F0F0F0', marginBottom: 16, paddingRight: 8 },
+  inputNoBorder: { padding: 12, fontSize: 16, color: '#333' },
   iconButton: { padding: 8 },
-
-  inputSmall: {
-    backgroundColor: '#F5F6FA',
-    padding: 10,
-    borderRadius: 8,
-    fontSize: 14,
-    color: '#333',
-    borderWidth: 1,
-    borderColor: '#eee'
-  },
-  rowInputs: { flexDirection: 'row', marginBottom: 16 },
-
-  percentInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F6FA',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-    paddingRight: 12,
-    marginBottom: 16
-  },
+  inputSmall: { backgroundColor: '#F5F6FA', padding: 10, borderRadius: 8, fontSize: 14, color: '#333', borderWidth: 1, borderColor: '#eee' },
+  rowInputs: { flexDirection: 'row', marginBottom: 0 },
+  percentInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F6FA', borderRadius: 10, borderWidth: 1, borderColor: '#F0F0F0', paddingRight: 12, marginBottom: 16 },
   percentInput: { flex: 1, padding: 12, fontSize: 16, color: '#333' },
   percentSymbol: { fontSize: 16, color: '#999', fontWeight: 'bold' },
-
-  toggleContainer: {
-      flexDirection: 'row',
-      backgroundColor: '#F0F0F0',
-      borderRadius: 10,
-      padding: 3,
-      marginBottom: 16,
-      height: 48
-  },
+  toggleContainer: { flexDirection: 'row', backgroundColor: '#F0F0F0', borderRadius: 10, padding: 3, marginBottom: 16, height: 48 },
   toggleBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: 8 },
   toggleBtnActive: { backgroundColor: '#fff', elevation: 2 },
   toggleText: { fontSize: 13, color: '#888', fontWeight: '600' },
   toggleTextActive: { color: '#007AFF', fontWeight: '700' },
-
-  addBtn: {
-      flexDirection: 'row', alignItems: 'center', backgroundColor: '#007AFF',
-      paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20
-  },
+  addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#007AFF', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
   addBtnText: { color: '#fff', fontSize: 12, fontWeight: '700', marginLeft: 4 },
-  wholesaleRow: {
-      marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0'
-  },
+  wholesaleRow: { marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   deleteButton: { padding: 8, marginTop: 18 },
   emptyText: { fontSize: 13, color: '#999', fontStyle: 'italic', textAlign: 'center', marginTop: 10 },
-
-  // New Button Styles
-  bottomContainer: {
-      padding: 16,
-      backgroundColor: '#fff',
-      borderTopWidth: 1,
-      borderTopColor: '#eee',
-      paddingBottom: Platform.OS === 'ios' ? 30 : 16 // Extra padding for iPhone X+
-  },
-  saveBtn: {
-      backgroundColor: '#007AFF',
-      borderRadius: 14,
-      paddingVertical: 16,
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      elevation: 4,
-      shadowColor: '#007AFF',
-      shadowOpacity: 0.3,
-      shadowRadius: 5,
-      shadowOffset: { width: 0, height: 3 }
-  },
-  saveBtnDisabled: {
-      backgroundColor: '#A0A0A0',
-      elevation: 0
-  },
-  saveBtnText: {
-      color: '#fff',
-      fontSize: 18,
-      fontWeight: 'bold'
-  }
+  bottomContainer: { padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee', paddingBottom: Platform.OS === 'ios' ? 30 : 16 },
+  saveBtn: { backgroundColor: '#007AFF', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 4, shadowColor: '#007AFF', shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 3 } },
+  saveBtnDisabled: { backgroundColor: '#A0A0A0', elevation: 0 },
+  saveBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' }
 });

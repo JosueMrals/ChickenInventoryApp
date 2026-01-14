@@ -14,10 +14,12 @@ export async function createProduct(payload) {
     ...payload,
     // helpful derived fields:
     name_lower: payload.name ? payload.name.toString().toLowerCase() : '',
-    stock: 0,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
+  if (typeof data.stock === 'undefined') {
+    data.stock = 0;
+  }
   await docRef.set(data);
   return docRef.id;
 }

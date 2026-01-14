@@ -11,6 +11,9 @@ export default StyleSheet.create({
     borderBottomLeftRadius: 14,
     borderBottomRightRadius: 14,
     marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     },
   headerTitle: {
       color: '#fff',
@@ -19,6 +22,12 @@ export default StyleSheet.create({
       marginTop: 25,
     },
   headerSubtitle: { fontSize: 16, color: '#fff' },
+  headerContent: {
+    flex: 1,
+  },
+  logoutButton: {
+    padding: 8,
+  },
 
   statsContainer: {
     flexDirection: 'row',

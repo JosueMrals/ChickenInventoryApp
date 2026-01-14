@@ -8,10 +8,9 @@ import CreateAddButton from '../../../components/CreateAddButton';
 import globalStyles from '../../../styles/globalStyles';
 
 export default function ProductsListScreen({ navigation, route }) {
-  const { products, loading, setQuery, clearQuery, query, refresh } = useProducts(); // Added refresh
+  const { products, loading, setQuery, clearQuery, query, refresh } = useProducts();
   const { role } = route.params ?? {};
 
-  // Estado para el modal de visualización
   const [selectedProduct, setSelectedProduct] = useState(null);
 
   const openProductDetail = (prod) => {
@@ -27,18 +26,17 @@ export default function ProductsListScreen({ navigation, route }) {
   };
 
   const handleRefresh = () => {
-      clearQuery(); // Limpia la búsqueda antes de refrescar
-      refresh(); // Refresca los datos base
+      clearQuery();
+      refresh();
   };
 
-  // Renderizado condicional según el rol
   const renderProductItem = ({ item }) => {
     if (role === 'admin') {
       return (
         <ProductCard
           product={item}
           onPress={() => openProductDetail(item)}
-          onEdit={() => navigation.navigate('EditProduct', { productId: item.id })}
+          onEdit={() => navigation.navigate('EditProduct', { product: item })} // FIX: Pass the whole product object
           onAddStock={() => navigation.navigate('AddStock', { productId: item.id })}
           hideActions={false}
         />
@@ -54,25 +52,19 @@ export default function ProductsListScreen({ navigation, route }) {
     }
   };
 
-  // Componente para cuando no hay resultados
   const renderEmptyState = () => {
       if (loading) {
           return <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 40 }} />;
       }
-
       if (query) {
           return (
               <View style={styles.emptyContainer}>
                   <Icon name="search-outline" size={60} color="#ccc" />
                   <Text style={styles.emptyText}>No se encontró: "{query}"</Text>
-
                   {role === 'admin' ? (
                       <TouchableOpacity
                         style={styles.createBtn}
-                        onPress={() => {
-                            // Navegar a crear producto pasando el código escaneado/buscado
-                            navigation.navigate('AddProduct', { scannedCode: query });
-                        }}
+                        onPress={() => navigation.navigate('AddProduct', { scannedCode: query })}
                       >
                           <Icon name="add-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
                           <Text style={styles.createBtnText}>Crear producto con este código</Text>
@@ -80,14 +72,12 @@ export default function ProductsListScreen({ navigation, route }) {
                   ) : (
                       <Text style={styles.emptySubText}>Intenta con otro término de búsqueda.</Text>
                   )}
-
                   <TouchableOpacity style={styles.clearBtn} onPress={clearQuery}>
                       <Text style={styles.clearBtnText}>Volver a la lista completa</Text>
                   </TouchableOpacity>
               </View>
           );
       }
-
       return (
           <View style={styles.emptyContainer}>
               <Icon name="cube-outline" size={60} color="#eee" />
@@ -113,12 +103,11 @@ export default function ProductsListScreen({ navigation, route }) {
               <SearchBar
                 value={query}
                 onChangeText={setQuery}
-                onClear={clearQuery} // Se pasa onClear para que el componente SearchBar muestre su propia X si lo implementa
+                onClear={clearQuery}
                 placeholder="Buscar por nombre o código"
                 placeholderTextColor="#999"
               />
           </View>
-          {/* Eliminado el botón externo de 'close-circle' para evitar redundancia con el SearchBar interno */}
           <TouchableOpacity
             onPress={() => navigation.navigate('BarcodeScanner', { onScanned: handleScan })}
             style={styles.scanBtn}
@@ -133,17 +122,16 @@ export default function ProductsListScreen({ navigation, route }) {
         renderItem={renderProductItem}
         contentContainerStyle={{ paddingBottom: 80, paddingTop: 10, flexGrow: 1 }}
         ListEmptyComponent={renderEmptyState}
-        refreshing={loading} // Pull to refresh
-        onRefresh={handleRefresh} // Usamos el nuevo handler que limpia primero
+        refreshing={loading}
+        onRefresh={handleRefresh}
       />
 
       <CreateAddButton
-        screenName="AddProduct" // Actualizado a la nueva ruta
+        screenName="AddProduct"
         visibleFor={['admin']}
         userType={role}
       />
 
-      {/* MODAL DETALLE FLOTANTE */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -227,7 +215,7 @@ export default function ProductsListScreen({ navigation, route }) {
                             style={styles.editModalBtn}
                             onPress={() => {
                                 closeProductDetail();
-                                navigation.navigate('EditProduct', { productId: selectedProduct.id });
+                                navigation.navigate('EditProduct', { product: selectedProduct }); // FIX: Pass the whole product object
                             }}
                         >
                             <Text style={styles.editModalBtnText}>Editar Producto</Text>

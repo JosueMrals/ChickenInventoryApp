@@ -43,7 +43,6 @@ export default function ReportsScreen() {
 
   const {
     summary,
-    financial,
     operations,
     loading,
     loadingMore,
@@ -89,13 +88,13 @@ export default function ReportsScreen() {
 
     switch (id) {
       case "dashboard":
-        return <DashboardPanel summary={summary} financial={financial} loading={loading} />;
+        return <DashboardPanel data={summary} loading={loading} />;
       case "product-operations":
         return <ProductOperationsPanel operations={operations} loading={loading} />;
       case "sales":
         return <SalesPanel data={combinedSalesData} loading={loading || loadingMore} loadMore={loadMoreOperations} hasMore={hasMore} />;
       case "financial":
-        return <FinancialPanelPRO data={financial} loading={loading} />;
+        return <FinancialPanelPRO data={summary} loading={loading} />;
       case "products":
         return <ProductsPanelPRO data={summary?.topProducts} loading={loading} />;
       case "employees":

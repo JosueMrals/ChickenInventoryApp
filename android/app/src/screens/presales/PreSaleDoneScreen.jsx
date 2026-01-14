@@ -2,14 +2,12 @@ import React, { useEffect, useState, useContext } from "react";
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import firestore from "@react-native-firebase/firestore";
-import styles from "./styles/doneReceiptStyles";
-import SaleReceipt from "../../screens/sales/components/SaleReceipt";
+import SaleReceipt from "../../screens/sales/components/SaleReceipt"; // Reusing the receipt component
+import styles from "../quicksalesNew/styles/doneReceiptStyles"; // Reusing styles
+import { PreSaleContext } from "./context/preSaleContext";
 
-import { QuickSaleContext } from "./context/quickSaleContext";
-
-export default function QuickSaleDoneScreen({ navigation, route }) {
-
-  const { resetQuickSale } = useContext(QuickSaleContext);
+export default function PreSaleDoneScreen({ navigation, route }) {
+  const { loadPreSales } = useContext(PreSaleContext);
   const { saleId } = route.params;
 
   const [sale, setSale] = useState(null);
@@ -20,17 +18,14 @@ export default function QuickSaleDoneScreen({ navigation, route }) {
     if (!saleId) return;
 
     // 1. Fetch the main sale document
-    const unsubSale = firestore()
-      .collection("sales")
-      .doc(saleId)
-      .onSnapshot((snap) => {
-        if (snap.exists) {
-          setSale({ id: snap.id, ...snap.data() });
-        }
-        setLoading(false);
-      });
+    const unsubSale = firestore().collection("sales").doc(saleId).onSnapshot((snap) => {
+      if (snap.exists) {
+        setSale({ id: snap.id, ...snap.data() });
+      }
+      setLoading(false);
+    });
 
-    // 2. Fetch associated bonus items
+    // 2. Fetch associated bonus items using the saleId
     const unsubBonuses = firestore()
       .collection("inventoryMovements")
       .where("relatedSaleId", "==", saleId)
@@ -40,26 +35,17 @@ export default function QuickSaleDoneScreen({ navigation, route }) {
         setBonuses(bonusItems);
       });
 
-    // Cleanup subscriptions on unmount
     return () => {
       unsubSale();
       unsubBonuses();
     };
   }, [saleId]);
 
-  if (loading) {
+  if (loading || !sale) {
     return (
       <View style={localStyles.loadingBox}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={localStyles.loadingText}>Cargando recibo...</Text>
-      </View>
-    );
-  }
-
-  if (!sale) {
-    return (
-      <View style={localStyles.loadingBox}>
-        <Text style={localStyles.loadingText}>No se encontró la venta.</Text>
+        <Text style={localStyles.loadingText}>Cargando Recibo...</Text>
       </View>
     );
   }
@@ -67,10 +53,10 @@ export default function QuickSaleDoneScreen({ navigation, route }) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Venta Completada</Text>
+        <Text style={styles.headerTitle}>Pre-Venta Pagada</Text>
       </View>
 
-      {/* Pass both sale and bonuses to the receipt component */}
+      {/* --- FIX: Pass both sale and bonuses to the receipt component --- */}
       <SaleReceipt sale={sale} bonuses={bonuses} />
 
       <TouchableOpacity style={styles.shareButton}>
@@ -81,20 +67,19 @@ export default function QuickSaleDoneScreen({ navigation, route }) {
       <TouchableOpacity
         style={styles.newSaleButton}
         onPress={() => {
-          resetQuickSale();
+          loadPreSales();
           navigation.reset({
             index: 0,
-            routes: [{ name: "QuickSaleProducts" }],
+            routes: [{ name: "PreSalesList" }],
           });
         }}
       >
-        <Text style={styles.newSaleText}>Nueva Venta</Text>
+        <Text style={styles.newSaleText}>Volver a Pre-Ventas</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-// Local styles for loading/error states to avoid breaking doneReceiptStyles
 const localStyles = StyleSheet.create({
   loadingBox: {
     flex: 1,

@@ -18,14 +18,20 @@ import ProductListScreen from './android/app/src/screens/products/ProductListScr
 import DashboardScreen from './android/app/src/screens/dashboard/DashboardScreen';
 
 import QuickSaleStack from './android/app/src/navigation/QuickSaleStack';
+import PreSaleStack from './android/app/src/navigation/PreSaleStack';
+import PreSaleListScreen from './android/app/src/screens/presales/PreSaleListScreen';
+import PreSaleDetailScreen from './android/app/src/screens/presales/PreSaleDetailScreen';
+import PreSalePaymentScreen from './android/app/src/screens/presales/PreSalePaymentScreen';
+import PreSaleDoneScreen from './android/app/src/screens/presales/PreSaleDoneScreen';
+
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
 import ProductsStack from './android/app/src/navigation/ProductsStack';
 import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen';
 
 import useSessionTimeout from "./android/app/src/hooks/useSessionTimeout";
 import { SessionManager } from './android/app/src/utils/SessionManager';
+import { PreSaleProvider } from './android/app/src/screens/presales/context/preSaleContext';
 
-// Creamos la referencia de navegación globalmente para usarla fuera de componentes si es necesario
 export const navigationRef = createNavigationContainerRef();
 
 const Stack = createNativeStackNavigator();
@@ -73,6 +79,40 @@ function AppDrawer({ route }) {
           swipeEnabled: false,
         }}
       />
+      <Drawer.Screen
+        name="PreSales"
+        component={PreSaleStack}
+        options={{
+          drawerLabel: "Preventa",
+          headerShown: false,
+          swipeEnabled: false,
+        }}
+      />
+      <Drawer.Screen
+        name="PreSalesList"
+        component={PreSaleListScreen}
+        options={{
+          drawerLabel: "Lista de Preventas",
+        }}
+      />
+      <Drawer.Screen
+		  name="PreSaleDetail"
+          component={PreSaleDetailScreen}
+		  options={{
+			drawerLabel: "Lista de Preventas",
+		  }}
+		/>
+
+	  <Drawer.Screen
+	  	name="PreSalePayment"
+	  	component={PreSalePaymentScreen}
+	  />
+
+	  <Drawer.Screen
+	  	name="PreSaleDone"
+	  	component={PreSaleDoneScreen}
+	  />
+
       <Drawer.Screen name="Settings"
       component={PrintersScreen}
       options={{
@@ -87,12 +127,12 @@ function AppDrawer({ route }) {
           headerShown: false,
           swipeEnabled: false,
         }}/>
-    <Drawer.Screen name="ProductsStack"
+	  <Drawer.Screen name="ProductsStack"
         component={ProductsStack}
         options={{ headerShown: false
             }}
         initialParams={{ role, user }}
-		/>
+	  />
 
     </Drawer.Navigator>
   );
@@ -123,6 +163,7 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <PreSaleProvider>
         <NavigationContainer ref={navigationRef}>
           <TouchableWithoutFeedback onPress={() => SessionManager.updateActivity()}>
             <View style={{ flex: 1 }}>
@@ -133,6 +174,7 @@ export default function App() {
             </View>
           </TouchableWithoutFeedback>
         </NavigationContainer>
+      </PreSaleProvider>
     </GestureHandlerRootView>
   );
 }
