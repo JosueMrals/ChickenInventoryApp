@@ -1,23 +1,26 @@
 import React, { useContext, useMemo, useState } from "react";
-import { View, Text, TouchableOpacity, FlatList, Alert, SafeAreaView, ActivityIndicator } from "react-native";
+import { View, Text, TouchableOpacity, FlatList, Alert, SafeAreaView, ActivityIndicator, StyleSheet } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { PreSaleContext } from "./context/preSaleContext";
 import CartItem from "../quicksalesNew/components/CartItem";
 import DiscountModal from "../../components/common/DiscountModal";
 import styles from "../quicksalesNew/styles/quickCartStyles";
 import globalStyles from "../../styles/globalStyles";
+import AddProductModal from "./components/AddProductModal";
 
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 
-export default function PreSaleCartScreen({ navigation }) {
+export default function PreSaleEditCartScreen({ navigation }) {
   const { 
-    cart, updateCart, removeFromCart, customer, setCustomer, 
-    submitPreSale, resetPreSale, loading
+    customer, setCustomer, 
+    submitPreSale, resetPreSale, loading,
+    editCart, updateEditCart, removeFromEditCart, addItemToEditCart
   } = useContext(PreSaleContext);
   
   const [discountModal, setDiscountModal] = useState({ visible: false, product: null });
+  const [addProductModalVisible, setAddProductModalVisible] = useState(false);
 
-  const soldItems = useMemo(() => cart.filter(item => !item.isBonus), [cart]);
+  const soldItems = useMemo(() => editCart.filter(item => !item.isBonus), [editCart]);
 
   const subtotal = useMemo(() => 
     soldItems.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0), 0), 
@@ -30,7 +33,7 @@ export default function PreSaleCartScreen({ navigation }) {
   const total = subtotal - totalDiscount;
 
   const handleSubmit = async () => {
-    if (cart.length === 0) return Alert.alert("Carrito vacío", "Agrega productos antes de continuar.");
+    if (editCart.length === 0) return Alert.alert("Carrito vacío", "Agrega productos antes de continuar.");
     if (!customer) {
       return Alert.alert("Cliente no asignado", "Por favor, asigna un cliente a esta pre-venta.", [
         { text: "Cancelar", style: "cancel" },
@@ -40,10 +43,10 @@ export default function PreSaleCartScreen({ navigation }) {
     
     try {
       await submitPreSale();
-      Alert.alert("Pre-Venta Guardada", "La pre-venta ha sido creada exitosamente.", [
+      Alert.alert("Pre-Venta Actualizada", "Los cambios han sido guardados.", [
         { text: "OK", onPress: () => {
             resetPreSale();
-            navigation.navigate("PreSalesList") 
+            navigation.navigate("PreSalesList");
         }}
       ]);
     } catch (error) {
@@ -59,38 +62,35 @@ export default function PreSaleCartScreen({ navigation }) {
   const applyDiscountToProduct = ({ discountType, discountValue }) => {
     const product = discountModal.product;
     if (!product) return;
-
     let finalDiscount = 0;
     const productTotal = product.quantity * product.unitPrice;
 
-    if (discountType === 'percent') {
-      finalDiscount = (productTotal * discountValue) / 100;
-    } else if (discountType === 'amount') {
-      finalDiscount = discountValue;
-    }
+    if (discountType === 'percent') finalDiscount = (productTotal * discountValue) / 100;
+    else if (discountType === 'amount') finalDiscount = discountValue;
+    if (finalDiscount > productTotal) finalDiscount = productTotal;
 
-    if (finalDiscount > productTotal) {
-      finalDiscount = productTotal;
-    }
-
-    updateCart(product.id, {
-      discount: finalDiscount,
-      discountType,
-      discountValue,
-    });
-    
+    updateEditCart(product.id, { discount: finalDiscount, discountType, discountValue });
     setDiscountModal({ visible: false, product: null });
   };
 
+  const handleToggleProduct = (product) => {
+      const isInCart = editCart.some(item => item.id === product.id);
+      if (isInCart) {
+          removeFromEditCart(product.id);
+      } else {
+          addItemToEditCart(product, 1);
+      }
+  };
+  
   return (
     <SafeAreaView style={globalStyles.container}>
-        <View style={styles.container}>
-          <View style={styles.headerRow}>
+        <View style={globalStyles.container}>
+          <View style={globalStyles.header}>
             <TouchableOpacity onPress={() => navigation.goBack()}>
-              <Icon name="chevron-back" size={26} color="#333" />
+              <Icon name="chevron-back" size={26} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Carrito de Pre-Venta</Text>
-            <View style={{ width: 40 }} />
+            <Text style={globalStyles.title}>Editando Pre-Venta</Text>
+            <View style={{ width: 40 }}/>
           </View>
 
           {customer && (
@@ -104,14 +104,14 @@ export default function PreSaleCartScreen({ navigation }) {
           )}
 
           <FlatList
-            data={cart}
+            data={editCart}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
               <CartItem
                 item={item}
                 onDiscount={() => openDiscount(item)}
-                onRemove={() => removeFromCart(item.id)}
-                onUpdate={(changes) => updateCart(item.id, changes)}
+                onRemove={() => removeFromEditCart(item.id)}
+                onUpdate={(changes) => updateEditCart(item.id, changes)}
               />
             )}
             ListEmptyComponent={() => (
@@ -125,13 +125,14 @@ export default function PreSaleCartScreen({ navigation }) {
             <View style={styles.row}><Text style={styles.label}>Descuentos</Text><Text style={styles.value}>-{formatCurrency(totalDiscount)}</Text></View>
             <View style={styles.rowTotal}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>{formatCurrency(total)}</Text></View>
             
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => { resetPreSale(); navigation.goBack(); }}>
-              <Text style={styles.cancelText}>Cancelar</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.checkoutBtn, loading && styles.disabledButton]} onPress={handleSubmit} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.checkoutText}>Guardar Pre-Venta</Text>}
-            </TouchableOpacity>
+            <View style={localStyles.footerButtons}>
+              <TouchableOpacity style={[styles.checkoutBtn, {flex: 1, marginRight: 5, backgroundColor: '#007AFF'}]} onPress={() => setAddProductModalVisible(true)}>
+                  <Text style={styles.checkoutText}>Agregar Producto</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.checkoutBtn, {flex: 1, marginLeft: 5}, loading && styles.disabledButton]} onPress={handleSubmit} disabled={loading}>
+                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.checkoutText}>Guardar Cambios</Text>}
+              </TouchableOpacity>
+            </View>
           </View>
 
           <DiscountModal
@@ -140,7 +141,18 @@ export default function PreSaleCartScreen({ navigation }) {
             onClose={() => setDiscountModal({ visible: false, product: null })}
             onApply={applyDiscountToProduct}
           />
+
+          <AddProductModal 
+            visible={addProductModalVisible}
+            onClose={() => setAddProductModalVisible(false)}
+            onAddProduct={handleToggleProduct}
+            cart={editCart}
+          />
         </View>
     </SafeAreaView>
   );
 }
+
+const localStyles = StyleSheet.create({
+    footerButtons: { flexDirection: 'row', marginTop: 10 }
+});

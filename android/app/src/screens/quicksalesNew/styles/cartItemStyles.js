@@ -77,8 +77,21 @@ export default StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#34495E',
-    minWidth: 30,
+    minWidth: 40,
     textAlign: 'center',
+    paddingVertical: 5,
+  },
+
+  quantityInput: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#34495E',
+    minWidth: 40,
+    textAlign: 'center',
+    borderBottomWidth: 2,
+    borderColor: '#007AFF',
+    paddingVertical: 5,
+    marginHorizontal: 5,
   },
 
   btn: {

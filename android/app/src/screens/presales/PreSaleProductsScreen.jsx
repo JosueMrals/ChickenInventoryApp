@@ -1,20 +1,28 @@
 import React, { useContext, useState, useEffect, useMemo } from "react";
-import { View, Text, FlatList, TouchableOpacity, TextInput, SafeAreaView, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator, StyleSheet } from "react-native";
 import { PreSaleContext } from "./context/preSaleContext";
 import Icon from "react-native-vector-icons/Ionicons";
 import firestore from "@react-native-firebase/firestore";
 import { calcPriceForProduct } from "../../screens/sales/hooks/useSalePricing"; // Import pricing logic
 import styles from "../quicksalesNew/styles/quickProductsStyles";
+import SearchBar from '../../components/SearchBar';
 
 // Helper to safely format currency
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 
 export default function PreSaleProductsScreen({ navigation }) {
-  const { cart, addItem, customer, setCustomer } = useContext(PreSaleContext);
+  const { 
+    cart, addItem, customer, setCustomer, resetPreSale,
+    editingPreSale, editCart, addItemToEditCart 
+  } = useContext(PreSaleContext);
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+
+  const isEditing = !!editingPreSale;
+  const cartToDisplay = isEditing ? editCart : cart;
+  const addItemFn = isEditing ? addItemToEditCart : addItem;
 
   useEffect(() => {
     const unsub = firestore()
@@ -29,8 +37,14 @@ export default function PreSaleProductsScreen({ navigation }) {
         setLoading(false);
       });
 
-    return unsub;
-  }, []);
+    // Cleanup when the user navigates away, but only reset if not editing
+    return () => {
+      unsub();
+      if (!isEditing) {
+        resetPreSale();
+      }
+    };
+  }, [isEditing]);
 
   const filteredProducts = useMemo(() => 
     products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase())),
@@ -38,14 +52,14 @@ export default function PreSaleProductsScreen({ navigation }) {
   );
   
   const cartTotal = useMemo(() => 
-    cart.reduce((sum, item) => sum + (item.quantity * item.unitPrice - (item.discount || 0)), 0),
-    [cart]
+    cartToDisplay.reduce((sum, item) => sum + (item.quantity * item.unitPrice - (item.discount || 0)), 0),
+    [cartToDisplay]
   );
 
   const openQuantity = (product) => {
     navigation.navigate("ProductQuantity", {
       product,
-      onConfirm: (qty) => addItem(product, qty),
+      onConfirm: (qty) => addItemFn(product, qty),
     });
   };
 
@@ -77,16 +91,16 @@ export default function PreSaleProductsScreen({ navigation }) {
     <SafeAreaView style={localStyles.flexOne}>
         <View style={styles.container}>
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.navigate("DashboardScreen")}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
               <Icon name="chevron-back" size={26} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.title}>Preventa</Text>
+            <Text style={styles.title}>{isEditing ? "Agregar Productos" : "Preventa"}</Text>
             <TouchableOpacity style={styles.customerBtn} onPress={() => navigation.navigate("AssignCustomer")}>
               <Icon name="person-add-outline" size={22} color="#fff" />
             </TouchableOpacity>
           </View>
 
-          {customer && (
+          {!isEditing && customer && (
             <View style={styles.customerAssignedBox}>
               <Text style={styles.customerAssigned}>
                 Cliente: {customer.firstName} {customer.lastName}
@@ -97,17 +111,11 @@ export default function PreSaleProductsScreen({ navigation }) {
             </View>
           )}
 
-          <View style={localStyles.searchContainer}>
-            <View style={localStyles.searchWrapper}>
-              <Icon name="search" size={20} color="#999" style={localStyles.searchIcon} />
-              <TextInput
-                placeholder="Buscar producto..."
-                style={localStyles.searchInput}
-                value={search}
-                onChangeText={setSearch}
-              />
-            </View>
-          </View>
+          <SearchBar 
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Buscar producto..."
+          />
 
           <FlatList
             data={filteredProducts}
@@ -118,14 +126,15 @@ export default function PreSaleProductsScreen({ navigation }) {
             keyboardShouldPersistTaps="handled"
           />
 
-          {cart.length > 0 && (
+          {cartToDisplay.length > 0 && (
             <TouchableOpacity
               style={styles.cartButton}
               onPress={() => navigation.navigate("PreSaleCart")}
             >
               <Text style={styles.cartButtonText}>
-                {cart.length} ítems · Total {formatCurrency(cartTotal)}
+                {cartToDisplay.length} ítems · Total {formatCurrency(cartTotal)}
               </Text>
+              <Icon name="arrow-forward-circle" size={24} color="#fff" />
             </TouchableOpacity>
           )}
         </View>
@@ -137,9 +146,5 @@ const localStyles = StyleSheet.create({
   flexOne: { flex: 1, backgroundColor: '#f2f2f2' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   wholesaleIndicator: { fontSize: 10, color: '#666', marginTop: 2 },
-  searchContainer: { paddingHorizontal: 16, marginBottom: 10 },
-  searchWrapper: { flexDirection: 'row', backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 12, alignItems: 'center', height: 48, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 3 },
-  searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 16 },
   listContent: { paddingBottom: 100 },
 });

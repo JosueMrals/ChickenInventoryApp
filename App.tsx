@@ -11,7 +11,8 @@ import ProductList from './android/app/src/screens/ProductList';
 import ProductForm from './android/app/src/screens/ProductForm';
 import Sidebar from './android/app/src/components/Sidebar';
 import ProfileScreen from './android/app/src/screens/ProfileScreen';
-import RegisterScreen from './android/app/src/screens/RegisterScreen';
+import UserManagementScreen from './android/app/src/screens/users/UserManagementScreen';
+
 import SalesScreen from './android/app/src/screens/sales/SalesScreen';
 import CustomersScreen from './android/app/src/screens/customer/CustomerListScreen';
 import ProductListScreen from './android/app/src/screens/products/ProductListScreen';
@@ -19,6 +20,7 @@ import DashboardScreen from './android/app/src/screens/dashboard/DashboardScreen
 
 import QuickSaleStack from './android/app/src/navigation/QuickSaleStack';
 import PreSaleStack from './android/app/src/navigation/PreSaleStack';
+import PreSaleProductsScreen from './android/app/src/screens/presales/PreSaleProductsScreen';
 import PreSaleListScreen from './android/app/src/screens/presales/PreSaleListScreen';
 import PreSaleDetailScreen from './android/app/src/screens/presales/PreSaleDetailScreen';
 import PreSalePaymentScreen from './android/app/src/screens/presales/PreSalePaymentScreen';
@@ -64,9 +66,11 @@ function AppDrawer({ route }) {
       <Drawer.Screen name="Profile">
         {(props) => <ProfileScreen {...props} user={user} role={role} />}
       </Drawer.Screen>
-      <Drawer.Screen name="Register">
-          {(props) => <RegisterScreen {...props} user={user} role={role} />}
-        </Drawer.Screen>
+      <Drawer.Screen 
+        name="Register"
+        component={UserManagementScreen}
+        initialParams={{ role, user }}
+      />
       <Drawer.Screen name="Customer">
         {(props) => <CustomersScreen {...props} user={user} role={role} />}
       </Drawer.Screen>
@@ -111,6 +115,10 @@ function AppDrawer({ route }) {
 	  <Drawer.Screen
 	  	name="PreSaleDone"
 	  	component={PreSaleDoneScreen}
+	  />
+
+	  <Drawer.Screen name="PreSaleProducts"
+		  component={PreSaleProductsScreen}
 	  />
 
       <Drawer.Screen name="Settings"

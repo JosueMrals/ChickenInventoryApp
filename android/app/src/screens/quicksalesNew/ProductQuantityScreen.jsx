@@ -72,16 +72,6 @@ export default function ProductQuantityScreen({ navigation, route }) {
           </ScrollView>
 
           {/* TECLADO NUMÉRICO */}
-          {/* Este teclado no es nativo, es un componente custom. No activa el teclado del sistema.
-              Por lo tanto, no debería haber problema de solapamiento con el teclado del sistema,
-              a menos que se use un TextInput oculto.
-              Pero el componente parece usar botones.
-              Si es custom, KeyboardAvoidingView no hace nada porque no hay teclado de sistema.
-              Pero el usuario dijo "al usar el teclado en el telefono".
-              Si ProductQuantityScreen usa un custom keyboard, el usuario se refiere a las pantallas donde SÍ hay inputs de texto.
-              ProductQuantityScreen NO tiene TextInput visible.
-              Sin embargo, lo dejo adaptado por si acaso.
-           */}
           <NumericKeyboard value={qty} onChange={setQty} onSubmit={saveQuantity} />
         </View>
       </KeyboardAvoidingView>

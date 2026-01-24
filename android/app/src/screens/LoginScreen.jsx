@@ -100,6 +100,7 @@ export default function LoginScreen({ navigation }) {
 
       <TextInput
         placeholder="Correo electrónico"
+        placeholderTextColor="#999"
         keyboardType="email-address"
         autoCapitalize="none"
         value={email}
@@ -109,6 +110,7 @@ export default function LoginScreen({ navigation }) {
 
       <TextInput
         placeholder="Contraseña"
+        placeholderTextColor="#999"
         secureTextEntry
         value={password}
         onChangeText={setPassword}

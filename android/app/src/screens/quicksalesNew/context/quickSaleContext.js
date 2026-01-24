@@ -105,14 +105,32 @@ export function QuickSaleProvider({ children }) {
     setCart(prev => {
       const updatedCart = prev.map((p) => {
         if (p.id !== id || p.isBonus) return p;
-        const newQuantity = Number(data.quantity ?? p.quantity);
-        let newUnit = Number(data.unitPrice ?? p.unitPrice);
+
+        // Merge old and new data
+        const pendingUpdate = { ...p, ...data };
+
+        // Recalculate price if only quantity is changing
         if (data.quantity !== undefined && data.unitPrice === undefined) {
-          const { priceToUse } = calcPriceForProduct({ product: p.product, qty: newQuantity, customer });
-          newUnit = priceToUse;
+          const { priceToUse } = calcPriceForProduct({ product: p.product, qty: data.quantity, customer });
+          pendingUpdate.unitPrice = priceToUse;
         }
-        const newDiscount = Number(data.discount ?? p.discount);
-        return { ...p, ...data, quantity: newQuantity, unitPrice: newUnit, discount: newDiscount, total: newQuantity * newUnit - newDiscount };
+
+        // Recalculate discount if it's percentage-based
+        if (pendingUpdate.discountType === 'percent' && pendingUpdate.discountValue > 0) {
+          const productTotal = pendingUpdate.quantity * pendingUpdate.unitPrice;
+          let newDiscount = (productTotal * pendingUpdate.discountValue) / 100;
+          
+          // Ensure discount doesn't exceed new total
+          if (newDiscount > productTotal) {
+            newDiscount = productTotal;
+          }
+          pendingUpdate.discount = newDiscount;
+        }
+
+        // Recalculate total
+        pendingUpdate.total = pendingUpdate.quantity * pendingUpdate.unitPrice - pendingUpdate.discount;
+
+        return pendingUpdate;
       });
       return applyBonuses(updatedCart);
     });

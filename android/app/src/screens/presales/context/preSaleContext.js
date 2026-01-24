@@ -1,37 +1,40 @@
-import React, { createContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useState, useCallback } from "react";
 import { calcPriceForProduct } from "../../sales/hooks/useSalePricing";
 import { 
   savePreSaleToFirestore, 
   getPreSalesFromFirestore,
-  processPreSalePayment
+  updatePreSaleInFirestore,
 } from "../../../services/preSaleService";
+import { getProducts } from "../../products/services/productService";
 
 export const PreSaleContext = createContext();
 
 export function PreSaleProvider({ children }) {
   const [cart, setCart] = useState([]);
+  const [editCart, setEditCart] = useState([]);
   const [customer, setCustomer] = useState(null);
   const [preSales, setPreSales] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [editingPreSale, setEditingPreSale] = useState(null);
 
   const applyBonuses = useCallback((currentCart) => {
     let newCart = [...currentCart].filter(item => !item.isBonus);
     currentCart.forEach(item => {
       if (item.isBonus) return;
       const product = item.product;
-      const { bonusEnabled, bonusThreshold, bonusQuantity } = product;
+      const { bonusEnabled, bonusThreshold, bonusQuantity } = product || {};
       if (bonusEnabled && bonusThreshold > 0 && bonusQuantity > 0) {
         const numberOfBonuses = Math.floor(item.quantity / bonusThreshold);
         if (numberOfBonuses > 0) {
           newCart.push({
-            id: `${product.id}_bonus`,
+            id: `${item.id}_bonus`,
             product: product,
             quantity: numberOfBonuses * bonusQuantity,
             unitPrice: 0,
             discount: 0,
             total: 0,
             isBonus: true,
-            linkedTo: product.id,
+            linkedTo: item.id,
           });
         }
       }
@@ -80,15 +83,19 @@ export function PreSaleProvider({ children }) {
 
   const updateCart = (id, data) => {
     setCart(prev => {
-      const updatedCart = prev.map(p => {
+      const updatedCart = prev.map((p) => {
         if (p.id !== id || p.isBonus) return p;
-        const updated = { ...p, ...data };
-        if (data.quantity && !data.unitPrice) {
-            const { priceToUse } = calcPriceForProduct({ product: p.product, qty: updated.quantity, customer });
-            updated.unitPrice = priceToUse;
+        const pendingUpdate = { ...p, ...data };
+        if (data.quantity !== undefined && data.unitPrice === undefined) {
+          const { priceToUse } = calcPriceForProduct({ product: p.product, qty: data.quantity, customer });
+          pendingUpdate.unitPrice = priceToUse;
         }
-        updated.total = updated.quantity * updated.unitPrice - updated.discount;
-        return updated;
+        if (pendingUpdate.discountType === 'percent' && pendingUpdate.discountValue > 0) {
+          const productTotal = pendingUpdate.quantity * pendingUpdate.unitPrice;
+          pendingUpdate.discount = (productTotal * pendingUpdate.discountValue) / 100;
+        }
+        pendingUpdate.total = pendingUpdate.quantity * pendingUpdate.unitPrice - pendingUpdate.discount;
+        return pendingUpdate;
       });
       return applyBonuses(updatedCart);
     });
@@ -96,46 +103,133 @@ export function PreSaleProvider({ children }) {
   
   const removeFromCart = (id) => setCart(prev => applyBonuses(prev.filter(p => p.id !== id)));
   
+  const addItemToEditCart = (product, qty = 1) => {
+    setEditCart(prevCart => {
+        const exists = prevCart.find(p => p.id === product.id && !p.isBonus);
+        const totalQty = (exists ? exists.quantity : 0) + qty;
+        const { priceToUse } = calcPriceForProduct({ product, qty: totalQty, customer });
+        
+        let updatedCart;
+        if (exists) {
+            updatedCart = prevCart.map(p => {
+            if (p.id === product.id && !p.isBonus) {
+                return { ...p, quantity: totalQty, unitPrice: priceToUse, total: totalQty * priceToUse - p.discount };
+            }
+            return p;
+            });
+        } else {
+            updatedCart = [...prevCart, {
+            id: product.id,
+            product,
+            quantity: qty,
+            unitPrice: priceToUse,
+            discount: 0,
+            total: qty * priceToUse,
+            isBonus: false,
+            }];
+        }
+        return applyBonuses(updatedCart);
+    });
+  };
+
+  const updateEditCart = (id, data) => {
+    setEditCart(prev => {
+      const updatedCart = prev.map((p) => {
+        if (p.id !== id || p.isBonus) return p;
+        const pendingUpdate = { ...p, ...data };
+        if (data.quantity !== undefined && data.unitPrice === undefined) {
+          const { priceToUse } = calcPriceForProduct({ product: p.product, qty: data.quantity, customer });
+          pendingUpdate.unitPrice = priceToUse;
+        }
+        if (pendingUpdate.discountType === 'percent' && pendingUpdate.discountValue > 0) {
+          const productTotal = pendingUpdate.quantity * pendingUpdate.unitPrice;
+          pendingUpdate.discount = (productTotal * pendingUpdate.discountValue) / 100;
+        }
+        pendingUpdate.total = pendingUpdate.quantity * pendingUpdate.unitPrice - pendingUpdate.discount;
+        return pendingUpdate;
+      });
+      return applyBonuses(updatedCart);
+    });
+  };
+
+  const removeFromEditCart = (id) => setEditCart(prev => applyBonuses(prev.filter(p => p.id !== id)));
+
   const resetPreSale = () => {
     setCart([]);
+    setEditCart([]);
     setCustomer(null);
+    setEditingPreSale(null);
   };
   
-  const savePreSale = async () => {
+  const submitPreSale = async () => {
     setLoading(true);
     try {
-      const soldItems = cart.filter(i => !i.isBonus);
+      const cartToSubmit = editingPreSale ? editCart : cart;
+      const soldItems = cartToSubmit.filter(i => !i.isBonus);
       const subtotal = soldItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const totalDiscount = soldItems.reduce((sum, item) => sum + item.discount, 0);
       const total = subtotal - totalDiscount;
-      await savePreSaleToFirestore({ customer, cart, subtotal, totalDiscount, total });
+      const preSalePayload = { customer, cart: cartToSubmit, subtotal, totalDiscount, total };
+
+      if (editingPreSale) {
+        await updatePreSaleInFirestore(editingPreSale.id, editingPreSale, preSalePayload);
+      } else {
+        await savePreSaleToFirestore(preSalePayload);
+      }
       await loadPreSales();
     } finally {
       setLoading(false);
     }
   };
 
-  const payPreSale = async (preSale) => {
+  const loadPreSaleForEditing = async (preSale) => {
     setLoading(true);
     try {
-      // --- FIX: Reconstruct cart from `items` and `bonuses` arrays ---
-      const fullCart = [
-        ...(preSale.items || []), 
-        ...(preSale.bonuses || [])
-      ];
-      await processPreSalePayment(preSale.id, fullCart);
-      await loadPreSales(); // Refresh the list
+        const allProducts = await getProducts();
+        const productsMap = allProducts.reduce((map, p) => {
+            map[p.id] = p;
+            return map;
+        }, {});
+
+        setEditingPreSale(preSale);
+        setCustomer(preSale.customer);
+
+        const cartItems = preSale.cart || preSale.items || [];
+        const reconstructedCart = cartItems
+            .map(item => {
+                const fullProduct = productsMap[item.productId || item.id];
+                if (!fullProduct) {
+                    console.warn(`Product with ID ${item.productId || item.id} not found.`);
+                    return {
+                        ...item,
+                        product: { id: item.productId || item.id, name: item.productName || 'Producto no encontrado' },
+                    };
+                }
+                return {
+                    ...item,
+                    product: fullProduct,
+                };
+            })
+            .filter(Boolean);
+        
+        setEditCart(reconstructedCart);
+        setCart([]);
+
     } catch (error) {
-        console.error("Failed to process payment", error);
-        throw error;
+        console.error("Error loading pre-sale for editing:", error);
     } finally {
         setLoading(false);
     }
-  };
-  
+};
+
   return (
     <PreSaleContext.Provider
-      value={{ cart, customer, setCustomer, addItem, updateCart, removeFromCart, resetPreSale, preSales, loading, loadPreSales, savePreSale, payPreSale }}
+      value={{ 
+        cart, customer, setCustomer, addItem, updateCart, removeFromCart, resetPreSale,
+        preSales, loading, loadPreSales, submitPreSale,
+        editingPreSale, loadPreSaleForEditing,
+        editCart, addItemToEditCart, updateEditCart, removeFromEditCart
+      }}
     >
       {children}
     </PreSaleContext.Provider>

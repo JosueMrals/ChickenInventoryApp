@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import PreSalesListScreen from '../screens/presales/PreSaleListScreen';
 import PreSaleProductsScreen from '../screens/presales/PreSaleProductsScreen';
 import PreSaleCartScreen from '../screens/presales/PreSaleCartScreen';
+import PreSaleEditCartScreen from '../screens/presales/PreSaleEditCartScreen';
 import PreSaleDetailScreen from '../screens/presales/PreSaleDetailScreen';
 import AssignCustomerScreen from '../screens/presales/AssignCustomerScreen';
 import PreSalePaymentScreen from '../screens/presales/PreSalePaymentScreen';
@@ -20,6 +21,7 @@ export default function PreSaleStack() {
       <Stack.Screen name="PreSalesList" component={PreSalesListScreen} />
       <Stack.Screen name="PreSaleProducts" component={PreSaleProductsScreen} />
       <Stack.Screen name="PreSaleCart" component={PreSaleCartScreen} />
+      <Stack.Screen name="PreSaleEditCart" component={PreSaleEditCartScreen} />
       <Stack.Screen name="PreSaleDetail" component={PreSaleDetailScreen} />
       <Stack.Screen name="AssignCustomer" component={AssignCustomerScreen} />
       <Stack.Screen name="PreSalePayment" component={PreSalePaymentScreen} />

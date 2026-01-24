@@ -1,5 +1,5 @@
-import React from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import React, { useState, useEffect } from "react";
+import { View, Text, TouchableOpacity, TextInput } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "../styles/cartItemStyles";
 
@@ -8,8 +8,18 @@ const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
   const product = item.product || { name: 'Producto no disponible' };
   const quantity = Number(item.quantity) || 0;
+  
+  const [isEditing, setIsEditing] = useState(false);
+  const [inputValue, setInputValue] = useState(quantity.toString());
 
-  // --- FIX: Use the onUpdate prop instead of context ---
+  useEffect(() => {
+    // If the quantity prop changes from outside, update the input value
+    // only if not currently editing.
+    if (!isEditing) {
+      setInputValue(quantity.toString());
+    }
+  }, [quantity]);
+
   const handleUpdateQuantity = (newQuantity) => {
     if (item.isBonus) return;
     
@@ -18,10 +28,47 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
       return;
     }
     
-    // Call the function passed via props from the parent screen
     if (onUpdate) {
       onUpdate({ quantity: newQuantity });
     }
+  };
+
+  const handleBlur = () => {
+    setIsEditing(false);
+    const newQuantity = parseInt(inputValue, 10);
+    
+    if (!isNaN(newQuantity) && newQuantity > 0) {
+        if (newQuantity !== quantity) {
+            handleUpdateQuantity(newQuantity);
+        }
+    } else {
+        // If input is invalid or zero, revert to original quantity
+        setInputValue(quantity.toString());
+    }
+  };
+
+  const QuantityDisplay = () => {
+    if (isEditing) {
+        return (
+            <TextInput
+                style={styles.quantityInput}
+                value={inputValue}
+                onChangeText={setInputValue}
+                keyboardType="number-pad"
+                autoFocus={true}
+                onBlur={handleBlur}
+                onSubmitEditing={handleBlur}
+                returnKeyType="done"
+                textAlign="center"
+            />
+        );
+    }
+
+    return (
+        <TouchableOpacity onPress={() => !item.isBonus && setIsEditing(true)}>
+            <Text style={styles.quantityDisplay}>{quantity}</Text>
+        </TouchableOpacity>
+    );
   };
   
   const NormalItem = () => (
@@ -36,7 +83,7 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
         <TouchableOpacity style={styles.btn} onPress={() => handleUpdateQuantity(quantity - 1)}>
           <Icon name="remove-circle-outline" size={26} color="#FF9500" />
         </TouchableOpacity>
-        <Text style={styles.quantityDisplay}>{quantity}</Text>
+        <QuantityDisplay />
         <TouchableOpacity style={styles.btn} onPress={() => handleUpdateQuantity(quantity + 1)}>
           <Icon name="add-circle-outline" size={26} color="#007AFF" />
         </TouchableOpacity>

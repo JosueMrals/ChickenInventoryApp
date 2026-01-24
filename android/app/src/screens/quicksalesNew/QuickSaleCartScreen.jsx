@@ -13,7 +13,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import { QuickSaleContext } from "./context/quickSaleContext";
 
 import CartItem from "./components/CartItem";
-import DiscountModal from "./components/DiscountModal";
+import DiscountModal from "../../components/common/DiscountModal";
 
 import styles from "./styles/quickCartStyles";
 
@@ -63,8 +63,26 @@ export default function QuickSaleCartScreen({ navigation }) {
 
   const applyDiscountToProduct = ({ discountType, discountValue }) => {
     const product = discountModal.product;
+    if (!product) return;
+
+    let finalDiscount = 0;
+    const productTotal = product.quantity * product.unitPrice;
+
+    if (discountType === 'percent') {
+      finalDiscount = (productTotal * discountValue) / 100;
+    } else if (discountType === 'amount') {
+      finalDiscount = discountValue;
+    }
+
+    // Ensure discount doesn't exceed product total
+    if (finalDiscount > productTotal) {
+      finalDiscount = productTotal;
+    }
+
     updateCart(product.id, {
-      discount: Number(discountValue || 0),
+      discount: finalDiscount,
+      discountType,
+      discountValue,
     });
 
     setDiscountModal({ visible: false, product: null });
@@ -127,6 +145,7 @@ export default function QuickSaleCartScreen({ navigation }) {
                 onEdit={() => openEdit(item)}
                 onDiscount={() => openDiscount(item)}
                 onRemove={() => handleRemove(item)}
+                onUpdate={(changes) => updateCart(item.id, changes)}
               />
             )}
             ListEmptyComponent={() => (
@@ -145,7 +164,7 @@ export default function QuickSaleCartScreen({ navigation }) {
 
             <View style={styles.row}>
               <Text style={styles.label}>Descuentos</Text>
-              <Text style={styles.value}>-C${totalDiscount.toFixed(2)}</Text>
+              <Text style={styles.value}>C${totalDiscount.toFixed(2)}</Text>
             </View>
 
             <View style={styles.rowTotal}>
