@@ -1,93 +1,224 @@
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
-const util = require("util"); // Importar para inspección avanzada
+const functions = require('firebase-functions');
+const admin = require('firebase-admin');
+admin.initializeApp();
 
-// Asegúrate de inicializar admin solo una vez
-if (admin.apps.length === 0) {
-  admin.initializeApp();
-}
+const db = admin.firestore();
 
-exports.updateUserPassword = functions.https.onCall(async (data, context) => {
-  // --- INICIO DE DEPURACIÓN ---
-  console.log("--- Invocación de 'updateUserPassword' ---");
+// Helper para normalizar el payload 'data'
+// Algunos SDKs envían los datos envueltos en una propiedad 'data'
+const getPayload = (data) => {
+    if (data && typeof data === 'object' && data.data) {
+        return data.data;
+    }
+    return data;
+};
 
-  // 1. Verificar si el contexto de autenticación existe
-  if (!context.auth) {
-    console.error("Error: La función fue llamada sin un contexto de autenticación.");
-    throw new functions.https.HttpsError(
-      "unauthenticated",
-      "La función debe ser llamada por un usuario autenticado."
-    );
-  }
+/**
+ * Cloud Function para que un 'bodeguero' despache una pre-venta a un 'entregador'.
+ */
+exports.dispatchPreSale = functions.https.onCall(async (reqData, context) => {
+    // 1. Normalizar datos
+    const data = getPayload(reqData);
+    let uid;
 
-  // 2. Inspeccionar el token completo del usuario que llama
-  console.log("Token del usuario que llama:", JSON.stringify(context.auth.token, null, 2));
-  console.log("Rol del usuario:", context.auth.token.role);
-  // --- FIN DE DEPURACIÓN ---
+    // --- BLOQUE DE DIAGNÓSTICO ---
+    const debugInfo = {
+        contextAuth: context && context.auth ? 'YES' : 'NO',
+        payloadKeys: data ? Object.keys(data) : [],
+        hasAuthToken: data && data.authToken ? 'YES' : 'NO',
+        tokenLength: data && data.authToken ? data.authToken.length : 0
+    };
+    console.log("[DEBUG] dispatchPreSale normalized start:", JSON.stringify(debugInfo));
+    // -----------------------------
 
-  // 1. Verificar que el que llama es un admin
-  if (context.auth.token.role !== "admin") {
-    console.error(`Fallo de permisos. Rol encontrado: '${context.auth.token.role}'. Se requiere 'admin'.`);
-    throw new functions.https.HttpsError(
-      "permission-denied",
-      "Solo los administradores pueden cambiar contraseñas."
-    );
-  }
+    // 2. Autenticación (Contexto o Manual)
+    if (context.auth) {
+        uid = context.auth.uid;
+    }
+    else if (data && data.authToken) {
+        try {
+            const decodedToken = await admin.auth().verifyIdToken(data.authToken);
+            uid = decodedToken.uid;
+            console.log(`Token verificado manualmente para usuario: ${uid}`);
+        } catch (error) {
+            console.error("Error verificando token manual:", error);
+            throw new functions.https.HttpsError('unauthenticated', `Token inválido: ${error.message}`);
+        }
+    } else {
+        const errorMsg = `DEBUG INFO: ContextAuth=${debugInfo.contextAuth}, PayloadKeys=${JSON.stringify(debugInfo.payloadKeys)}, TokenLen=${debugInfo.tokenLength}`;
+        console.error("Fallo de autenticación:", errorMsg);
+        throw new functions.https.HttpsError('unauthenticated', errorMsg);
+    }
 
-  // Los datos de la contraseña vienen en data.data
-  const { uid, password } = data.data;
-  console.log(`Intentando cambiar contraseña para UID: ${uid}`);
+    // 3. Verificar Rol de Bodeguero
+    const userDoc = await db.collection('users').doc(uid).get();
+    if (!userDoc.exists || userDoc.data().role !== 'bodeguero') {
+        throw new functions.https.HttpsError('permission-denied', 'El usuario no tiene permisos de bodeguero.');
+    }
 
-  // 2. Validar datos de entrada
-  if (!uid || !password || password.length < 6) {
-    throw new functions.https.HttpsError(
-      "invalid-argument",
-      "Se requiere UID y una contraseña de al menos 6 caracteres."
-    );
-  }
+    const { preSaleId, entregadorId } = data;
+    if (!preSaleId || !entregadorId) {
+        throw new functions.https.HttpsError('invalid-argument', 'Los parámetros preSaleId y entregadorId son requeridos.');
+    }
 
-  try {
-    // 3. Actualizar la contraseña usando el Admin SDK
-    await admin.auth().updateUser(uid, {
-      password: password,
-    });
+    try {
+        const preSaleRef = db.collection('presales').doc(preSaleId);
 
-    return { message: `Contraseña actualizada correctamente para el usuario ${uid}` };
-  } catch (error) {
-    // 4. Registrar el error específico del Admin SDK
-    console.error("Error específico de admin.auth().updateUser():", error);
-    throw new functions.https.HttpsError(
-      "internal",
-      "No se pudo actualizar la contraseña."
-    );
-  }
+        const docSnap = await preSaleRef.get();
+        if (!docSnap.exists) {
+            throw new functions.https.HttpsError('not-found', `La pre-venta con ID ${preSaleId} no existe en la colección 'presales'.`);
+        }
+
+        await preSaleRef.update({
+            status: 'dispatched',
+            entregadorId: entregadorId,
+            fechaEntregaRepartidor: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return { success: true, message: 'Pre-venta despachada correctamente.' };
+    } catch (error) {
+        console.error("Error en dispatchPreSale:", error);
+        if (error instanceof functions.https.HttpsError) {
+            throw error;
+        }
+        throw new functions.https.HttpsError('internal', 'Ocurrió un error al despachar la pre-venta.');
+    }
 });
 
-exports.setUserRole = functions.https.onCall(async (data, context) => {
-  // Se reactiva la guarda de seguridad
-  if (context.auth.token.role !== "admin") {
-    throw new functions.https.HttpsError(
-      "permission-denied",
-      "Solo los administradores pueden asignar roles."
-    );
-  }
+/**
+ * Cloud Function para que un 'entregador' complete el pago de una pre-venta.
+ */
+exports.completePreSalePayment = functions.https.onCall(async (reqData, context) => {
+    const data = getPayload(reqData);
+    let uid;
 
-  // Extraer 'email' y 'role' del objeto anidado 'data.data'
-  const { email, role } = data.data;
+    if (context.auth) {
+        uid = context.auth.uid;
+    } else if (data && data.authToken) {
+        try {
+            const decodedToken = await admin.auth().verifyIdToken(data.authToken);
+            uid = decodedToken.uid;
+        } catch (error) {
+            throw new functions.https.HttpsError('unauthenticated', 'Token de autenticación inválido.');
+        }
+    } else {
+        throw new functions.https.HttpsError('unauthenticated', 'El usuario debe estar autenticado.');
+    }
 
-  if (!email || !role) {
-    throw new functions.https.HttpsError(
-      "invalid-argument",
-      "Se requiere 'email' y 'role'."
-    );
-  }
+    const { preSaleId } = data;
+    if (!preSaleId) {
+        throw new functions.https.HttpsError('invalid-argument', 'El parámetro preSaleId es requerido.');
+    }
 
-  try {
-    const user = await admin.auth().getUserByEmail(email);
-    await admin.auth().setCustomUserClaims(user.uid, { role: role });
-    return { message: `Éxito. El usuario ${email} ahora tiene el rol de ${role}.` };
-  } catch (error) {
-    console.error("Error dentro del bloque try/catch al asignar rol:", error);
-    throw new functions.https.HttpsError("internal", "No se pudo asignar el rol.");
-  }
+    const preSaleRef = db.collection('presales').doc(preSaleId);
+
+    try {
+        await db.runTransaction(async (transaction) => {
+            const preSaleDoc = await transaction.get(preSaleRef);
+            if (!preSaleDoc.exists) {
+                throw new functions.https.HttpsError('not-found', 'La pre-venta no existe.');
+            }
+
+            const preSaleData = preSaleDoc.data();
+
+            if (preSaleData.entregadorId !== uid) {
+                throw new functions.https.HttpsError('permission-denied', 'No eres el entregador asignado para esta pre-venta.');
+            }
+
+            if (preSaleData.status !== 'dispatched') {
+                 throw new functions.https.HttpsError('failed-precondition', 'La pre-venta no está en estado de reparto.');
+            }
+
+            transaction.update(preSaleRef, {
+                status: 'paid',
+                fechaPago: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+            if (preSaleData.items && Array.isArray(preSaleData.items)) {
+                for (const item of preSaleData.items) {
+                    const productRef = db.collection('products').doc(item.productId);
+                    transaction.update(productRef, {
+                        stock: admin.firestore.FieldValue.increment(-item.quantity)
+                    });
+                }
+            }
+        });
+
+        return { success: true, message: 'Pago completado y stock actualizado.' };
+
+    } catch (error) {
+        console.error("Error en completePreSalePayment:", error);
+        throw new functions.https.HttpsError('internal', error.message || 'Error al procesar el pago.');
+    }
+});
+
+/**
+ * Cloud Function para obtener estadísticas del dashboard.
+ */
+exports.getDashboardStats = functions.https.onCall(async (reqData, context) => {
+    const data = getPayload(reqData);
+    let uid;
+
+    if (context.auth) {
+        uid = context.auth.uid;
+    } else if (data && data.authToken) {
+        try {
+            const decoded = await admin.auth().verifyIdToken(data.authToken);
+            uid = decoded.uid;
+        } catch (e) {
+             throw new functions.https.HttpsError('unauthenticated', 'Token inválido');
+        }
+    } else {
+         throw new functions.https.HttpsError('unauthenticated', 'Sin credenciales');
+    }
+
+    const userDoc = await db.collection('users').doc(uid).get();
+    if (!userDoc.exists) {
+        throw new functions.https.HttpsError('not-found', 'Usuario no encontrado.');
+    }
+    const role = userDoc.data().role;
+
+    let stats = {};
+
+    if (role === 'admin') {
+        const [productsSnap, lowStockSnap, usersSnap] = await Promise.all([
+            db.collection('products').get(),
+            db.collection('products').where('stock', '<=', 5).get(),
+            db.collection('users').get()
+        ]);
+        stats = {
+            products: productsSnap.size,
+            lowStock: lowStockSnap.size,
+            users: usersSnap.size,
+            verifiedUsers: usersSnap.docs.filter(doc => doc.data().emailVerified).length
+        };
+    } else if (role === 'bodeguero') {
+        const [pendingSnap, readySnap] = await Promise.all([
+            db.collection('presales').where('status', '==', 'pending').get(),
+            db.collection('presales').where('status', '==', 'ready_for_delivery').get()
+        ]);
+        stats = {
+            pendingPreSales: pendingSnap.size,
+            readyForDelivery: readySnap.size
+        };
+    } else if (role === 'entregador') {
+        const assignedSnap = await db.collection('presales')
+                                  .where('entregadorId', '==', uid)
+                                  .where('status', '==', 'dispatched')
+                                  .get();
+        stats = {
+            assignedDeliveries: assignedSnap.size,
+            totalToCollect: assignedSnap.docs.reduce((sum, doc) => sum + (doc.data().total || 0), 0)
+        };
+    } else {
+        const [productsSnap, lowStockSnap] = await Promise.all([
+            db.collection('products').get(),
+            db.collection('products').where('stock', '<=', 5).get()
+        ]);
+        stats = {
+            products: productsSnap.size,
+            lowStock: lowStockSnap.size
+        };
+    }
+    return stats;
 });

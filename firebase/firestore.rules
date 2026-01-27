@@ -2,165 +2,32 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // =====================================================
-    //  🔐 REGLA GLOBAL – Exigir autenticación
-    // =====================================================
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    function getUserRole(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.role;
     }
 
-    // =====================================================
-    //  👤 USERS — roles, perfiles
-    // =====================================================
     match /users/{userId} {
-      allow read: if request.auth != null;
-
-      // Cualquier usuario autenticado puede crear su perfil
-      allow create: if request.auth != null;
-
-      // Solo admin puede editar/eliminar perfiles
-      allow update, delete: if isAdmin();
-    }
-
-    // =====================================================
-    //  👥 CUSTOMERS — con tipo, descuento, crédito
-    // =====================================================
-    match /customers/{customerId} {
-      allow read: if request.auth != null;
-
-      // Crear / actualizar clientes:
-      // admin o user
-      allow create, update: if isAdmin() || isUser();
-
-      // Pero solo ADMIN puede modificar campos sensibles:
-      allow update: if isAdmin() ||
-        (
-          isUser() &&
-          !(
-            // campos restringidos a admin
-            'creditLimit' in request.resource.data.diff() ||
-            'discount'    in request.resource.data.diff() ||
-            'type'        in request.resource.data.diff()
-          )
-        );
-
-      // Solo admin puede eliminar
-      allow delete: if isAdmin();
-    }
-
-    // =====================================================
-    //  📦 PRODUCTS — precio, stock, mayoreo
-    // =====================================================
-    match /products/{productId} {
-      allow read: if request.auth != null;
-
-      // Crear y eliminar SOLO admin
-      allow create, delete: if isAdmin();
-
-      // update:
-      allow update: if isAdmin() ||
-        (
-          isUser() &&
-          // Solo se permite actualizar stock y lastSaleUpdate
-          (
-            request.resource.data.keys().hasOnly(['stock', 'lastSaleUpdate']) &&
-            request.resource.data.stock is number
-          )
-        );
-    }
-
-    // =====================================================
-    //  📝 PRODUCT MOVEMENTS — log de cambios en productos
-    // =====================================================
-    match /product_movements/{movementId} {
-      // Cualquiera autenticado puede leer el historial
-      allow read: if request.auth != null;
-
-      // Crear registros de operación: admin o user
-      allow create: if isAdmin() || isUser();
-
-      // Los registros no se pueden modificar ni eliminar
-      allow update, delete: if false;
-    }
-
-    // =====================================================
-    //  📦 INVENTORY MOVEMENTS — log de movimientos de stock
-    // =====================================================
-    match /inventoryMovements/{movementId} {
-      allow read: if request.auth != null;
-      allow create: if isAdmin() || isUser();
-      allow update, delete: if false;
-    }
-
-    // =====================================================
-    //  🧾 SALES — multi-producto, carrito
-    // =====================================================
-    match /sales/{saleId} {
-      allow read: if request.auth != null;
-
-      // Crear: admin o user
-      allow create: if isAdmin() || isUser();
-
-      // Permitir actualización solo para receiptImageUrl
-      allow update: if request.resource.data.keys().hasOnly(['receiptImageUrl']);
-
-      // Ventas NO pueden borrarse
-      allow delete: if false;
-    }
-
-    // =====================================================
-    //  🧾 SALES OPERATIONS — log de ventas para reportes
-    // =====================================================
-    match /sales_operations/{operationId} {
-      allow read: if request.auth != null;
-      allow create: if isAdmin() || isUser();
-      allow update, delete: if false;
+      allow read, write: if request.auth.uid == userId || getUserRole(request.auth.uid) == 'admin';
     }
     
-    // =====================================================
-    //  FINANCIALS — ingresos y egresos
-    // =====================================================
-    match /financials/{financialId} {
+    match /products/{productId} {
       allow read: if request.auth != null;
-      allow create: if isAdmin() || isUser();
-      allow update, delete: if false;
+      // La escritura (actualización de stock) está protegida y se gestiona a través de Cloud Functions.
+      allow write: if getUserRole(request.auth.uid) == 'admin';
     }
 
-    // =====================================================
-    //  💰 CREDITS — historial de créditos, abonos
-    // =====================================================
-    match /credits/{creditId} {
-      allow read: if request.auth != null;
+    match /preSales/{preSaleId} {
+      allow create: if request.auth != null;
 
-      // Crear créditos desde venta
-      allow create: if isAdmin() || isUser();
+      // Múltiples reglas de lectura basadas en el rol.
+      allow read: if getUserRole(request.auth.uid) == 'admin'
+                  || (resource.data.clientId == request.auth.uid)
+                  || (getUserRole(request.auth.uid) == 'bodeguero' && (resource.data.status == 'PENDIENTE' || resource.data.status == 'LISTA_PARA_ENTREGA'))
+                  || (getUserRole(request.auth.uid) == 'entregador' && resource.data.entregadorId == request.auth.uid);
 
-      // Actualizar créditos (abonos) permitido a admin y user
-      allow update: if isAdmin() || isUser();
-
-      // Solo admin puede eliminar créditos
-      allow delete: if isAdmin();
-    }
-
-    // =====================================================
-    //  🔢 COUNTERS — control de correlativos
-    // =====================================================
-    match /counters/{docId} {
-      allow read: if request.auth != null;
-
-      // Crear o incrementar contadores: admin/user
-      allow update, create: if isAdmin() || isUser();
-    }
-
-    // =====================================================
-    // ⚙ FUNCIONES COMUNES
-    // =====================================================
-    function isAdmin() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
-    }
-
-    function isUser() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "user";
+      // La escritura y actualización se deben realizar a través de Cloud Functions
+      // para garantizar la lógica de negocio. Se deniega la escritura directa para roles no-admin.
+      allow update, delete: if getUserRole(request.auth.uid) == 'admin';
     }
   }
 }

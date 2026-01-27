@@ -1,10 +1,11 @@
-import React from 'react';
-import { View, TouchableWithoutFeedback } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, TouchableWithoutFeedback, Alert } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import auth from '@react-native-firebase/auth';
+import appCheck from '@react-native-firebase/app-check'; // Importar App Check
 
 import LoginScreen from './android/app/src/screens/LoginScreen';
 import ProductList from './android/app/src/screens/ProductList';
@@ -25,6 +26,9 @@ import PreSaleListScreen from './android/app/src/screens/presales/PreSaleListScr
 import PreSaleDetailScreen from './android/app/src/screens/presales/PreSaleDetailScreen';
 import PreSalePaymentScreen from './android/app/src/screens/presales/PreSalePaymentScreen';
 import PreSaleDoneScreen from './android/app/src/screens/presales/PreSaleDoneScreen';
+
+import PreparePreSalesScreen from './android/app/src/screens/presales/PreparePreSalesScreen';
+import MyDeliveriesScreen from './android/app/src/screens/presales/MyDeliveriesScreen';
 
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
 import ProductsStack from './android/app/src/navigation/ProductsStack';
@@ -121,6 +125,14 @@ function AppDrawer({ route }) {
 		  component={PreSaleProductsScreen}
 	  />
 
+	  <Drawer.Screen name="PreparePreSales"
+		  component={PreparePreSalesScreen}
+	  />
+
+    <Drawer.Screen name="MyDeliveries">
+      {(props) => <MyDeliveriesScreen {...props} user={user} />}
+    </Drawer.Screen>
+
       <Drawer.Screen name="Settings"
       component={PrintersScreen}
       options={{
@@ -147,6 +159,43 @@ function AppDrawer({ route }) {
 }
 
 export default function App() {
+
+  // Inicializar App Check con proveedor de depuración
+  useEffect(() => {
+    const initAppCheck = async () => {
+      try {
+        // En desarrollo usamos el proveedor de depuración.
+        // En producción se usaría 'playIntegrity' en Android.
+        const provider = appCheck().newReactNativeFirebaseAppCheckProvider();
+
+        provider.configure({
+          android: {
+            provider: __DEV__ ? 'debug' : 'playIntegrity',
+            debug: {
+              token: 'DE892224-2C47-4189-93C0-D6F39F80D87E' // Token fijo opcional para desarrollo, o ver logs para uno nuevo
+            }
+          },
+          ios: {
+            provider: __DEV__ ? 'debug' : 'appAttestWithDeviceCheckFallback',
+            debug: {
+              token: 'DE892224-2C47-4189-93C0-D6F39F80D87E'
+            }
+          },
+        });
+
+        await appCheck().initializeAppCheck({
+          provider: provider,
+          isTokenAutoRefreshEnabled: true,
+        });
+
+        console.log('App Check initialized');
+      } catch (error) {
+        console.log('App Check init error:', error);
+      }
+    };
+
+    initAppCheck();
+  }, []);
 
   useSessionTimeout(() => {
       // Callback cuando expira la sesión

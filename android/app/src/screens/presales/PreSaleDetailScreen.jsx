@@ -140,7 +140,7 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         <SafeAreaView style={globalStyles.container}>
             <View style={globalStyles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}><Icon name="chevron-back" size={28} color="#FFF" /></TouchableOpacity>
-                <Text style={globalStyles.title}>Detalle de Pre-Venta</Text>
+                <Text style={globalStyles.title}>Detalles de Pre-Venta</Text>
                 <View style={{ width: 28 }} />
             </View>
             
@@ -170,8 +170,6 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 						</TouchableOpacity>
 					</View>
 				)}
-
-
             </View>
         </SafeAreaView>
     );

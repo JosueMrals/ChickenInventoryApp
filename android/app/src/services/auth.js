@@ -7,12 +7,13 @@ export const loginUser = async (email, password) => {
     const userCredential = await auth().signInWithEmailAndPassword(email, password);
     const user = userCredential.user;
 
-    if (!user.emailVerified) {
-      throw new Error('Correo no verificado. Verifica tu cuenta antes de ingresar.');
+    // 🔹 CAMBIO: Ya no lanzamos error aquí. Devolvemos el usuario para que la UI decida qué hacer.
+    if (user.emailVerified) {
+      // Si está verificado, actualizar Firestore
+      await updateVerificationStatus(user.uid);
+    } else {
+      console.log('⚠️ Usuario logueado pero correo NO verificado.');
     }
-
-    // Si está verificado, actualizar Firestore
-    await updateVerificationStatus(user.uid);
 
     return user;
   } catch (error) {
@@ -21,22 +22,65 @@ export const loginUser = async (email, password) => {
   }
 };
 
-// 🔹 Obtener rol del usuario desde Firestore
-export const getUserRole = async (uid) => {
+// 🔹 Obtener rol del usuario desde Firestore (Robustecido)
+export const getUserRole = async (uid, email = null) => {
   try {
-    const snap = await firestore().collection('users').doc(uid).get();
+    console.log(`🔍 Intentando obtener rol para UID: ${uid}`);
 
-    if (!snap.exists) {
-      console.log('⚠️ Usuario sin documento, asignando rol por defecto.');
-      return 'user';
+    // 1. Intento principal: Buscar por ID del documento
+    const docSnap = await firestore().collection('users').doc(uid).get();
+
+    if (docSnap.exists) {
+      const data = docSnap.data();
+      if (data && data.role) {
+        console.log('✅ Rol encontrado por UID:', data.role);
+        return data.role;
+      }
     }
 
-    const data = snap.data();
-    console.log('✅ Rol obtenido desde Firestore:', data.role);
-    return data.role || 'user';
+    // 2. Intento secundario: Si falló por UID y tenemos email, buscar por email
+    if (email) {
+        console.log(`⚠️ No se encontró por UID, buscando por email: ${email}`);
+        const querySnap = await firestore().collection('users').where('email', '==', email).limit(1).get();
+
+        if (!querySnap.empty) {
+            const userDoc = querySnap.docs[0];
+            const data = userDoc.data();
+            if (data && data.role) {
+                console.log('✅ Rol encontrado por Email:', data.role);
+                return data.role;
+            }
+        }
+    }
+
+    console.log('⚠️ No se encontró documento de usuario o campo rol. Asignando "user".');
+    return 'user';
   } catch (error) {
     console.log('🔥 Error obteniendo rol:', error);
     return 'user';
+  }
+};
+
+// 🔹 Obtener lista de usuarios por rol
+export const getUsersByRole = async (role) => {
+  try {
+    const snap = await firestore().collection('users').where('role', '==', role).get();
+
+    if (snap.empty) {
+      console.log(`⚠️ No se encontraron usuarios con rol: ${role}`);
+      return [];
+    }
+
+    const users = snap.docs.map(doc => ({
+      uid: doc.id,
+      ...doc.data()
+    }));
+
+    console.log(`✅ ${users.length} usuarios encontrados con rol: ${role}`);
+    return users;
+  } catch (error) {
+    console.log(`🔥 Error obteniendo usuarios con rol ${role}:`, error);
+    return [];
   }
 };
 
@@ -49,7 +93,7 @@ export const updateVerificationStatus = async (uid) => {
     if (docSnap.exists) {
       const userData = docSnap.data();
 
-      if (!userData.verified) {
+      if (userData && !userData.verified) {
         await userRef.update({
           verified: true,
           verifiedAt: new Date(),
@@ -77,5 +121,35 @@ export const logoutUser = async () => {
     await auth().signOut();
   } catch (e) {
     console.log('Error al cerrar sesión:', e);
+  }
+};
+
+// 🔹 DEBUG: Mostrar datos del usuario específico por EMAIL
+export const logUserData = async (email) => {
+  try {
+    console.log(`⏳ Buscando datos en Firestore para: ${email}`);
+
+    // Buscamos en la colección 'users' donde el campo 'email' coincida
+    const snapshot = await firestore().collection('users').where('email', '==', email).get();
+
+    if (snapshot.empty) {
+      console.log(`⚠️ No se encontró ningún documento para el email: ${email}`);
+      return;
+    }
+
+    // Iteramos (aunque debería ser único) para mostrar los datos
+    snapshot.forEach(doc => {
+      const userData = {
+        uid: doc.id, // Incluimos el UID del documento
+        ...doc.data()
+      };
+
+      console.log('🔍 --- DATOS COMPLETOS DEL USUARIO (Firestore) ---');
+      console.log(JSON.stringify(userData, null, 2));
+      console.log('--------------------------------------------------');
+    });
+
+  } catch (error) {
+    console.error('🔥 Error al imprimir datos del usuario:', error);
   }
 };
