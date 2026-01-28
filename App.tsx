@@ -28,6 +28,7 @@ import PreSalePaymentScreen from './android/app/src/screens/presales/PreSalePaym
 import PreSaleDoneScreen from './android/app/src/screens/presales/PreSaleDoneScreen';
 
 import PreparePreSalesScreen from './android/app/src/screens/presales/PreparePreSalesScreen';
+import WarehousePreSaleDetailScreen from './android/app/src/screens/presales/WarehousePreSaleDetailScreen';
 import MyDeliveriesScreen from './android/app/src/screens/presales/MyDeliveriesScreen';
 
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
@@ -128,6 +129,10 @@ function AppDrawer({ route }) {
 	  <Drawer.Screen name="PreparePreSales"
 		  component={PreparePreSalesScreen}
 	  />
+
+    <Drawer.Screen name="WarehousePreSaleDetail"
+      component={WarehousePreSaleDetailScreen}
+    />
 
     <Drawer.Screen name="MyDeliveries">
       {(props) => <MyDeliveriesScreen {...props} user={user} />}

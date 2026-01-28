@@ -4,17 +4,16 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
-  Modal,
   StyleSheet,
   ActivityIndicator,
-  Alert,
-  TextInput
+  Dimensions,
+  ScrollView
 } from 'react-native';
 import firestore from '@react-native-firebase/firestore';
-import functions from '@react-native-firebase/functions';
-import auth from '@react-native-firebase/auth';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { getUsersByRole } from '../../services/auth';
+import globalStyles from '../../styles/globalStyles';
+
+const { width } = Dimensions.get('window');
 
 const STATUS_LABELS = {
   pending: 'Pendiente',
@@ -29,19 +28,37 @@ const PreSaleItem = ({ item, onSelect }) => {
     ? item.items.reduce((acc, curr) => acc + (curr.quantity || 0), 0)
     : 0;
 
+  const customerName = item.customer?.firstName
+        ? `${item.customer.firstName} ${item.customer.lastName || ''}`
+        : item.customerName || 'Cliente sin nombre';
+
+  const customerPhone = item.customer?.phone || 'Sin teléfono';
+
   return (
     <TouchableOpacity style={styles.itemContainer} onPress={() => onSelect(item)}>
       <View style={styles.itemHeader}>
-          <Icon name="receipt-outline" size={24} color="#5856D6" />
-          <Text style={styles.itemTitle}>ID: {item.id.substring(0, 8).toUpperCase()}</Text>
-      </View>
-      <Text style={styles.itemText}>Cliente: {item.customerName || 'Cliente sin nombre'}</Text>
-      <Text style={styles.itemText}>Items Totales: {totalItems}</Text>
-
-      <View style={styles.badgeContainer}>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            <Icon name="receipt-outline" size={24} color="#5856D6" />
+            <Text style={styles.itemTitle}>ID: {item.id.substring(0, 8).toUpperCase()}</Text>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
             <Text style={styles.statusText}>{STATUS_LABELS[item.status] || item.status}</Text>
+          </View>
+      </View>
+
+      <View style={styles.customerContainer}>
+        <View style={styles.customerRow}>
+            <Icon name="person-outline" size={16} color="#666" style={{marginRight: 6}} />
+            <Text style={styles.customerText}>{customerName}</Text>
         </View>
+        <View style={styles.customerRow}>
+            <Icon name="call-outline" size={16} color="#666" style={{marginRight: 6}} />
+            <Text style={styles.customerSubText}>{customerPhone}</Text>
+        </View>
+      </View>
+
+      <View style={styles.footerRow}>
+        <Text style={styles.itemText}>Items Totales: {totalItems}</Text>
         <Text style={styles.dateText}>
             {item.createdAt ? new Date(item.createdAt.toDate()).toLocaleDateString() : ''}
         </Text>
@@ -50,194 +67,93 @@ const PreSaleItem = ({ item, onSelect }) => {
   );
 };
 
-const ManagePreSaleModal = ({ visible, onClose, preSale, setPreSale, entregadores }) => {
-  if (!preSale) return null;
+const DashboardPanel = ({ preSales }) => {
+    const { aggregatedProducts, totalUnits, totalOrders, statusCounts } = React.useMemo(() => {
+        const totals = {};
+        let units = 0;
+        const sCounts = { pending: 0, preparing: 0, ready_for_delivery: 0 };
 
-  const [loading, setLoading] = useState(false);
-  const [showEntregadorPicker, setShowEntregadorPicker] = useState(false);
-  const [searchText, setSearchText] = useState('');
-  const [processingEntregadorId, setProcessingEntregadorId] = useState(null);
+        preSales.forEach(sale => {
+            if (sCounts[sale.status] !== undefined) sCounts[sale.status]++;
 
-  const filteredEntregadores = entregadores.filter(e =>
-    (e.email && e.email.toLowerCase().includes(searchText.toLowerCase())) ||
-    (e.displayName && e.displayName.toLowerCase().includes(searchText.toLowerCase()))
-  );
+            if (sale.items && Array.isArray(sale.items)) {
+                sale.items.forEach(item => {
+                    const productName = item.name || item.productName || 'Producto Desconocido';
+                    if (!totals[productName]) {
+                        totals[productName] = 0;
+                    }
+                    totals[productName] += (item.quantity || 0);
+                    units += (item.quantity || 0);
+                });
+            }
+        });
+        const products = Object.entries(totals)
+            .map(([name, quantity]) => ({ name, quantity }))
+            .sort((a, b) => b.quantity - a.quantity);
 
-  const updateStatus = async (newStatus) => {
-    setLoading(true);
-    try {
-      await firestore().collection('presales').doc(preSale.id).update({ status: newStatus });
-      setPreSale(prev => ({ ...prev, status: newStatus }));
+        return { aggregatedProducts: products, totalUnits: units, totalOrders: preSales.length, statusCounts: sCounts };
+    }, [preSales]);
 
-      if(newStatus === 'ready_for_delivery'){
-        setShowEntregadorPicker(true);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'No se pudo actualizar el estado.');
-      console.error(error);
-    }
-    setLoading(false);
-  };
-
-  const handleDispatch = (entregador) => {
-    Alert.alert(
-      'Confirmar Asignación',
-      `¿Asignar entrega a ${entregador.email || 'este repartidor'}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Asignar', onPress: () => dispatchToEntregador(entregador.uid) }
-      ]
-    );
-  };
-
-  const dispatchToEntregador = async (entregadorId) => {
-    const currentUser = auth().currentUser;
-    if (!currentUser) {
-        Alert.alert('Error de Sesión', 'No estás autenticado.');
-        return;
-    }
-
-    setProcessingEntregadorId(entregadorId);
-    try {
-      // 1. OBTENER TOKEN FRESCO (Mecanismo de Respaldo)
-      const token = await currentUser.getIdToken(true);
-
-      // 2. LLAMADA REAL A LA CLOUD FUNCTION
-      const dispatchFunction = functions().httpsCallable('dispatchPreSale');
-
-      const response = await dispatchFunction({
-          preSaleId: preSale.id,
-          entregadorId,
-          authToken: token // Token enviado manualmente
-      });
-
-      console.log("Respuesta del servidor:", response.data);
-
-      Alert.alert('Éxito', 'La pre-venta ha sido asignada y está en reparto.');
-      setSearchText('');
-      setShowEntregadorPicker(false);
-      onClose(); // Cerrar modal principal
-    } catch (error) {
-      console.error("❌ Error en dispatchToEntregador:", error);
-
-      let errorMsg = error.message;
-      if (error.code === 'functions/unauthenticated') {
-          errorMsg = 'Error de autenticación. Verifica tu conexión e intenta nuevamente.';
-      } else if (error.code === 'functions/not-found') {
-          errorMsg = 'No se encontró la pre-venta o el documento.';
-      } else if (error.code === 'functions/permission-denied') {
-          errorMsg = 'No tienes permisos de bodeguero para realizar esta acción.';
-      }
-
-      Alert.alert('Error', errorMsg);
-    } finally {
-        setProcessingEntregadorId(null);
-    }
-  };
-
-  return (
-    <Modal visible={visible} transparent={true} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalContainer}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Gestionar Pre-Venta</Text>
-          <Text style={styles.modalSubtitle}>ID: {preSale.id.substring(0, 8).toUpperCase()}</Text>
-
-          {loading && <ActivityIndicator size="large" color="#5856D6" style={{ marginBottom: 10 }} />}
-
-          <Modal visible={showEntregadorPicker} transparent={true} animationType="fade" onRequestClose={() => setShowEntregadorPicker(false)}>
-             <View style={styles.modalContainer}>
-                <View style={styles.pickerContent}>
-                  <Text style={styles.modalTitle}>Seleccionar Entregador</Text>
-
-                  <View style={styles.searchContainer}>
-                    <Icon name="search" size={20} color="#999" />
-                    <TextInput
-                        style={styles.searchInput}
-                        placeholder="Buscar por correo..."
-                        value={searchText}
-                        onChangeText={setSearchText}
-                        autoCapitalize="none"
-                    />
-                  </View>
-
-                  {entregadores.length === 0 ? (
-                      <Text style={styles.emptyListText}>No hay entregadores disponibles.</Text>
-                  ) : (
-                      <FlatList
-                        data={filteredEntregadores}
-                        keyExtractor={(item) => item.uid}
-                        style={{ maxHeight: 300, width: '100%' }}
-                        renderItem={({ item }) => (
-                          <TouchableOpacity
-                            style={styles.entregadorItem}
-                            onPress={() => handleDispatch(item)}
-                            disabled={!!processingEntregadorId}
-                          >
-                            <View style={styles.avatarContainer}>
-                                <Icon name="person" size={20} color="#555" />
-                            </View>
-                            <Text style={styles.entregadorText}>{item.email || 'Sin Email'}</Text>
-
-                            {processingEntregadorId === item.uid ? (
-                                <ActivityIndicator size="small" color="#5856D6" />
-                            ) : (
-                                <Icon name="chevron-forward" size={20} color="#ccc" />
-                            )}
-                          </TouchableOpacity>
-                        )}
-                        ListEmptyComponent={<Text style={styles.emptyListText}>No se encontraron resultados.</Text>}
-                      />
-                  )}
-                  <TouchableOpacity
-                    style={[styles.closeButton, { marginTop: 15 }]}
-                    onPress={() => {
-                        setShowEntregadorPicker(false);
-                        setSearchText('');
-                    }}
-                  >
-                    <Text style={styles.buttonText}>Cancelar</Text>
-                  </TouchableOpacity>
+    return (
+        <ScrollView style={styles.dashboardContainer} showsVerticalScrollIndicator={false}>
+            <View style={styles.dashboardSection}>
+                <Text style={styles.sectionHeader}>Métricas Clave</Text>
+                <View style={styles.statsContainer}>
+                    <View style={[styles.statCard, { backgroundColor: '#E3F2FD', borderColor: '#BBDEFB' }]}>
+                        <Icon name="receipt-outline" size={26} color="#1E88E5" />
+                        <Text style={styles.statNumber}>{totalOrders}</Text>
+                        <Text style={styles.statLabel}>Ordenes</Text>
+                    </View>
+                    <View style={[styles.statCard, { backgroundColor: '#E8F5E9', borderColor: '#C8E6C9' }]}>
+                        <Icon name="layers-outline" size={26} color="#43A047" />
+                        <Text style={[styles.statNumber, {color: '#2E7D32'}]}>{totalUnits}</Text>
+                        <Text style={styles.statLabel}>Unidades</Text>
+                    </View>
                 </View>
-             </View>
-          </Modal>
+            </View>
 
-          {!loading && (
-            <>
-                {preSale.status === 'pending' && (
-                    <TouchableOpacity style={styles.actionButton} onPress={() => updateStatus('preparing')}>
-                        <Icon name="hammer-outline" size={20} color="white" style={{marginRight: 8}} />
-                        <Text style={styles.buttonText}>Empezar Preparación</Text>
-                    </TouchableOpacity>
-                )}
-                {preSale.status === 'preparing' && (
-                    <TouchableOpacity style={[styles.actionButton, {backgroundColor: '#34C759'}]} onPress={() => updateStatus('ready_for_delivery')}>
-                        <Icon name="checkmark-circle-outline" size={20} color="white" style={{marginRight: 8}} />
-                        <Text style={styles.buttonText}>Marcar Lista para Entrega</Text>
-                    </TouchableOpacity>
-                )}
-                {preSale.status === 'ready_for_delivery' && (
-                    <TouchableOpacity style={[styles.actionButton, {backgroundColor: '#FF9500'}]} onPress={() => setShowEntregadorPicker(true)}>
-                        <Icon name="bicycle-outline" size={20} color="white" style={{marginRight: 8}} />
-                        <Text style={styles.buttonText}>Asignar Entregador</Text>
-                    </TouchableOpacity>
-                )}
-            </>
-          )}
+            <View style={styles.dashboardSection}>
+                <Text style={styles.sectionHeader}>Estado de Ordenes</Text>
+                <View style={styles.statusRow}>
+                    <View style={[styles.statusItem, { borderLeftColor: '#F2C94C' }]}>
+                        <Text style={styles.statusCount}>{statusCounts.pending}</Text>
+                        <Text style={styles.statusLabel}>Pendientes</Text>
+                    </View>
+                     <View style={[styles.statusItem, { borderLeftColor: '#007AFF' }]}>
+                        <Text style={styles.statusCount}>{statusCounts.preparing}</Text>
+                        <Text style={styles.statusLabel}>Preparando</Text>
+                    </View>
+                     <View style={[styles.statusItem, { borderLeftColor: '#34C759' }]}>
+                        <Text style={styles.statusCount}>{statusCounts.ready_for_delivery}</Text>
+                        <Text style={styles.statusLabel}>Listas</Text>
+                    </View>
+                </View>
+            </View>
 
-          <TouchableOpacity style={[styles.closeButton, { marginTop: 10 }]} onPress={onClose}>
-            <Text style={styles.buttonText}>Cerrar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
+            <Text style={[styles.sectionHeader, { marginTop: 15 }]}>Desglose de Productos</Text>
+
+            {aggregatedProducts.map((item, index) => (
+                 <View key={item.name} style={styles.dashboardRow}>
+                    <View style={styles.rowInfo}>
+                        <View style={styles.bulletPoint} />
+                        <Text style={styles.rowName}>{item.name}</Text>
+                    </View>
+                    <View style={styles.rowValueContainer}>
+                        <Text style={styles.rowValue}>{item.quantity}</Text>
+                        <Text style={styles.rowUnit}>und</Text>
+                    </View>
+                </View>
+            ))}
+            {aggregatedProducts.length === 0 && <Text style={styles.emptyText}>No hay carga pendiente.</Text>}
+            <View style={{height: 20}} />
+        </ScrollView>
+    );
 };
 
-export default function PreparePreSalesScreen() {
+export default function PreparePreSalesScreen({ navigation }) {
   const [preSales, setPreSales] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPreSale, setSelectedPreSale] = useState(null);
-  const [entregadores, setEntregadores] = useState([]);
+  const [activeTab, setActiveTab] = useState('list'); // 'list' | 'dashboard'
 
   useEffect(() => {
     const subscriber = firestore()
@@ -262,13 +178,9 @@ export default function PreparePreSalesScreen() {
     return () => subscriber();
   }, []);
 
-  useEffect(() => {
-    const fetchEntregadores = async () => {
-        const users = await getUsersByRole('entregador');
-        setEntregadores(users);
-    };
-    fetchEntregadores();
-  }, []);
+  const handleSelectPreSale = (presale) => {
+      navigation.navigate('WarehousePreSaleDetail', { presale });
+  };
 
   if (loading) {
     return (
@@ -280,27 +192,51 @@ export default function PreparePreSalesScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.headerTitle}>Pre-Ventas por Preparar</Text>
-      <FlatList
-        data={preSales}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => <PreSaleItem item={item} onSelect={setSelectedPreSale} />}
-        ListEmptyComponent={
-            <View style={{ alignItems: 'center', marginTop: 50 }}>
-                <Icon name="checkmark-circle-outline" size={60} color="#ccc" />
-                <Text style={styles.emptyText}>No hay pre-ventas pendientes.</Text>
-            </View>
-        }
-        contentContainerStyle={{ paddingBottom: 20 }}
-      />
-      <ManagePreSaleModal
-        visible={!!selectedPreSale}
-        onClose={() => setSelectedPreSale(null)}
-        preSale={selectedPreSale}
-        setPreSale={setSelectedPreSale}
-        entregadores={entregadores}
-      />
+    <View style={globalStyles.container}>
+      <View style={globalStyles.header}>
+          <TouchableOpacity onPress={() => navigation && navigation.navigate("DashboardScreen")}>
+            <Icon name="chevron-back" size={26} color="#fff" />
+          </TouchableOpacity>
+          <Text style={globalStyles.title}>Pre-Ventas</Text>
+          <View style={{width: 26}} />
+      </View>
+
+      <View style={styles.tabContainer}>
+	  	<TouchableOpacity
+			  style={[styles.tabButton, activeTab === 'dashboard' && styles.activeTabButton]}
+			  onPress={() => setActiveTab('dashboard')}
+		  >
+			  <Icon name="grid-outline" size={20} color={activeTab === 'dashboard' ? '#5856D6' : '#888'} />
+			  <Text style={[styles.tabText, activeTab === 'dashboard' && styles.activeTabText]}>Panel Control</Text>
+		  </TouchableOpacity>
+        <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'list' && styles.activeTabButton]}
+            onPress={() => setActiveTab('list')}
+        >
+            <Icon name="list-outline" size={20} color={activeTab === 'list' ? '#5856D6' : '#888'} />
+            <Text style={[styles.tabText, activeTab === 'list' && styles.activeTabText]}>Ordenes</Text>
+        </TouchableOpacity>
+
+      </View>
+
+      <View style={styles.contentContainer}>
+        {activeTab === 'list' ? (
+             <FlatList
+                data={preSales}
+                keyExtractor={item => item.id}
+                renderItem={({ item }) => <PreSaleItem item={item} onSelect={handleSelectPreSale} />}
+                ListEmptyComponent={
+                    <View style={{ alignItems: 'center', marginTop: 50 }}>
+                        <Icon name="checkmark-circle-outline" size={60} color="#ccc" />
+                        <Text style={styles.emptyText}>No hay pre-ventas pendientes.</Text>
+                    </View>
+                }
+                contentContainerStyle={{ paddingBottom: 20 }}
+            />
+        ) : (
+            <DashboardPanel preSales={preSales} />
+        )}
+      </View>
     </View>
   );
 }
@@ -316,34 +252,54 @@ const getStatusColor = (status) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 10, backgroundColor: '#f5f5f7' },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 15, color: '#1c1c1e', marginLeft: 5 },
+  contentContainer: { flex: 1, paddingHorizontal: 8 },
+
+  // Tabs Styles
+  tabContainer: { flexDirection: 'row', backgroundColor: 'white', margin: 10, borderRadius: 12, padding: 4 },
+  tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8 },
+  activeTabButton: { backgroundColor: '#F0F0FF' },
+  tabText: { marginLeft: 8, fontWeight: '600', color: '#888', fontSize: 14 },
+  activeTabText: { color: '#5856D6' },
+
   emptyText: { textAlign: 'center', marginTop: 10, fontSize: 16, color: '#888' },
 
+  // List Item Styles
   itemContainer: { backgroundColor: 'white', padding: 15, marginVertical: 6, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
-  itemHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  itemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   itemTitle: { fontSize: 16, fontWeight: 'bold', marginLeft: 8, color: '#333' },
-  itemText: { fontSize: 14, color: '#666', marginBottom: 4 },
-  badgeContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+
+  customerContainer: { marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  customerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  customerText: { fontSize: 16, fontWeight: '600', color: '#333' },
+  customerSubText: { fontSize: 14, color: '#888' },
+
+  footerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  itemText: { fontSize: 14, color: '#666' },
+
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   statusText: { color: 'white', fontWeight: '700', fontSize: 12, textTransform: 'capitalize' },
   dateText: { fontSize: 12, color: '#999' },
 
-  modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
-  modalContent: { width: '85%', backgroundColor: 'white', padding: 25, borderRadius: 15, alignItems: 'center', elevation: 5 },
-  pickerContent: { width: '90%', maxHeight: '80%', backgroundColor: 'white', padding: 20, borderRadius: 15, alignItems: 'center', elevation: 5 },
+  // Dashboard Panel Styles
+  dashboardContainer: { flex: 1, padding: 10 },
+  dashboardSection: { marginBottom: 20 },
+  sectionHeader: { fontSize: 13, fontWeight: '700', color: '#888', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5 },
 
-  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 5, color: '#333' },
-  modalSubtitle: { fontSize: 14, color: '#666', marginBottom: 20 },
+  statsContainer: { flexDirection: 'row', justifyContent: 'space-between' },
+  statCard: { flex: 1, padding: 15, borderRadius: 16, alignItems: 'center', marginHorizontal: 5, borderWidth: 1, elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, backgroundColor: 'white' },
+  statNumber: { fontSize: 20, fontWeight: 'bold', color: '#333', marginTop: 5 },
+  statLabel: { fontSize: 12, color: '#666', marginTop: 2 },
 
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F0F0', borderRadius: 10, paddingHorizontal: 10, height: 45, width: '100%', marginBottom: 15 },
-  searchInput: { flex: 1, marginLeft: 10, fontSize: 16, color: '#333' },
+  statusRow: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: 'white', padding: 10, borderRadius: 16, elevation: 1 },
+  statusItem: { flex: 1, alignItems: 'center', borderLeftWidth: 3, paddingLeft: 5 },
+  statusCount: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  statusLabel: { fontSize: 10, color: '#888' },
 
-  actionButton: { flexDirection: 'row', backgroundColor: '#5856D6', paddingVertical: 14, paddingHorizontal: 20, borderRadius: 12, width: '100%', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  closeButton: { backgroundColor: '#FF3B30', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, width: '100%', alignItems: 'center' },
-  buttonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-
-  entregadorItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', width: '100%', justifyContent: 'space-between' },
-  avatarContainer: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0E0E0', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  entregadorText: { fontSize: 16, color: '#333', flex: 1 },
-  emptyListText: { textAlign: 'center', color: '#999', marginVertical: 20 }
+  dashboardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 12, borderRadius: 12, marginVertical: 4, elevation: 1 },
+  rowInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  bulletPoint: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#5856D6', marginRight: 10 },
+  rowName: { fontSize: 14, fontWeight: '600', color: '#333' },
+  rowValueContainer: { alignItems: 'flex-end' },
+  rowValue: { fontSize: 15, fontWeight: 'bold', color: '#333' },
+  rowUnit: { fontSize: 10, color: '#999' },
 });

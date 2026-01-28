@@ -13,8 +13,9 @@ import {
   Animated,
   StatusBar
 } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons'; // Asegúrate de tener esta librería instalada
-import { loginUser, getUserRole, resendVerificationEmail, logUserData } from '../services/auth';
+import Icon from 'react-native-vector-icons/Ionicons';
+import { loginUser, getUserRole, resendVerificationEmail } from '../services/auth';
+import { getSavedAccounts, saveAccount, removeAccount } from '../services/accountManager';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
@@ -24,11 +25,18 @@ export default function LoginScreen({ navigation }) {
   const [sendingVerification, setSendingVerification] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Estados para gestión de cuentas guardadas
+  const [savedAccounts, setSavedAccounts] = useState([]);
+  const [showAccountList, setShowAccountList] = useState(false);
+  const [loggingInAccount, setLoggingInAccount] = useState(null); // UID de la cuenta intentando entrar
+
   // Animación de entrada
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
 
   useEffect(() => {
+    loadSavedAccounts();
+
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -43,8 +51,16 @@ export default function LoginScreen({ navigation }) {
     ]).start();
   }, []);
 
-  const handleLogin = async () => {
-    if (!email || !password) {
+  const loadSavedAccounts = async () => {
+    const accounts = await getSavedAccounts();
+    if (accounts && accounts.length > 0) {
+      setSavedAccounts(accounts);
+      setShowAccountList(true);
+    }
+  };
+
+  const processLogin = async (emailInput, passwordInput, isQuickLogin = false) => {
+    if (!emailInput || !passwordInput) {
       Alert.alert('Campos incompletos', 'Por favor ingresa tu correo y contraseña.');
       return;
     }
@@ -52,23 +68,26 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     setUnverifiedUser(null);
     try {
-      const user = await loginUser(email.trim(), password);
+      // 1. Autenticación con Backend (Firebase)
+      const user = await loginUser(emailInput.trim(), passwordInput);
 
       if (!user.emailVerified) {
         setUnverifiedUser(user);
         setLoading(false);
-        // No mostramos Alert intrusivo, la UI mostrará la tarjeta de advertencia
+        setLoggingInAccount(null);
+        if (isQuickLogin) setShowAccountList(false); // Volver al form para mostrar advertencia
         return;
       }
 
-      // Obtener rol (buscando por UID y Email para robustez)
+      // 2. Obtener rol
       const role = await getUserRole(user.uid, user.email);
       console.log('✅ Rol obtenido:', role);
 
-      // DEBUG: Log datos del usuario
-      // await logUserData(user.email);
+      // 3. Guardar credenciales localmente para futuro acceso rápido
+      await saveAccount(user, passwordInput, role);
 
       setLoading(false);
+      setLoggingInAccount(null);
       navigation.replace('AppDrawer', { role, user });
 
     } catch (error) {
@@ -76,28 +95,106 @@ export default function LoginScreen({ navigation }) {
       let msg = 'Error al iniciar sesión.';
       if (error.code === 'auth/invalid-email') msg = 'Correo electrónico inválido.';
       if (error.code === 'auth/user-not-found') msg = 'Usuario no encontrado.';
-      if (error.code === 'auth/wrong-password') msg = 'Contraseña incorrecta.';
+      if (error.code === 'auth/wrong-password') msg = 'Contraseña incorrecta.'; // Posible si cambió pass en otro lado
 
       Alert.alert('Error de Acceso', msg);
       setLoading(false);
+      setLoggingInAccount(null);
     }
+  };
+
+  const handleLogin = () => {
+    processLogin(email, password, false);
+  };
+
+  const handleQuickLogin = (account) => {
+    setLoggingInAccount(account.uid);
+    processLogin(account.email, account.password, true);
+  };
+
+  const handleDeleteAccount = async (uid) => {
+    Alert.alert(
+      'Eliminar cuenta',
+      '¿Estás seguro de que quieres eliminar esta cuenta de la lista de acceso rápido?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            const updated = await removeAccount(uid);
+            setSavedAccounts(updated);
+            if (updated.length === 0) {
+              setShowAccountList(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleResendVerification = async () => {
     if (!unverifiedUser) return;
-
     try {
       setSendingVerification(true);
       await resendVerificationEmail();
-      Alert.alert(
-        'Correo enviado',
-        `Se ha reenviado el enlace a ${unverifiedUser.email}. Revisa tu bandeja de entrada o spam.`
-      );
+      Alert.alert('Correo enviado', `Se ha reenviado el enlace a ${unverifiedUser.email}.`);
     } catch (error) {
       Alert.alert('Error', error.message);
     } finally {
       setSendingVerification(false);
     }
+  };
+
+  // Helper para mostrar el nombre del rol correctamente
+  const getRoleDisplayName = (role) => {
+    switch (role) {
+      case 'admin': return 'Administrador';
+      case 'vendedor': return 'Vendedor';
+      case 'entregador': return 'Entregador';
+      case 'bodeguero': return 'Bodeguero';
+      case 'user': return 'Usuario';
+      default: return role ? role.charAt(0).toUpperCase() + role.slice(1) : 'Usuario';
+    }
+  };
+
+  // Render del Item de Cuenta Guardada
+  const renderAccountItem = (account) => {
+    const isLoggingIn = loggingInAccount === account.uid;
+
+    return (
+      <TouchableOpacity
+        key={account.uid}
+        style={styles.accountCard}
+        onPress={() => handleQuickLogin(account)}
+        disabled={loading}
+      >
+        <View style={styles.accountAvatar}>
+          <Text style={styles.accountInitial}>
+            {account.displayName ? account.displayName.charAt(0).toUpperCase() : account.email.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+
+        <View style={styles.accountInfo}>
+          <Text style={styles.accountName} numberOfLines={1}>
+            {account.displayName || account.email.split('@')[0]}
+          </Text>
+          <Text style={styles.accountEmail} numberOfLines={1}>{account.email}</Text>
+          <Text style={styles.accountRole}>{getRoleDisplayName(account.role)}</Text>
+        </View>
+
+        {isLoggingIn ? (
+          <ActivityIndicator color="#007AFF" />
+        ) : (
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => handleDeleteAccount(account.uid)}
+          >
+            <Icon name="trash-outline" size={20} color="#FF3B30" />
+          </TouchableOpacity>
+        )}
+      </TouchableOpacity>
+    );
   };
 
   return (
@@ -110,61 +207,89 @@ export default function LoginScreen({ navigation }) {
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <Animated.View style={[styles.innerContainer, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
 
-          {/* Header / Logo Placeholder */}
+          {/* Header */}
           <View style={styles.headerContainer}>
             <View style={styles.logoContainer}>
               <Icon name="cube" size={50} color="#007AFF" />
             </View>
-            <Text style={styles.title}>Bienvenido</Text>
-            <Text style={styles.subtitle}>Inicia sesión para gestionar el inventario</Text>
+            <Text style={styles.title}>
+              {showAccountList ? 'Selecciona una cuenta' : 'Bienvenido'}
+            </Text>
+            <Text style={styles.subtitle}>
+              {showAccountList ? 'Toca para iniciar sesión rápidamente' : 'Inicia sesión para gestionar el inventario'}
+            </Text>
           </View>
 
-          {/* Formulario */}
-          <View style={styles.formContainer}>
+          {/* VISTA: LISTA DE CUENTAS */}
+          {showAccountList ? (
+            <View style={styles.accountListContainer}>
+              {savedAccounts.map(renderAccountItem)}
 
-            {/* Input Email */}
-            <View style={styles.inputWrapper}>
-              <Icon name="mail-outline" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                placeholder="Correo electrónico"
-                placeholderTextColor="#A0A0A0"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                value={email}
-                onChangeText={setEmail}
-                style={styles.input}
-              />
-            </View>
-
-            {/* Input Password */}
-            <View style={styles.inputWrapper}>
-              <Icon name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                placeholder="Contraseña"
-                placeholderTextColor="#A0A0A0"
-                secureTextEntry={!showPassword}
-                value={password}
-                onChangeText={setPassword}
-                style={styles.input}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-                <Icon name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#666" />
+              <TouchableOpacity
+                style={styles.useAnotherAccountButton}
+                onPress={() => setShowAccountList(false)}
+              >
+                <Icon name="add-circle-outline" size={24} color="#007AFF" style={{ marginRight: 8 }} />
+                <Text style={styles.useAnotherAccountText}>Usar otra cuenta</Text>
               </TouchableOpacity>
             </View>
+          ) : (
+            /* VISTA: FORMULARIO DE LOGIN */
+            <View style={styles.formContainer}>
+              {/* Input Email */}
+              <View style={styles.inputWrapper}>
+                <Icon name="mail-outline" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  placeholder="Correo electrónico"
+                  placeholderTextColor="#A0A0A0"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  value={email}
+                  onChangeText={setEmail}
+                  style={styles.input}
+                />
+              </View>
 
-            {/* Botón Login */}
-            <TouchableOpacity
-              onPress={handleLogin}
-              disabled={loading}
-              style={[styles.loginButton, loading && styles.loginButtonDisabled]}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.loginButtonText}>INGRESAR</Text>
+              {/* Input Password */}
+              <View style={styles.inputWrapper}>
+                <Icon name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  placeholder="Contraseña"
+                  placeholderTextColor="#A0A0A0"
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={setPassword}
+                  style={styles.input}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+                  <Icon name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#666" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Botón Login */}
+              <TouchableOpacity
+                onPress={handleLogin}
+                disabled={loading}
+                style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.loginButtonText}>INGRESAR</Text>
+                )}
+              </TouchableOpacity>
+
+              {/* Botón Volver a Cuentas Guardadas (si existen) */}
+              {savedAccounts.length > 0 && (
+                <TouchableOpacity
+                  style={styles.backToAccountsButton}
+                  onPress={() => setShowAccountList(true)}
+                >
+                  <Text style={styles.backToAccountsText}>Volver a mis cuentas</Text>
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
-          </View>
+            </View>
+          )}
 
           {/* Tarjeta de Usuario No Verificado */}
           {unverifiedUser && (
@@ -235,11 +360,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1A1A1A',
     marginBottom: 8,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
+    paddingHorizontal: 20,
   },
   formContainer: {
     width: '100%',
@@ -253,7 +380,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     height: 60,
     borderWidth: 1,
-    borderColor: 'transparent', // Se puede cambiar a un gris muy suave si se desea borde
+    borderColor: 'transparent',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -332,5 +459,80 @@ const styles = StyleSheet.create({
   footerText: {
     color: '#B0B0B0',
     fontSize: 12,
+  },
+  // Estilos Nuevos para Lista de Cuentas
+  accountListContainer: {
+    width: '100%',
+  },
+  accountCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  accountAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#E1F0FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  accountInitial: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#007AFF',
+  },
+  accountInfo: {
+    flex: 1,
+  },
+  accountName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  accountEmail: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 2,
+  },
+  accountRole: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  deleteButton: {
+    padding: 8,
+  },
+  useAnotherAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    paddingVertical: 12,
+  },
+  useAnotherAccountText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  backToAccountsButton: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  backToAccountsText: {
+    color: '#666',
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
 });
