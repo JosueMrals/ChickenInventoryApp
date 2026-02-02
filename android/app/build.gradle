@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.google.firebase.appdistribution"
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -83,7 +84,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.5"
+        versionName "1.8.2"
     }
     signingConfigs {
         debug {

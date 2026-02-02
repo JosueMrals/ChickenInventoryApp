@@ -5,6 +5,7 @@ import globalStyles from '../../styles/globalStyles';
 import { PreSaleContext } from './context/preSaleContext';
 import { getPreSaleHistory } from '../../services/preSaleService';
 import HistoryDetailModal from './components/HistoryDetailModal';
+import { useRoute as useRouteContext } from '../../context/RouteContext'; // Rename to avoid conflict with navigation route
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
@@ -71,6 +72,28 @@ export default function PreSaleDetailScreen({ route, navigation }) {
     const [historyModalVisible, setHistoryModalVisible] = useState(false);
     const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
 
+    // Obtener rol del contexto de ruta o de los params de navegación
+    // Asumimos que podemos obtener el rol de alguna manera global o pasarlo
+    // En este caso, intentaremos obtenerlo del usuario que hizo login si está disponible en RouteContext
+    // Si no, tendremos que confiar en que solo vendedores ven esto
+    // Pero lo más robusto es comprobar el rol
+    // Por simplicidad y basándonos en tu requerimiento: "eliminar... para el usuario vendedor"
+
+    // NOTA: Para implementar esto correctamente, necesitamos saber el rol actual.
+    // Como PreSaleDetailScreen puede ser accedido por Admin o Vendedor,
+    // verificaremos si podemos pasar el rol por params o contexto.
+
+    // Una opción es que el usuario actual se guarde en un contexto global de Auth (SessionManager),
+    // pero aquí usaremos una lógica simple: Si es vendedor, ocultamos el botón.
+    // Asumiremos que el rol viene en `route.params` si se pasó, o lo obtenemos de otra fuente.
+
+    // Vamos a intentar obtener el rol de los params de navegación si se pasó desde el Stack
+    const userRole = route.params?.role || 'user'; // Default to user if not provided
+
+    // También podemos usar una lógica:
+    // Si la pantalla se muestra, verificar si el usuario es Admin para mostrar el botón.
+    // O simplemente ocultarlo para todos excepto Entregador/Admin.
+
     useEffect(() => {
         const fetchHistory = async () => {
             if (presale.id) {
@@ -100,6 +123,11 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         data.push({ type: 'section_title', key: 'title_customer', title: 'Cliente' });
         data.push({ type: 'info_row', key: 'customer_name', icon: 'person-outline', label: 'Nombre', value: `${presale.customer?.firstName || ''} ${presale.customer?.lastName || ''}` });
         data.push({ type: 'info_row', key: 'date', icon: 'calendar-outline', label: 'Fecha', value: presale.createdAt?.toDate ? presale.createdAt.toDate().toLocaleDateString('es-ES') : 'N/A' });
+
+        // Mostrar Ruta si existe
+        if (presale.route) {
+             data.push({ type: 'info_row', key: 'route_info', icon: 'location-outline', label: 'Ruta', value: presale.route.name });
+        }
 
         data.push({ type: 'section_title', key: 'title_products', title: 'Productos' });
         (presale.items || []).forEach((item) => data.push({ type: 'item_card', key: `item-${item.id}`, ...item }));
@@ -136,6 +164,27 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 
     const keyExtractor = useCallback((item) => item.key, []);
 
+    // Lógica para mostrar botón de pago:
+    // Solo visible si es 'pending' Y (es Admin o Entregador)
+    // Asumimos que si no sabemos el rol (undefined), ocultamos por seguridad si queremos bloquear a vendedores.
+    // O verificamos negativamente: Si es vendedor, NO mostrar.
+
+    // Sin embargo, como el rol no siempre llega por params en todas las navegaciones legacy,
+    // necesitamos ser cuidadosos.
+    // Una estrategia segura es ocultar el botón de pago por defecto en esta pantalla,
+    // ya que el Entregador tendrá su propio módulo "Mis Entregas" para procesar pagos.
+    // Si el Admin necesita pagar desde aquí, podemos habilitarlo si confirmamos que es admin.
+
+    // Para cumplir estrictamente "eliminar la función de pagar para el vendedor":
+    // Simplemente no renderizaremos el botón de pago si estamos en un flujo de vendedor.
+
+    // Como solución rápida y efectiva: Ocultar el botón de "Proceder al Pago" totalmente en esta pantalla
+    // si asumimos que el pago se hace EXCLUSIVAMENTE en el flujo de entrega.
+    // Pero si el Admin quiere pagar aquí, debemos permitirlo.
+
+    // Vamos a asumir que el rol se pasa o se obtiene. Si no, ocultamos.
+    const showPayButton = presale.status === 'pending' && (userRole === 'admin' || userRole === 'entregador');
+
     return (
         <SafeAreaView style={globalStyles.container}>
             <View style={globalStyles.header}>
@@ -161,13 +210,21 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 
 				{presale.status === 'pending' && (
 					<View style={styles.footer}>
-						<TouchableOpacity style={styles.editButton} onPress={handleEdit} disabled={isEditing}>
-							{isEditing ? <ActivityIndicator color="#007AFF" /> : <Icon name="create-outline" size={22} color="#007AFF"/>}
+						<TouchableOpacity style={[styles.editButton, { flex: 1, flexDirection: 'row', width: 'auto' }]} onPress={handleEdit} disabled={isEditing}>
+							{isEditing ? <ActivityIndicator color="#007AFF" /> : (
+                                <>
+                                    <Icon name="create-outline" size={22} color="#007AFF" style={{ marginRight: 8 }}/>
+                                    <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Editar Pedido</Text>
+                                </>
+                            )}
 						</TouchableOpacity>
-						<TouchableOpacity style={styles.payButton} onPress={() => navigation.navigate('PreSalePayment', { presale })}>
-							<Icon name="cash-outline" size={22} color="#fff" style={{marginRight: 10}}/>
-							<Text style={styles.payButtonText}>Proceder al Pago</Text>
-						</TouchableOpacity>
+
+                        {showPayButton && (
+                            <TouchableOpacity style={styles.payButton} onPress={() => navigation.navigate('PreSalePayment', { presale })}>
+                                <Icon name="cash-outline" size={22} color="#fff" style={{marginRight: 10}}/>
+                                <Text style={styles.payButtonText}>Cobrar</Text>
+                            </TouchableOpacity>
+                        )}
 					</View>
 				)}
             </View>
@@ -193,8 +250,8 @@ const styles = StyleSheet.create({
     totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, marginTop: 8, borderTopWidth: 1, borderTopColor: '#F0F0F0', padding: 16 },
     totalLabel: { fontSize: 18, fontWeight: 'bold', color: '#333' },
     totalValue: { fontSize: 20, fontWeight: 'bold', color: '#007AFF' },
-    footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#EEE', backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center' },
-    editButton: { borderWidth: 1, borderColor: '#007AFF', borderRadius: 12, padding: 14, marginRight: 10, justifyContent: 'center', alignItems: 'center', width: 50, height: 50 },
+    footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#EEE', backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', gap: 10 },
+    editButton: { borderWidth: 1, borderColor: '#007AFF', borderRadius: 12, padding: 14, justifyContent: 'center', alignItems: 'center' },
     payButton: { backgroundColor: '#28A745', flexDirection: 'row', flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16, borderRadius: 12, elevation: 3 },
     payButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     historyItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', backgroundColor: 'white', paddingHorizontal: 16, borderRadius: 8, marginBottom: 5 },

@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback } from "react";
+import React, { createContext, useState, useCallback, useEffect } from "react";
 import { calcPriceForProduct } from "../../sales/hooks/useSalePricing";
 import { 
   savePreSaleToFirestore, 
@@ -6,6 +6,7 @@ import {
   updatePreSaleInFirestore,
 } from "../../../services/preSaleService";
 import { getProducts } from "../../products/services/productService";
+import { useRoute } from "../../../context/RouteContext";
 
 export const PreSaleContext = createContext();
 
@@ -16,6 +17,9 @@ export function PreSaleProvider({ children }) {
   const [preSales, setPreSales] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editingPreSale, setEditingPreSale] = useState(null);
+
+  // Obtener la ruta seleccionada del contexto global
+  const { selectedRoute } = useRoute();
 
   const applyBonuses = useCallback((currentCart) => {
     let newCart = [...currentCart].filter(item => !item.isBonus);
@@ -42,15 +46,26 @@ export function PreSaleProvider({ children }) {
     return newCart;
   }, []);
 
-  const loadPreSales = async () => {
+  const loadPreSales = useCallback(async () => {
     setLoading(true);
     try {
-      const salesFromDb = await getPreSalesFromFirestore();
+      // Aplicar filtro por ruta si existe
+      const filters = {};
+      if (selectedRoute && selectedRoute.id) {
+        filters.routeId = selectedRoute.id;
+      }
+
+      const salesFromDb = await getPreSalesFromFirestore(filters);
       setPreSales(salesFromDb);
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedRoute]); // Recargar si cambia la ruta
+
+  // Efecto para recargar las ventas cuando cambia la ruta
+  useEffect(() => {
+    loadPreSales();
+  }, [loadPreSales]);
   
   const addItem = (product, qty = 1) => {
     setCart(prevCart => {
@@ -169,14 +184,24 @@ export function PreSaleProvider({ children }) {
       const subtotal = soldItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const totalDiscount = soldItems.reduce((sum, item) => sum + item.discount, 0);
       const total = subtotal - totalDiscount;
-      const preSalePayload = { customer, cart: cartToSubmit, subtotal, totalDiscount, total };
+
+      // Vinculamos la ruta seleccionada
+      const preSalePayload = {
+        customer,
+        cart: cartToSubmit,
+        subtotal,
+        totalDiscount,
+        total,
+        route: selectedRoute || null, // Guardamos el objeto completo de la ruta
+        routeId: selectedRoute?.id || null // Aseguramos que routeId se pase explícitamente para el servicio
+      };
 
       if (editingPreSale) {
         await updatePreSaleInFirestore(editingPreSale.id, editingPreSale, preSalePayload);
       } else {
         await savePreSaleToFirestore(preSalePayload);
       }
-      await loadPreSales();
+      await loadPreSales(); // Recargar la lista después de guardar
     } finally {
       setLoading(false);
     }

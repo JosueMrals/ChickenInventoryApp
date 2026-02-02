@@ -6,17 +6,15 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import auth from '@react-native-firebase/auth';
 import appCheck from '@react-native-firebase/app-check'; // Importar App Check
+import appDistribution from '@react-native-firebase/app-distribution';
 
 import LoginScreen from './android/app/src/screens/LoginScreen';
-import ProductList from './android/app/src/screens/ProductList';
-import ProductForm from './android/app/src/screens/ProductForm';
 import Sidebar from './android/app/src/components/Sidebar';
 import ProfileScreen from './android/app/src/screens/ProfileScreen';
 import UserManagementScreen from './android/app/src/screens/users/UserManagementScreen';
 
 import SalesScreen from './android/app/src/screens/sales/SalesScreen';
 import CustomersScreen from './android/app/src/screens/customer/CustomerListScreen';
-import ProductListScreen from './android/app/src/screens/products/ProductListScreen';
 import DashboardScreen from './android/app/src/screens/dashboard/DashboardScreen';
 
 import QuickSaleStack from './android/app/src/navigation/QuickSaleStack';
@@ -27,17 +25,25 @@ import PreSaleDetailScreen from './android/app/src/screens/presales/PreSaleDetai
 import PreSalePaymentScreen from './android/app/src/screens/presales/PreSalePaymentScreen';
 import PreSaleDoneScreen from './android/app/src/screens/presales/PreSaleDoneScreen';
 
-import PreparePreSalesScreen from './android/app/src/screens/presales/PreparePreSalesScreen';
-import WarehousePreSaleDetailScreen from './android/app/src/screens/presales/WarehousePreSaleDetailScreen';
-import MyDeliveriesScreen from './android/app/src/screens/presales/MyDeliveriesScreen';
+// --- WAREHOUSE IMPORTS (MIGRATED) ---
+import WarehouseDashboardScreen from './android/app/src/screens/Warehouse/screens/WarehouseDashboardScreen';
+import WarehouseOrderDetailScreen from './android/app/src/screens/Warehouse/screens/WarehouseOrderDetailScreen';
+import ProductHandoverScreen from './android/app/src/screens/Warehouse/screens/ProductHandoverScreen';
+import MyDeliveriesScreen from './android/app/src/screens/Warehouse/screens/MyDeliveriesScreen';
+// ------------------------------------
 
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
 import ProductsStack from './android/app/src/navigation/ProductsStack';
 import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen';
+import SettingsScreen from './android/app/src/screens/settings/SettingsScreen'; // Nuevo Import
+import RoutesScreen from './android/app/src/screens/routes/RoutesScreen';
+import AddRouteScreen from './android/app/src/screens/routes/AddRouteScreen';
+import RouteSelectionScreen from './android/app/src/screens/routes/RouteSelectionScreen';
 
 import useSessionTimeout from "./android/app/src/hooks/useSessionTimeout";
 import { SessionManager } from './android/app/src/utils/SessionManager';
 import { PreSaleProvider } from './android/app/src/screens/presales/context/preSaleContext';
+import { RouteProvider } from './android/app/src/context/RouteContext';
 
 export const navigationRef = createNavigationContainerRef();
 
@@ -62,12 +68,6 @@ function AppDrawer({ route }) {
       <Drawer.Screen name="Sales">
          {(props) => <SalesScreen {...props} user={user} role={role} />}
        </Drawer.Screen>
-       <Drawer.Screen name="ProductListScreen">
-          {(props) => <ProductListScreen {...props} user={user} role={role} />}
-        </Drawer.Screen>
-      <Drawer.Screen name="ProductForm">
-        {(props) => <ProductForm {...props} user={user} role={role} />}
-      </Drawer.Screen>
       <Drawer.Screen name="Profile">
         {(props) => <ProfileScreen {...props} user={user} role={role} />}
       </Drawer.Screen>
@@ -126,25 +126,41 @@ function AppDrawer({ route }) {
 		  component={PreSaleProductsScreen}
 	  />
 
+	  {/* WAREHOUSE ROUTES */}
 	  <Drawer.Screen name="PreparePreSales"
-		  component={PreparePreSalesScreen}
+		  component={WarehouseDashboardScreen}
+          options={{ title: "Bodega - Control" }}
 	  />
 
-    <Drawer.Screen name="WarehousePreSaleDetail"
-      component={WarehousePreSaleDetailScreen}
-    />
+      <Drawer.Screen name="WarehouseOrderDetail"
+        component={WarehouseOrderDetailScreen}
+        options={{ title: "Detalle de Orden Bodega" }}
+      />
+      {/* Kept alias for backward compatibility if needed, though WarehouseOrderDetail is preferred */}
+      <Drawer.Screen name="WarehousePreSaleDetail"
+        component={WarehouseOrderDetailScreen}
+      />
 
-    <Drawer.Screen name="MyDeliveries">
-      {(props) => <MyDeliveriesScreen {...props} user={user} />}
-    </Drawer.Screen>
+      <Drawer.Screen name="ProductHandover"
+        component={ProductHandoverScreen}
+        options={{ title: "Entregar Carga" }}
+      />
 
+      <Drawer.Screen name="MyDeliveries">
+        {(props) => <MyDeliveriesScreen {...props} user={user} />}
+      </Drawer.Screen>
+      {/* ---------------- */}
+
+      {/* SETTINGS MODULE UPDATED */}
       <Drawer.Screen name="Settings"
-      component={PrintersScreen}
-      options={{
-        drawerLabel: "Impresoras Bluetooth",
-        headerShown: false,
-        swipeEnabled: false,
-      }}/>
+        component={SettingsScreen}
+        options={{
+            drawerLabel: "Configuración",
+            headerShown: false,
+            swipeEnabled: false,
+        }}
+      />
+
       <Drawer.Screen name="Reports"
         component={ReportsScreen}
         options={{
@@ -159,11 +175,65 @@ function AppDrawer({ route }) {
         initialParams={{ role, user }}
 	  />
 
+      {/* ROUTES MODULE */}
+      <Drawer.Screen name="Routes"
+        component={RoutesScreen}
+        options={{ title: "Rutas de Entrega" }}
+      />
+      <Drawer.Screen name="AddRouteScreen"
+        component={AddRouteScreen}
+        options={{ title: "Nueva Ruta" }}
+      />
+
     </Drawer.Navigator>
   );
 }
 
 export default function App() {
+
+  // Verificar actualizaciones de App Distribution al iniciar (o al hacer login)
+  // Como `App` se monta una vez, este useEffect corre al arrancar la app.
+  useEffect(() => {
+    async function checkUpdates() {
+      // Intentar verificar actualización, ignorando errores de entorno dev
+      try {
+        const release = await appDistribution().checkForUpdate();
+        if (release && release.downloadUrl) {
+          Alert.alert(
+            'Nueva Actualización Disponible',
+            `Versión ${release.displayVersion} (${release.versionCode}).\n¿Deseas descargarla e instalarla ahora?`,
+            [
+              {
+                text: 'Más tarde',
+                style: 'cancel',
+              },
+              {
+                text: 'Actualizar',
+                onPress: async () => {
+                  try {
+                    await release.download();
+                  } catch (err) {
+                    Alert.alert('Error', 'No se pudo iniciar la descarga.');
+                    console.log('Download error:', err);
+                  }
+                },
+              },
+            ],
+            { cancelable: false }
+          );
+        }
+      } catch (error) {
+        // Silenciar error si es entorno no soportado (dev/simulador) para no molestar
+        if (error.message && error.message.includes("not supported")) {
+             console.log("App Distribution check skipped: Not supported in this environment.");
+        } else {
+             console.log('App Distribution check error:', error);
+        }
+      }
+    }
+
+    checkUpdates();
+  }, []);
 
   // Inicializar App Check con proveedor de depuración
   useEffect(() => {
@@ -225,18 +295,23 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <PreSaleProvider>
-        <NavigationContainer ref={navigationRef}>
-          <TouchableWithoutFeedback onPress={() => SessionManager.updateActivity()}>
-            <View style={{ flex: 1 }}>
-              <Stack.Navigator screenOptions={{ headerShown: false }}>
-                  <Stack.Screen name="Login" component={LoginScreen} />
-                  <Stack.Screen name="AppDrawer" component={AppDrawer} />
-              </Stack.Navigator>
-            </View>
-          </TouchableWithoutFeedback>
-        </NavigationContainer>
-      </PreSaleProvider>
+      <RouteProvider>
+        <PreSaleProvider>
+          <NavigationContainer ref={navigationRef}>
+            <TouchableWithoutFeedback onPress={() => SessionManager.updateActivity()}>
+              <View style={{ flex: 1 }}>
+                <Stack.Navigator screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="Login" component={LoginScreen} />
+                    <Stack.Screen name="RouteSelection" component={RouteSelectionScreen} />
+                    <Stack.Screen name="AppDrawer" component={AppDrawer} />
+                    {/* Pantallas globales accesibles desde Settings */}
+                    <Stack.Screen name="PrintersScreen" component={PrintersScreen} />
+                </Stack.Navigator>
+              </View>
+            </TouchableWithoutFeedback>
+          </NavigationContainer>
+        </PreSaleProvider>
+      </RouteProvider>
     </GestureHandlerRootView>
   );
 }

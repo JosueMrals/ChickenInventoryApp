@@ -12,7 +12,12 @@ export const useUsers = () => {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    // Validar que unsubscribe sea una función antes de llamarla
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
   }, []);
 
   const handleAddUser = async (userData) => {

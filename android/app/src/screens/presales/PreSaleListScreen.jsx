@@ -6,7 +6,7 @@ import PreSaleCard from './components/PreSaleCard';
 import { useFocusEffect } from '@react-navigation/native';
 import globalStyles from '../../styles/globalStyles';
 
-const TABS = ['Pendientes', 'Pagadas', 'Productos'];
+const TABS = ['Pendientes', 'Pagadas'];
 
 export default function PreSaleListScreen({ navigation }) {
     const { preSales, loadPreSales, loading } = useContext(PreSaleContext);
@@ -24,25 +24,6 @@ export default function PreSaleListScreen({ navigation }) {
         return [];
     }, [preSales, activeTab]);
 
-    const aggregatedProducts = useMemo(() => {
-        if (activeTab !== 'Productos') return [];
-        const productMap = new Map();
-        preSales.forEach(sale => {
-            sale.cart.forEach(item => {
-                const existing = productMap.get(item.productId);
-                if (existing) {
-                    productMap.set(item.productId, { ...existing, quantity: existing.quantity + item.quantity });
-                } else {
-                    productMap.set(item.productId, { 
-                        productId: item.productId, 
-                        productName: item.productName, 
-                        quantity: item.quantity 
-                    });
-                }
-            });
-        });
-        return Array.from(productMap.values()).sort((a, b) => b.quantity - a.quantity);
-    }, [preSales, activeTab]);
 
     const renderEmptyComponent = () => (
         <View style={styles.emptyContainer}>
@@ -76,7 +57,6 @@ export default function PreSaleListScreen({ navigation }) {
 
             {loading ? <ActivityIndicator size="large" style={{ marginTop: 50 }} /> : (
                 <>
-                    {activeTab !== 'Productos' ? (
                         <FlatList
                             data={filteredData}
                             renderItem={({ item }) => (
@@ -88,20 +68,6 @@ export default function PreSaleListScreen({ navigation }) {
                             contentContainerStyle={styles.listContent}
                             ListEmptyComponent={renderEmptyComponent}
                         />
-                    ) : (
-                        <FlatList
-                            data={aggregatedProducts}
-                            renderItem={({ item }) => (
-                                <View style={styles.productItem}>
-                                    <Text style={styles.productName}>{item.productName}</Text>
-                                    <Text style={styles.productQuantity}>Total: {item.quantity}</Text>
-                                </View>
-                            )}
-                            keyExtractor={item => item.productId}
-                            contentContainerStyle={styles.listContent}
-                            ListEmptyComponent={renderEmptyComponent}
-                        />
-                    )}
                 </>
             )}
 

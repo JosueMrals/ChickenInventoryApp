@@ -29,6 +29,10 @@ export const getNextPreSaleNumber = async () => {
 export const savePreSaleToFirestore = async (preSaleData) => {
   const preSaleNumber = await getNextPreSaleNumber();
   const user = auth().currentUser;
+
+  // Extraemos la ruta si viene en los datos, si no, null
+  const { route, ...restData } = preSaleData;
+
   const newPreSale = {
     customer: preSaleData.customer,
     subtotal: preSaleData.subtotal,
@@ -40,6 +44,9 @@ export const savePreSaleToFirestore = async (preSaleData) => {
     createdBy: user?.email || 'N/A',
     items: preSaleData.cart.filter(item => !item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
     bonuses: preSaleData.cart.filter(item => item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
+    // Guardamos la información de la ruta en la pre-venta
+    route: route || null,
+    routeId: route?.id || null
   };
   const docRef = await presalesCollection.add(newPreSale);
   
@@ -59,6 +66,10 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
   const user = auth().currentUser;
   const preSaleRef = presalesCollection.doc(preSaleId);
 
+  // Mantenemos la ruta original si no se proporciona una nueva (generalmente la ruta no cambia al editar, pero por si acaso)
+  const route = newPreSaleData.route || oldPreSaleData.route || null;
+  const routeId = newPreSaleData.route?.id || oldPreSaleData.routeId || null;
+
   const updatedPreSale = {
     customer: newPreSaleData.customer,
     subtotal: newPreSaleData.subtotal,
@@ -68,6 +79,8 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
     updatedBy: user?.email || 'N/A',
     items: newPreSaleData.cart.filter(item => !item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
     bonuses: newPreSaleData.cart.filter(item => item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
+    route: route,
+    routeId: routeId
   };
 
   const historyRef = preSaleRef.collection('history').doc();
@@ -93,8 +106,15 @@ export const getPreSaleHistory = async (preSaleId) => {
 };
 
 
-export const getPreSalesFromFirestore = async () => {
-  const snapshot = await presalesCollection.orderBy('createdAt', 'desc').get();
+export const getPreSalesFromFirestore = async (filters = {}) => {
+  let query = presalesCollection.orderBy('createdAt', 'desc');
+
+  // Aplicar filtro de ruta si existe
+  if (filters.routeId) {
+    query = query.where('routeId', '==', filters.routeId);
+  }
+
+  const snapshot = await query.get();
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 

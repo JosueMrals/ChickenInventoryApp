@@ -88,7 +88,14 @@ export default function LoginScreen({ navigation }) {
 
       setLoading(false);
       setLoggingInAccount(null);
-      navigation.replace('AppDrawer', { role, user });
+
+      // REDIRECCIÓN SEGÚN ROL (RUTA O DASHBOARD)
+      const rolesWithRoute = ['user', 'entregador', 'bodeguero', 'vendedor'];
+      if (rolesWithRoute.includes(role)) {
+        navigation.replace('RouteSelection', { role, user });
+      } else {
+        navigation.replace('AppDrawer', { role, user });
+      }
 
     } catch (error) {
       console.log('🔥 Error al iniciar sesión:', error);

@@ -2,6 +2,7 @@ import React, { useContext, useMemo, useState } from "react";
 import { View, Text, TouchableOpacity, FlatList, Alert, SafeAreaView, ActivityIndicator } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { PreSaleContext } from "./context/preSaleContext";
+import { useRoute } from "../../context/RouteContext";
 import CartItem from "../quicksalesNew/components/CartItem";
 import DiscountModal from "../../components/common/DiscountModal";
 import styles from "../quicksalesNew/styles/quickCartStyles";
@@ -14,7 +15,9 @@ export default function PreSaleCartScreen({ navigation }) {
     cart, updateCart, removeFromCart, customer, setCustomer, 
     submitPreSale, resetPreSale, loading
   } = useContext(PreSaleContext);
-  
+
+  const { selectedRoute } = useRoute();
+
   const [discountModal, setDiscountModal] = useState({ visible: false, product: null });
 
   const soldItems = useMemo(() => cart.filter(item => !item.isBonus), [cart]);
@@ -31,6 +34,16 @@ export default function PreSaleCartScreen({ navigation }) {
 
   const handleSubmit = async () => {
     if (cart.length === 0) return Alert.alert("Carrito vacío", "Agrega productos antes de continuar.");
+
+    // Validación de ruta seleccionada (opcional, pero recomendada)
+    if (!selectedRoute) {
+        return Alert.alert(
+            "Ruta no seleccionada",
+            "No se ha detectado una ruta activa. Por favor, selecciona una ruta desde el menú principal antes de guardar la venta.",
+            [{ text: "OK" }]
+        );
+    }
+
     if (!customer) {
       return Alert.alert("Cliente no asignado", "Por favor, asigna un cliente a esta pre-venta.", [
         { text: "Cancelar", style: "cancel" },
@@ -40,7 +53,7 @@ export default function PreSaleCartScreen({ navigation }) {
     
     try {
       await submitPreSale();
-      Alert.alert("Pre-Venta Guardada", "La pre-venta ha sido creada exitosamente.", [
+      Alert.alert("Pre-Venta Guardada", `La pre-venta ha sido creada exitosamente para la ruta: ${selectedRoute.name}`, [
         { text: "OK", onPress: () => {
             resetPreSale();
             navigation.navigate("PreSalesList") 
@@ -93,15 +106,38 @@ export default function PreSaleCartScreen({ navigation }) {
             <View style={{ width: 40 }} />
           </View>
 
-          {customer && (
-            <View style={styles.customerBox}>
-              <Icon name="person" size={18} color="#007AFF" />
-              <Text style={styles.customerText}>{customer.firstName} {customer.lastName}</Text>
-              <TouchableOpacity onPress={() => setCustomer(null)} style={{ marginLeft: 8 }}>
-                <Icon name="close" size={20} color="#FF3B30" />
-              </TouchableOpacity>
-            </View>
-          )}
+          {/* Información Contextual: Cliente y Ruta */}
+          <View style={{ paddingHorizontal: 16, marginBottom: 10 }}>
+            {/* Cliente */}
+            {customer ? (
+                <View style={[styles.customerBox, { marginBottom: 8 }]}>
+                <Icon name="person" size={18} color="#007AFF" />
+                <Text style={styles.customerText}>{customer.firstName} {customer.lastName}</Text>
+                <TouchableOpacity onPress={() => setCustomer(null)} style={{ marginLeft: 8 }}>
+                    <Icon name="close" size={20} color="#FF3B30" />
+                </TouchableOpacity>
+                </View>
+            ) : (
+                <TouchableOpacity
+                    style={[styles.customerBox, { borderStyle: 'dashed', backgroundColor: '#f9f9f9' }]}
+                    onPress={() => navigation.navigate('AssignCustomer')}
+                >
+                    <Icon name="person-add-outline" size={18} color="#666" />
+                    <Text style={[styles.customerText, { color: '#666' }]}>Asignar Cliente</Text>
+                </TouchableOpacity>
+            )}
+
+            {/* Ruta (Visualización) */}
+            {selectedRoute && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#E1F0FF', padding: 8, borderRadius: 8 }}>
+                    <Icon name="location-sharp" size={16} color="#007AFF" style={{ marginRight: 6 }} />
+                    <Text style={{ fontSize: 13, color: '#004488', fontWeight: '600' }}>
+                        Ruta Actual: {selectedRoute.name}
+                    </Text>
+                </View>
+            )}
+          </View>
+
 
           <FlatList
             data={cart}

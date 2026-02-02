@@ -1,24 +1,26 @@
 import React from 'react';
-import { TouchableOpacity, Text, Animated } from 'react-native';
+import { TouchableOpacity, Text, View, Animated } from 'react-native';
 import Ionicons from "react-native-vector-icons/Ionicons";
-import styles from '../styles/dashboardStyles';
+import styles from '../styles/ModuleCardStyles';
 import { useNavigation } from '@react-navigation/native';
+
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 export default function ModuleCard({ item, anim, user, role }) {
   const navigation = useNavigation();
+
   return (
-    <TouchableOpacity
+    <AnimatedTouchableOpacity
       onPress={() => navigation.navigate(item.screen, { user, role })}
-      activeOpacity={0.9}
+      activeOpacity={0.7}
       style={[
         styles.moduleCard,
         {
-          backgroundColor: item.color,
           transform: [
             {
               scale: anim.interpolate({
                 inputRange: [0, 1],
-                outputRange: [0.9, 1],
+                outputRange: [0.95, 1],
               }),
             },
           ],
@@ -26,8 +28,10 @@ export default function ModuleCard({ item, anim, user, role }) {
         },
       ]}
     >
-      <Ionicons name={item.icon} size={40} color="#fff" />
+      <View style={[styles.moduleIconContainer, { backgroundColor: item.color + '15' }]}>
+        <Ionicons name={item.icon} size={28} color={item.color} />
+      </View>
       <Text style={styles.moduleLabel}>{item.label}</Text>
-    </TouchableOpacity>
+    </AnimatedTouchableOpacity>
   );
 }
