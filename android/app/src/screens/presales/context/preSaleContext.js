@@ -5,7 +5,7 @@ import {
   getPreSalesFromFirestore,
   updatePreSaleInFirestore,
 } from "../../../services/preSaleService";
-import { getProducts } from "../../products/services/productService";
+import { getProducts } from "../../productsNew1/services/productsService";
 import { useRoute } from "../../../context/RouteContext";
 
 export const PreSaleContext = createContext();
@@ -220,7 +220,10 @@ export function PreSaleProvider({ children }) {
         setCustomer(preSale.customer);
 
         const cartItems = preSale.cart || preSale.items || [];
-        const reconstructedCart = cartItems
+        const bonusItems = preSale.bonuses || [];
+        const allItems = [...cartItems, ...bonusItems];
+
+        const reconstructedCart = allItems
             .map(item => {
                 const fullProduct = productsMap[item.productId || item.id];
                 if (!fullProduct) {

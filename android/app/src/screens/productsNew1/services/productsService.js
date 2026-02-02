@@ -82,6 +82,16 @@ export async function getProductByName(name) {
   }
 }
 
+export async function getProducts() {
+  try {
+    const snap = await db.collection(COLLECTION).orderBy('name').get();
+    return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (err) {
+    console.error('getProducts error:', err);
+    return [];
+  }
+}
+
 /* -------------------------
    Real-time subscription
    ------------------------- */
@@ -234,6 +244,7 @@ const productsService = {
   getProductById,
   getProductByBarcode,
   getProductByName,
+  getProducts,
   subscribeProducts,
   searchProductsByNamePrefix,
   searchProductsByBarcodeOrName,
