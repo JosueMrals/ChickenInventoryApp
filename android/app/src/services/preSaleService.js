@@ -30,7 +30,6 @@ export const savePreSaleToFirestore = async (preSaleData) => {
   const preSaleNumber = await getNextPreSaleNumber();
   const user = auth().currentUser;
 
-  // Extraemos la ruta si viene en los datos, si no, null
   const { route, ...restData } = preSaleData;
 
   const newPreSale = {
@@ -42,15 +41,14 @@ export const savePreSaleToFirestore = async (preSaleData) => {
     status: 'pending',
     createdAt: firestore.FieldValue.serverTimestamp(),
     createdBy: user?.email || 'N/A',
+    // Separar items y bonificaciones
     items: preSaleData.cart.filter(item => !item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
     bonuses: preSaleData.cart.filter(item => item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
-    // Guardamos la información de la ruta en la pre-venta
     route: route || null,
     routeId: route?.id || null
   };
   const docRef = await presalesCollection.add(newPreSale);
   
-  // Create initial history record
   const historyRef = docRef.collection('history').doc();
   await historyRef.set({
     timestamp: firestore.FieldValue.serverTimestamp(),
@@ -66,7 +64,6 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
   const user = auth().currentUser;
   const preSaleRef = presalesCollection.doc(preSaleId);
 
-  // Mantenemos la ruta original si no se proporciona una nueva (generalmente la ruta no cambia al editar, pero por si acaso)
   const route = newPreSaleData.route || oldPreSaleData.route || null;
   const routeId = newPreSaleData.route?.id || oldPreSaleData.routeId || null;
 
@@ -77,6 +74,7 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
     total: newPreSaleData.total,
     updatedAt: firestore.FieldValue.serverTimestamp(),
     updatedBy: user?.email || 'N/A',
+    // Separar items y bonificaciones
     items: newPreSaleData.cart.filter(item => !item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
     bonuses: newPreSaleData.cart.filter(item => item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
     route: route,
@@ -105,11 +103,9 @@ export const getPreSaleHistory = async (preSaleId) => {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
-
 export const getPreSalesFromFirestore = async (filters = {}) => {
   let query = presalesCollection.orderBy('createdAt', 'desc');
 
-  // Aplicar filtro de ruta si existe
   if (filters.routeId) {
     query = query.where('routeId', '==', filters.routeId);
   }

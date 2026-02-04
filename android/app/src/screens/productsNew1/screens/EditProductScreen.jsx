@@ -10,8 +10,6 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Switch,
-  Keyboard,
 } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
@@ -19,6 +17,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import globalStyles from '../../../styles/globalStyles';
 import productsService from '../services/productsService';
 import { createProductOperation } from '../../../services/operations/productOperations';
+import BonusSetup from '../components/BonusSetup'; // <-- Importar nuevo componente
 
 export default function EditProductScreen() {
   const navigation = useNavigation();
@@ -31,10 +30,9 @@ export default function EditProductScreen() {
 
   const initialRef = useRef(null);
   const scrollRef = useRef(null);
-  const inputsRef = useRef({});
 
   useEffect(() => {
-    // FIX: Added optional chaining (?.) to prevent crashes if fields are missing
+    // --- Lógica de carga actualizada ---
     const loadedValues = {
       ...initialProduct,
       purchasePrice: String(initialProduct?.purchasePrice ?? ''),
@@ -46,13 +44,20 @@ export default function EditProductScreen() {
         quantity: String(p?.quantity ?? ''),
         margin: '', 
       })) || [],
-      // --- Bonificaciones ---
-      bonusEnabled: initialProduct?.bonusEnabled ?? false,
-      bonusThreshold: String(initialProduct?.bonusThreshold ?? ''),
-      bonusQuantity: String(initialProduct?.bonusQuantity ?? ''),
+      // --- Cargar nueva estructura de bonificación o crear una por defecto ---
+      bonus: initialProduct.bonus ? {
+        ...initialProduct.bonus,
+        threshold: String(initialProduct.bonus.threshold || ''),
+        bonusQuantity: String(initialProduct.bonus.bonusQuantity || ''),
+      } : {
+        enabled: false,
+        threshold: '',
+        bonusProductId: null,
+        bonusProductName: '',
+        bonusQuantity: '',
+      },
     };
     
-    // Recalcular márgenes mayoristas iniciales
     loadedValues.wholesalePrices.forEach(wp => {
         if(wp.price && loadedValues.purchasePrice) {
             wp.margin = calculateMarginFromSalePrice(loadedValues.purchasePrice, wp.price);
@@ -135,9 +140,12 @@ export default function EditProductScreen() {
     if (!values.name || values.name.trim() === '') return { ok: false, msg: 'El nombre es obligatorio.' };
     if (values.purchasePrice && (Number.isNaN(Number(values.purchasePrice)) || Number(values.purchasePrice) < 0)) return { ok: false, msg: 'Costo de compra inválido.' };
     if (values.salePrice && (Number.isNaN(Number(values.salePrice)) || Number(values.salePrice) < 0)) return { ok: false, msg: 'Precio de venta inválido.' };
-    if (values.bonusEnabled) {
-      if (!values.bonusThreshold || Number(values.bonusThreshold) <= 0) return {ok: false, msg: "La 'cantidad mínima para bonificar' debe ser mayor a 0."};
-      if (!values.bonusQuantity || Number(values.bonusQuantity) <= 0) return {ok: false, msg: "La 'cantidad a bonificar' debe ser mayor a 0."};
+
+    // --- Nueva validación de bonificaciones ---
+    if (values.bonus?.enabled) {
+      if (!values.bonus.threshold || Number(values.bonus.threshold) <= 0) return {ok: false, msg: "La 'cantidad mínima' de la bonificación debe ser mayor a 0."};
+      if (!values.bonus.bonusProductId) return {ok: false, msg: "Debe seleccionar un producto para la bonificación."};
+      if (!values.bonus.bonusQuantity || Number(values.bonus.bonusQuantity) <= 0) return {ok: false, msg: "La 'cantidad a regalar' de la bonificación debe ser mayor a 0."};
     }
     return { ok: true };
   }
@@ -156,6 +164,7 @@ export default function EditProductScreen() {
         quantity: Number(wp.quantity)
       }));
 
+      // --- Nuevo payload con la estructura de bonificación ---
       const payload = {
         name: values.name,
         barcode: values.barcode,
@@ -165,10 +174,13 @@ export default function EditProductScreen() {
         salePrice: values.salePrice ? Number(values.salePrice) : 0,
         measureType: values.measureType,
         wholesalePrices: processedWholesale,
-        // --- Bonificaciones ---
-        bonusEnabled: values.bonusEnabled,
-        bonusThreshold: values.bonusEnabled ? Number(values.bonusThreshold) : 0,
-        bonusQuantity: values.bonusEnabled ? Number(values.bonusQuantity) : 0,
+        bonus: {
+            enabled: values.bonus.enabled,
+            threshold: values.bonus.enabled ? Number(values.bonus.threshold) : 0,
+            bonusProductId: values.bonus.enabled ? values.bonus.bonusProductId : null,
+            bonusProductName: values.bonus.enabled ? values.bonus.bonusProductName : '',
+            bonusQuantity: values.bonus.enabled ? Number(values.bonus.bonusQuantity) : 0,
+        }
       };
 
       await productsService.updateProduct(initialProduct.id, payload);
@@ -213,6 +225,11 @@ export default function EditProductScreen() {
   function setField(field, value) {
     setValues(v => ({ ...v, [field]: value }));
   }
+
+  // --- Handler para cambios en el componente de bonificación ---
+  const handleBonusChange = (newBonusData) => {
+    setValues(prev => ({ ...prev, bonus: newBonusData }));
+  };
 
   if (loading) return <View style={styles.centered}><ActivityIndicator size="large" /></View>;
 
@@ -273,40 +290,8 @@ export default function EditProductScreen() {
          </View>
         </View>
 
-        {/* SECTION: BONIFICACIONES */}
-        <View style={styles.section}>
-            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-              <Text style={styles.sectionTitle}>Bonificaciones</Text>
-              <Switch
-                trackColor={{ false: "#767577", true: "#81b0ff" }}
-                thumbColor={values.bonusEnabled ? "#007AFF" : "#f4f3f4"}
-                onValueChange={() => setField('bonusEnabled', !values.bonusEnabled)}
-                value={values.bonusEnabled}
-              />
-            </View>
-            {values.bonusEnabled && (
-              <View style={{marginTop: 16}}>
-                  <Text style={styles.label}>Por cada...</Text>
-                  <TextInput
-                      style={styles.input}
-                      keyboardType="numeric"
-                      value={values.bonusThreshold}
-                      onChangeText={t => setField('bonusThreshold', t.replace(/[^0-9]/g, ''))}
-                      placeholder="Ej. 10 unidades vendidas"
-                      placeholderTextColor="#999"
-                  />
-                  <Text style={styles.label}>...regalar</Text>
-                  <TextInput
-                      style={styles.input}
-                      keyboardType="numeric"
-                      value={values.bonusQuantity}
-                      onChangeText={t => setField('bonusQuantity', t.replace(/[^0-9]/g, ''))}
-                      placeholder="Ej. 1 unidad"
-                      placeholderTextColor="#999"
-                  />
-              </View>
-            )}
-        </View>
+        {/* --- SECCIÓN DE BONIFICACIONES REFACTORIZADA --- */}
+        <BonusSetup bonusData={values.bonus} onChange={handleBonusChange} />
 
         <View style={styles.section}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -320,21 +305,10 @@ export default function EditProductScreen() {
           {values.wholesalePrices.map((wp, index) => (
             <View key={index} style={styles.wholesaleRow}>
               <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                      <Text style={styles.subLabel}>Cant. Mín.</Text>
-                      <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(wp.quantity)} onChangeText={t => updateWholesalePrice(index, 'quantity', t)} />
-                  </View>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                      <Text style={styles.subLabel}>Margen %</Text>
-                      <TextInput style={styles.inputSmall} keyboardType="numeric" value={String(wp.margin)} onChangeText={t => updateWholesalePrice(index, 'margin', t)} />
-                  </View>
-                  <View style={{ flex: 1, marginRight: 4 }}>
-                      <Text style={styles.subLabel}>Precio $</Text>
-                      <TextInput style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]} keyboardType="numeric" value={String(wp.price)} onChangeText={t => updateWholesalePrice(index, 'price', t)} />
-                  </View>
-                  <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}>
-                      <Icon name="trash-outline" size={20} color="#FF3B30" />
-                  </TouchableOpacity>
+                  <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.subLabel}>Cant. Mín.</Text><TextInput style={styles.inputSmall} keyboardType="numeric" value={String(wp.quantity)} onChangeText={t => updateWholesalePrice(index, 'quantity', t)} /></View>
+                  <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.subLabel}>Margen %</Text><TextInput style={styles.inputSmall} keyboardType="numeric" value={String(wp.margin)} onChangeText={t => updateWholesalePrice(index, 'margin', t)} /></View>
+                  <View style={{ flex: 1, marginRight: 4 }}><Text style={styles.subLabel}>Precio $</Text><TextInput style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]} keyboardType="numeric" value={String(wp.price)} onChangeText={t => updateWholesalePrice(index, 'price', t)} /></View>
+                  <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}><Icon name="trash-outline" size={20} color="#FF3B30" /></TouchableOpacity>
               </View>
             </View>
           ))}

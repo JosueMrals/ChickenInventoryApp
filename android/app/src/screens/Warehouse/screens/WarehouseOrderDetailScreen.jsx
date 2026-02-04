@@ -143,13 +143,16 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
         data.push({ type: 'info_row', key: 'date', icon: 'calendar-outline', label: 'Fecha', value: presale.createdAt?.toDate ? presale.createdAt.toDate().toLocaleDateString('es-ES') : 'N/A' });
 
         // Use translated status
-        data.push({ type: 'info_row', key: 'status', icon: 'information-circle-outline', label: 'Estado', value: statusLabel });
+        data.push({ type: 'info_row', key: 'status', icon: 'information-circle-outline',
+			label: 'Estado', value: statusLabel });
 
         data.push({ type: 'section_title', key: 'title_products', title: 'Productos' });
-        (presale.items || []).forEach((item, index) => data.push({ type: 'item_card', key: `item-${index}`, ...item }));
+        (presale.items || []).forEach((item, index) => data.push({ type: 'item_card',
+			key: `item-${index}`, ...item }));
 
         if (presale.bonuses?.length > 0) {
-            data.push({ type: 'section_title', key: 'title_bonuses', title: 'Bonificaciones', color: '#007AFF' });
+            data.push({ type: 'section_title', key: 'title_bonuses', title: 'Bonificaciones',
+				color: '#007AFF' });
             presale.bonuses.forEach((bonus, index) => data.push({ type: 'item_card', key: `bonus-${index}`, ...bonus, isBonus: true }));
         }
 
@@ -169,7 +172,7 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
         <SafeAreaView style={globalStyles.container}>
             <View style={globalStyles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()}><Icon name="chevron-back" size={28} color="#FFF" /></TouchableOpacity>
-                <Text style={globalStyles.title}>Detalle Bodega</Text>
+                <Text style={globalStyles.title}>Detalle de la Orden</Text>
                 <View style={{ width: 28 }} />
             </View>
 

@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useMemo } from "react";
+import React, { useContext, useState, useEffect, useMemo, useCallback } from "react";
 import { View, Text, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator, StyleSheet } from "react-native";
 import { PreSaleContext } from "./context/preSaleContext";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -6,8 +6,8 @@ import firestore from "@react-native-firebase/firestore";
 import { calcPriceForProduct } from "../../screens/sales/hooks/useSalePricing"; // Import pricing logic
 import styles from "../quicksalesNew/styles/quickProductsStyles";
 import SearchBar from '../../components/SearchBar';
+import { useFocusEffect } from "@react-navigation/native";
 
-// Helper to safely format currency
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 
 export default function PreSaleProductsScreen({ navigation }) {
@@ -24,27 +24,33 @@ export default function PreSaleProductsScreen({ navigation }) {
   const cartToDisplay = isEditing ? editCart : cart;
   const addItemFn = isEditing ? addItemToEditCart : addItem;
 
-  useEffect(() => {
-    const unsub = firestore()
-      .collection("products")
-      .orderBy("name", "asc")
-      .onSnapshot((snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setProducts(list);
-        setLoading(false);
-      }, (error) => {
-        console.error("Error fetching products:", error);
-        setLoading(false);
-      });
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      const unsub = firestore()
+        .collection("products")
+        .orderBy("name", "asc")
+        .onSnapshot((snap) => {
+          const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          setProducts(list);
+          setLoading(false);
+        }, (error) => {
+          console.error("Error fetching products:", error);
+          setLoading(false);
+        });
+      return () => unsub();
+    }, [])
+  );
 
-    // Cleanup when the user navigates away, but only reset if not editing
-    return () => {
-      unsub();
-      if (!isEditing) {
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (!isEditing && e.data.action.type === 'GO_BACK') {
         resetPreSale();
       }
-    };
-  }, [isEditing]);
+    });
+    return unsubscribe;
+  }, [navigation, isEditing, resetPreSale]);
+
 
   const filteredProducts = useMemo(() => 
     products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase())),
@@ -64,15 +70,16 @@ export default function PreSaleProductsScreen({ navigation }) {
   };
 
   const renderProductCard = ({ item }) => {
-    // CORRECTLY get the price from the returned object
     const { priceToUse } = calcPriceForProduct({ product: item, qty: 1, customer });
-
     return (
       <TouchableOpacity style={styles.card} onPress={() => openQuantity(item)}>
         <Text style={styles.cardName}>{item.name}</Text>
         <Text style={styles.cardPrice}>{formatCurrency(priceToUse)}</Text>
-        {(item.wholesalePrices?.length > 0 || item.wholesaleThreshold) && (
-          <Text style={localStyles.wholesaleIndicator}>Mayoreo disp.</Text>
+        {(item.wholesalePrices?.length > 0 || item.bonus?.enabled) && (
+          <View style={localStyles.tagContainer}>
+            {item.wholesalePrices?.length > 0 && <Text style={localStyles.tag}>Mayoreo</Text>}
+            {item.bonus?.enabled && <Text style={[localStyles.tag, localStyles.bonusTag]}>Bonificación</Text>}
+          </View>
         )}
       </TouchableOpacity>
     );
@@ -145,6 +152,23 @@ export default function PreSaleProductsScreen({ navigation }) {
 const localStyles = StyleSheet.create({
   flexOne: { flex: 1, backgroundColor: '#f2f2f2' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  wholesaleIndicator: { fontSize: 10, color: '#666', marginTop: 2 },
   listContent: { paddingBottom: 100 },
+  tagContainer: {
+    flexDirection: 'row',
+    marginTop: 4,
+  },
+  tag: {
+    fontSize: 10,
+    color: '#666',
+    backgroundColor: '#EAECEE',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginRight: 4,
+    overflow: 'hidden',
+  },
+  bonusTag: {
+    backgroundColor: '#D4EFDF',
+    color: '#1E8449',
+  },
 });

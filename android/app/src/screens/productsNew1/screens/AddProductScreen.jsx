@@ -10,9 +10,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Switch,
   Keyboard,
-  Dimensions
 } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
@@ -21,7 +19,7 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import globalStyles from '../../../styles/globalStyles';
 import productsService from '../services/productsService';
 import { createProductOperation } from '../../../services/operations/productOperations';
-
+import BonusSetup from '../components/BonusSetup';
 
 export default function AddProductScreen() {
   const navigation = useNavigation();
@@ -42,30 +40,28 @@ export default function AddProductScreen() {
     measureType: 'unit',
     wholesalePrices: [],
     initialStock: '',
-    // --- Bonificaciones ---
-    bonusEnabled: false,
-    bonusThreshold: '', // Cantidad mínima para bonificar
-    bonusQuantity: '',  // Cantidad de producto a regalar
+    // --- Nueva estructura de bonificaciones ---
+    bonus: {
+      enabled: false,
+      threshold: '',
+      bonusProductId: null,
+      bonusProductName: '',
+      bonusQuantity: '',
+    },
   });
 
   const initialRef = useRef(JSON.stringify(values));
 
-  // Referencias para UI
   const scrollRef = useRef(null);
   const inputsRef = useRef({});
-  const focusedField = useRef(null);
-  const keyboardHeightRef = useRef(0);
-
   const assignRef = (field) => (r) => { inputsRef.current[field] = r; };
 
-  // Cargar código escaneado si viene desde la lista
   useEffect(() => {
     if (scannedCode) {
         setValues(prev => ({ ...prev, barcode: scannedCode }));
     }
   }, [scannedCode]);
 
-  // --- Lógica de Precios (Igual que EditProduct) ---
   const calculateSalePriceFromMargin = (cost, margin) => {
       if (!cost || !margin || margin >= 100) return '';
       const c = Number(cost);
@@ -87,38 +83,27 @@ export default function AddProductScreen() {
   const handlePriceChange = (field, text) => {
       setValues(prev => {
           const newValues = { ...prev, [field]: text };
-
           if (field === 'purchasePrice') {
                if (newValues.autoSalePrice && newValues.profitMargin) {
                    newValues.salePrice = calculateSalePriceFromMargin(text, newValues.profitMargin);
                } else if (!newValues.autoSalePrice && newValues.salePrice) {
                    newValues.profitMargin = calculateMarginFromSalePrice(text, newValues.salePrice);
                }
-               // Recalcular márgenes mayoristas
                newValues.wholesalePrices = prev.wholesalePrices.map(wp => {
-                   if(wp.price) {
-                       return {...wp, margin: calculateMarginFromSalePrice(text, wp.price)};
-                   }
+                   if(wp.price) return {...wp, margin: calculateMarginFromSalePrice(text, wp.price)};
                    return wp;
                });
           }
-
           if (field === 'profitMargin') {
-              if (newValues.purchasePrice) {
-                  newValues.salePrice = calculateSalePriceFromMargin(newValues.purchasePrice, text);
-              }
+              if (newValues.purchasePrice) newValues.salePrice = calculateSalePriceFromMargin(newValues.purchasePrice, text);
           }
-
           if (field === 'salePrice') {
-              if (newValues.purchasePrice) {
-                  newValues.profitMargin = calculateMarginFromSalePrice(newValues.purchasePrice, text);
-              }
+              if (newValues.purchasePrice) newValues.profitMargin = calculateMarginFromSalePrice(newValues.purchasePrice, text);
           }
           return newValues;
       });
   };
 
-  // --- Lógica Mayorista ---
   function addWholesalePrice() {
     if (values.wholesalePrices.length >= 5) {
       Alert.alert('Límite alcanzado', 'Máximo 5 precios de mayorista.');
@@ -142,30 +127,27 @@ export default function AddProductScreen() {
     setValues(v => {
       const newPrices = [...v.wholesalePrices];
       const currentItem = { ...newPrices[index], [field]: value };
-
       if (field === 'price' && v.purchasePrice) {
           currentItem.margin = calculateMarginFromSalePrice(v.purchasePrice, value);
       } else if (field === 'margin' && v.purchasePrice) {
           currentItem.price = calculateSalePriceFromMargin(v.purchasePrice, value);
       }
-
       newPrices[index] = currentItem;
       return { ...v, wholesalePrices: newPrices };
     });
   }
 
-  // --- Validación y Guardado ---
   function validateValues() {
     if (!values.name || values.name.trim() === '') return { ok: false, msg: 'El nombre es obligatorio.' };
-    if (values.purchasePrice && (Number.isNaN(Number(values.purchasePrice)) || Number(values.purchasePrice) < 0))
-        return { ok: false, msg: 'Costo de compra inválido.' };
-    if (values.salePrice && (Number.isNaN(Number(values.salePrice)) || Number(values.salePrice) < 0))
-        return { ok: false, msg: 'Precio de venta inválido.' };
-    if (values.initialStock && (Number.isNaN(Number(values.initialStock)) || Number(values.initialStock) < 0))
-        return { ok: false, msg: 'El stock inicial es inválido.' };
-    if (values.bonusEnabled) {
-      if (!values.bonusThreshold || Number(values.bonusThreshold) <= 0) return {ok: false, msg: "La 'cantidad mínima para bonificar' debe ser mayor a 0."};
-      if (!values.bonusQuantity || Number(values.bonusQuantity) <= 0) return {ok: false, msg: "La 'cantidad a bonificar' debe ser mayor a 0."};
+    if (values.purchasePrice && (Number.isNaN(Number(values.purchasePrice)) || Number(values.purchasePrice) < 0)) return { ok: false, msg: 'Costo de compra inválido.' };
+    if (values.salePrice && (Number.isNaN(Number(values.salePrice)) || Number(values.salePrice) < 0)) return { ok: false, msg: 'Precio de venta inválido.' };
+    if (values.initialStock && (Number.isNaN(Number(values.initialStock)) || Number(values.initialStock) < 0)) return { ok: false, msg: 'El stock inicial es inválido.' };
+
+    // --- Nueva validación de bonificaciones ---
+    if (values.bonus?.enabled) {
+      if (!values.bonus.threshold || Number(values.bonus.threshold) <= 0) return {ok: false, msg: "La 'cantidad mínima' de la bonificación debe ser mayor a 0."};
+      if (!values.bonus.bonusProductId) return {ok: false, msg: "Debe seleccionar un producto para la bonificación."};
+      if (!values.bonus.bonusQuantity || Number(values.bonus.bonusQuantity) <= 0) return {ok: false, msg: "La 'cantidad a regalar' de la bonificación debe ser mayor a 0."};
     }
     return { ok: true };
   }
@@ -179,7 +161,7 @@ export default function AddProductScreen() {
 
     const currentUser = auth().currentUser;
     if (!currentUser?.email) {
-      Alert.alert('Error', 'No se pudo obtener la información del usuario para registrar la operación.');
+      Alert.alert('Error', 'No se pudo obtener la información del usuario.');
       return;
     }
 
@@ -200,9 +182,9 @@ export default function AddProductScreen() {
         price: Number(wp.price),
         quantity: Number(wp.quantity)
       }));
-
       const initialStock = Number(values.initialStock) || 0;
 
+      // --- Nuevo payload con la estructura de bonificación ---
       const payload = {
         name: values.name,
         barcode: values.barcode,
@@ -214,10 +196,13 @@ export default function AddProductScreen() {
         measureType: values.measureType,
         wholesalePrices: processedWholesale,
         stock: initialStock,
-        // --- Bonificaciones ---
-        bonusEnabled: values.bonusEnabled,
-        bonusThreshold: values.bonusEnabled ? Number(values.bonusThreshold) : 0,
-        bonusQuantity: values.bonusEnabled ? Number(values.bonusQuantity) : 0,
+        bonus: {
+            enabled: values.bonus.enabled,
+            threshold: values.bonus.enabled ? Number(values.bonus.threshold) : 0,
+            bonusProductId: values.bonus.enabled ? values.bonus.bonusProductId : null,
+            bonusProductName: values.bonus.enabled ? values.bonus.bonusProductName : '',
+            bonusQuantity: values.bonus.enabled ? Number(values.bonus.bonusQuantity) : 0,
+        }
       };
 
       const newProductId = await productsService.createProduct(payload);
@@ -227,15 +212,10 @@ export default function AddProductScreen() {
         productName: values.name,
         operationType: 'create',
         userEmail: currentUser.email,
-        details: {
-          description: `Producto creado con stock inicial de ${initialStock}.`,
-          initialStock: initialStock,
-          ...payload
-        }
+        details: { description: `Producto creado con stock inicial de ${initialStock}.`, initialStock: initialStock, ...payload }
       });
 
       initialRef.current = JSON.stringify(values);
-
       Alert.alert('Éxito', 'Producto creado correctamente.',[
         { text: 'OK', onPress: () => navigation.goBack() }
       ]);
@@ -244,29 +224,19 @@ export default function AddProductScreen() {
       console.error('Error creando producto:', err);
       Alert.alert('Error', 'No se pudo crear el producto.');
     } finally {
-        setTimeout(() => {
-             if (navigation.isFocused()) setSaving(false);
-        }, 500);
+        setTimeout(() => { if (navigation.isFocused()) setSaving(false); }, 500);
     }
   }
 
-  // --- Helpers de UI (Keyboard, Back handling) ---
-  const hasChanges = useCallback(() => {
-    return initialRef.current !== JSON.stringify(values);
-  }, [values]);
+  const hasChanges = useCallback(() => initialRef.current !== JSON.stringify(values), [values]);
 
   useFocusEffect(
     useCallback(() => {
       const onBeforeRemove = (e) => {
         if (!hasChanges() || saving) return;
         e.preventDefault();
-        Alert.alert(
-          'Descartar cambios?',
-          'Tienes datos sin guardar. ¿Deseas salir?',
-          [
-            { text: 'Seguir editando', style: 'cancel' },
-            { text: 'Salir', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
-          ]
+        Alert.alert('Descartar cambios?', 'Tienes datos sin guardar. ¿Deseas salir?',
+          [{ text: 'Seguir editando', style: 'cancel' }, { text: 'Salir', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) }]
         );
       };
       navigation.addListener('beforeRemove', onBeforeRemove);
@@ -274,49 +244,32 @@ export default function AddProductScreen() {
     }, [navigation, hasChanges, saving])
   );
   
-  useEffect(() => {
-    const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', (e) => {
-        keyboardHeightRef.current = e.endCoordinates.height;
-    });
-    const hideSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => {
-        keyboardHeightRef.current = 0;
-    });
-    return () => { showSub.remove(); hideSub.remove(); };
-  }, []);
-
   function setField(field, value) {
     setValues(v => ({ ...v, [field]: value }));
   }
 
+  // --- Handler para cambios en el componente de bonificación ---
+  const handleBonusChange = (newBonusData) => {
+    setValues(prev => ({ ...prev, bonus: newBonusData }));
+  };
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={{ flex: 1, backgroundColor: '#F5F6FA' }}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
         <View style={globalStyles.header}>
-			<TouchableOpacity onPress={() => navigation.goBack()}>
-			  <Icon name="chevron-back" size={26} color="#fff" />
-			</TouchableOpacity>
+			<TouchableOpacity onPress={() => navigation.goBack()}><Icon name="chevron-back" size={26} color="#fff" /></TouchableOpacity>
 			<Text style={globalStyles.title}>Nuevo Producto</Text>
             <View style={{width: 26}} />
 		</View>
-
-      <ScrollView
-        ref={scrollRef}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
           <View style={styles.section}>
               <Text style={styles.sectionTitle}>Información Básica</Text>
               <Text style={styles.label}>Nombre del producto *</Text>
-              <TextInput ref={assignRef('name')} style={styles.input} value={values.name} onChangeText={t => setField('name', t)} placeholder="Ej. Pechuga de Pollo" placeholderTextColor="#999" onFocus={() => focusedField.current = 'name'} />
+              <TextInput ref={assignRef('name')} style={styles.input} value={values.name} onChangeText={t => setField('name', t)} placeholder="Ej. Pechuga de Pollo" />
               <View style={styles.rowInputs}>
                   <View style={{ flex: 1, marginRight: 8 }}>
                       <Text style={styles.label}>Código de barras</Text>
                       <View style={styles.inputWithIconContainer}>
-                          <TextInput ref={assignRef('barcode')} style={[styles.inputNoBorder, {flex: 1}]} value={values.barcode} onChangeText={t => setField('barcode', t)} placeholder="Escanea o escribe" placeholderTextColor="#999" onFocus={() => focusedField.current = 'barcode'} />
+                          <TextInput ref={assignRef('barcode')} style={[styles.inputNoBorder, {flex: 1}]} value={values.barcode} onChangeText={t => setField('barcode', t)} placeholder="Escanea o escribe" />
                           <TouchableOpacity onPress={() => navigation.navigate('BarcodeScanner', { onScanned: (code) => setField('barcode', code) })} style={styles.iconButton}>
                              <Icon name="scan" size={20} color="#666" />
                           </TouchableOpacity>
@@ -335,101 +288,55 @@ export default function AddProductScreen() {
                   </View>
               </View>
               <Text style={styles.label}>Stock Inicial</Text>
-              <TextInput ref={assignRef('initialStock')} style={styles.input} keyboardType="numeric" value={values.initialStock} onChangeText={t => setField('initialStock', t)} placeholder="Cantidad inicial (opcional)" placeholderTextColor="#999" onFocus={() => focusedField.current = 'initialStock'} />
+              <TextInput ref={assignRef('initialStock')} style={styles.input} keyboardType="numeric" value={values.initialStock} onChangeText={t => setField('initialStock', t)} placeholder="Cantidad inicial (opcional)" />
               <Text style={styles.label}>Descripción</Text>
-              <TextInput ref={assignRef('description')} style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={values.description} onChangeText={t => setField('description', t)} placeholder="Opcional" placeholderTextColor="#999" onFocus={() => focusedField.current = 'description'} />
+              <TextInput ref={assignRef('description')} style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={values.description} onChangeText={t => setField('description', t)} placeholder="Opcional" />
           </View>
           
           <View style={styles.section}>
              <Text style={styles.sectionTitle}>Precios y Costos</Text>
              <Text style={styles.label}>Costo de Compra ($)</Text>
-             <TextInput ref={assignRef('purchasePrice')} style={styles.input} keyboardType="numeric" value={values.purchasePrice} onChangeText={t => handlePriceChange('purchasePrice', t)} placeholder="0.00" placeholderTextColor="#999" onFocus={() => focusedField.current = 'purchasePrice'} />
+             <TextInput ref={assignRef('purchasePrice')} style={styles.input} keyboardType="numeric" value={values.purchasePrice} onChangeText={t => handlePriceChange('purchasePrice', t)} placeholder="0.00" />
              <View style={styles.rowInputs}>
                  <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={styles.label}>Margen (%)</Text>
                     <View style={styles.percentInputContainer}>
-                        <TextInput ref={assignRef('profitMargin')} style={styles.percentInput} keyboardType="numeric" value={values.profitMargin} onChangeText={t => handlePriceChange('profitMargin', t)} placeholder="0" placeholderTextColor="#999" onFocus={() => focusedField.current = 'profitMargin'} />
+                        <TextInput ref={assignRef('profitMargin')} style={styles.percentInput} keyboardType="numeric" value={values.profitMargin} onChangeText={t => handlePriceChange('profitMargin', t)} placeholder="0" />
                         <Text style={styles.percentSymbol}>%</Text>
                     </View>
                  </View>
                  <View style={{ flex: 1, marginLeft: 8 }}>
                     <Text style={styles.label}>Precio Venta ($)</Text>
-                    <TextInput ref={assignRef('salePrice')} style={[styles.input, { fontWeight: 'bold', color: '#007AFF' }]} keyboardType="numeric" value={values.salePrice} onChangeText={t => handlePriceChange('salePrice', t)} placeholder="0.00" placeholderTextColor="#999" onFocus={() => focusedField.current = 'salePrice'} />
+                    <TextInput ref={assignRef('salePrice')} style={[styles.input, { fontWeight: 'bold', color: '#007AFF' }]} keyboardType="numeric" value={values.salePrice} onChangeText={t => handlePriceChange('salePrice', t)} placeholder="0.00" />
                  </View>
              </View>
           </View>
 
-          {/* SECTION: BONIFICACIONES */}
-          <View style={styles.section}>
-              <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
-                <Text style={styles.sectionTitle}>Bonificaciones</Text>
-                <Switch
-                  trackColor={{ false: "#767577", true: "#81b0ff" }}
-                  thumbColor={values.bonusEnabled ? "#007AFF" : "#f4f3f4"}
-                  onValueChange={() => setField('bonusEnabled', !values.bonusEnabled)}
-                  value={values.bonusEnabled}
-                />
-              </View>
-              {values.bonusEnabled && (
-                <View style={{marginTop: 16}}>
-                    <Text style={styles.label}>Por cada...</Text>
-                    <TextInput
-                        style={styles.input}
-                        keyboardType="numeric"
-                        value={values.bonusThreshold}
-                        onChangeText={t => setField('bonusThreshold', t.replace(/[^0-9]/g, ''))}
-                        placeholder="Ej. 10 unidades vendidas"
-                        placeholderTextColor="#999"
-                    />
-                    <Text style={styles.label}>...regalar</Text>
-                    <TextInput
-                        style={styles.input}
-                        keyboardType="numeric"
-                        value={values.bonusQuantity}
-                        onChangeText={t => setField('bonusQuantity', t.replace(/[^0-9]/g, ''))}
-                        placeholder="Ej. 1 unidad"
-                        placeholderTextColor="#999"
-                    />
-                </View>
-              )}
-          </View>
+          {/* --- SECCIÓN DE BONIFICACIONES REFACTORIZADA --- */}
+          <BonusSetup bonusData={values.bonus} onChange={handleBonusChange} />
 
           <View style={styles.section}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <Text style={styles.sectionTitle}>Precios Mayorista</Text>
                 {values.wholesalePrices.length < 5 && (
                     <TouchableOpacity onPress={addWholesalePrice} style={styles.addBtn}>
-                        <Icon name="add" size={18} color="#fff" />
-                        <Text style={styles.addBtnText}>Agregar</Text>
+                        <Icon name="add" size={18} color="#fff" /><Text style={styles.addBtnText}>Agregar</Text>
                     </TouchableOpacity>
                 )}
             </View>
             {values.wholesalePrices.map((wp, index) => (
               <View key={index} style={styles.wholesaleRow}>
                 <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={styles.subLabel}>Cant. Mín.</Text>
-                        <TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="10" placeholderTextColor="#999" value={String(wp.quantity)} onChangeText={t => updateWholesalePrice(index, 'quantity', t)} />
-                    </View>
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={styles.subLabel}>Margen %</Text>
-                        <TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="%" placeholderTextColor="#999" value={String(wp.margin)} onChangeText={t => updateWholesalePrice(index, 'margin', t)} />
-                    </View>
-                    <View style={{ flex: 1, marginRight: 4 }}>
-                        <Text style={styles.subLabel}>Precio $</Text>
-                        <TextInput style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]} keyboardType="numeric" placeholder="$" placeholderTextColor="#999" value={String(wp.price)} onChangeText={t => updateWholesalePrice(index, 'price', t)} />
-                    </View>
-                    <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}>
-                        <Icon name="trash-outline" size={20} color="#FF3B30" />
-                    </TouchableOpacity>
+                    <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.subLabel}>Cant. Mín.</Text><TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="10" value={String(wp.quantity)} onChangeText={t => updateWholesalePrice(index, 'quantity', t)} /></View>
+                    <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.subLabel}>Margen %</Text><TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="%" value={String(wp.margin)} onChangeText={t => updateWholesalePrice(index, 'margin', t)} /></View>
+                    <View style={{ flex: 1, marginRight: 4 }}><Text style={styles.subLabel}>Precio $</Text><TextInput style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]} keyboardType="numeric" placeholder="$" value={String(wp.price)} onChangeText={t => updateWholesalePrice(index, 'price', t)} /></View>
+                    <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}><Icon name="trash-outline" size={20} color="#FF3B30" /></TouchableOpacity>
                 </View>
               </View>
             ))}
             {values.wholesalePrices.length === 0 && (<Text style={styles.emptyText}>Sin precios por volumen.</Text>)}
           </View>
-
       </ScrollView>
-
       <View style={styles.bottomContainer}>
           <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={handleSave} disabled={saving}>
               {saving ? (<ActivityIndicator color="#fff" />) : (<><Icon name="save-outline" size={22} color="#fff" style={{marginRight: 8}} /><Text style={styles.saveBtnText}>Guardar Producto</Text></>)}

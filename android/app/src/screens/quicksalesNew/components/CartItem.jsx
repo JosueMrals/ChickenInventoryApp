@@ -13,8 +13,6 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
   const [inputValue, setInputValue] = useState(quantity.toString());
 
   useEffect(() => {
-    // If the quantity prop changes from outside, update the input value
-    // only if not currently editing.
     if (!isEditing) {
       setInputValue(quantity.toString());
     }
@@ -22,12 +20,10 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
 
   const handleUpdateQuantity = (newQuantity) => {
     if (item.isBonus) return;
-    
     if (newQuantity <= 0) {
       onRemove();
       return;
     }
-    
     if (onUpdate) {
       onUpdate({ quantity: newQuantity });
     }
@@ -42,7 +38,6 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
             handleUpdateQuantity(newQuantity);
         }
     } else {
-        // If input is invalid or zero, revert to original quantity
         setInputValue(quantity.toString());
     }
   };
@@ -76,7 +71,7 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
       <View style={styles.left}>
         <Text style={styles.title}>{product.name}</Text>
         <Text style={styles.subtitle}>{quantity} x {formatCurrency(item.unitPrice)}</Text>
-        {item.discount > 0 && <Text style={styles.discountText}>Descuento: -{formatCurrency(item.discount)}</Text>}
+        {(item.discount > 0) && <Text style={styles.discountText}>Descuento: -{formatCurrency(item.discount)}</Text>}
         <Text style={styles.totalText}>{formatCurrency(item.total)}</Text>
       </View>
       <View style={styles.actions}>
@@ -101,14 +96,14 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
     <View style={[styles.card, styles.bonusCard]}>
       <View style={styles.left}>
         <View style={styles.bonusTag}>
-          <Text style={styles.bonusTagText}>BONIFICACIÓN</Text>
+            <Text style={styles.bonusTagText}>BONIFICACIÓN</Text>
         </View>
         <Text style={styles.title}>{product.name}</Text>
-        <Text style={styles.subtitle}>{quantity} x GRATIS</Text>
+        <Text style={styles.subtitle}>{quantity} x ¡GRATIS!</Text>
       </View>
       <View style={styles.actions}>
-         <Icon name="gift" size={24} color="#007AFF" />
-         <Text style={[styles.quantityDisplay, {marginLeft: 8}]}>{quantity}</Text>
+         <Icon name="gift" size={24} color="#27AE60" />
+         <Text style={[styles.quantityDisplay, {marginLeft: 8, color: '#27AE60'}]}>{quantity}</Text>
       </View>
     </View>
   );

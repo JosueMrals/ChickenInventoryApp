@@ -5,12 +5,18 @@ export default StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F9FA',
   },
+  // --- Stats Styles ---
   statsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 15,
     paddingTop: 10,
+    paddingBottom: 10,
+  },
+  statRow: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  statCardWrapper: {
+    paddingHorizontal: 5,
   },
   sectionTitle: {
     fontSize: 18,
@@ -20,10 +26,18 @@ export default StyleSheet.create({
     marginBottom: 15,
     marginTop: 10,
   },
-  modulesList: {
+  // --- Modules Styles ---
+  modulesContainer: {
     paddingHorizontal: 15,
-    paddingBottom: 50,
   },
+  moduleRow: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  moduleCardWrapper: {
+    paddingHorizontal: 5,
+  },
+  // --- General Styles ---
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -38,7 +52,7 @@ export default StyleSheet.create({
   },
   footer: {
     alignItems: 'center',
-    paddingBottom: 20,
+    paddingVertical: 20,
   },
   footerText: {
     fontSize: 12,
