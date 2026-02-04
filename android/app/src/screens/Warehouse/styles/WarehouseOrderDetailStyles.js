@@ -1,0 +1,36 @@
+import { StyleSheet } from 'react-native';
+
+export default StyleSheet.create({
+    listContainer: { paddingHorizontal: 16, paddingBottom: 20, backgroundColor: '#f5f5f5' },
+    sectionHeader: { paddingTop: 20, paddingBottom: 10 },
+    sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+    infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, backgroundColor: 'white', paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+    label: { fontSize: 15, color: '#666' },
+    value: { fontSize: 15, fontWeight: '500', color: '#333' },
+    itemCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'white', padding: 12, borderRadius: 8, marginVertical: 4 },
+    bonusItemCard: { backgroundColor: '#E6F7FF' },
+    itemInfo: { flex: 1 },
+    itemName: { fontSize: 15, fontWeight: '600', color: '#333' },
+    itemDetails: { fontSize: 13, color: '#777', marginTop: 2 },
+    bonusTag: { backgroundColor: '#007AFF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+    bonusTagText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
+    financialSection: { backgroundColor: 'white', borderRadius: 12, elevation: 1, marginVertical: 10 },
+    totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, marginTop: 8, borderTopWidth: 1, borderTopColor: '#F0F0F0', padding: 16 },
+    totalLabel: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+    totalValue: { fontSize: 20, fontWeight: 'bold', color: '#007AFF' },
+    footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#EEE', backgroundColor: '#FFF' },
+    actionButton: { flexDirection: 'row', backgroundColor: '#5856D6', paddingVertical: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    buttonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+
+    // Modal Styles
+    modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
+    pickerContent: { width: '90%', maxHeight: '80%', backgroundColor: 'white', padding: 20, borderRadius: 15, alignItems: 'center', elevation: 5 },
+    modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 5, color: '#333' },
+    searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F0F0', borderRadius: 10, paddingHorizontal: 10, height: 45, width: '100%', marginBottom: 15 },
+    searchInput: { flex: 1, marginLeft: 10, fontSize: 16, color: '#333' },
+    entregadorItem: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', width: '100%', justifyContent: 'space-between' },
+    avatarContainer: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0E0E0', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+    entregadorText: { fontSize: 16, color: '#333', flex: 1 },
+    emptyListText: { textAlign: 'center', color: '#999', marginVertical: 20 },
+    closeButton: { backgroundColor: '#FF3B30', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, width: '100%', alignItems: 'center' },
+});

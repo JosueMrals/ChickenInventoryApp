@@ -1,102 +1,155 @@
 // src/services/auth.js
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import { auth, firestore } from './firebaseConfig';
 
-/**
- * Escucha el estado de autenticación del usuario actual
- * y ejecuta un callback cuando cambia (login/logout).
- */
-export const onAuthStateChanged = (callback) => {
-  return auth().onAuthStateChanged(callback);
-};
-
-/**
- * Inicia sesión con email y password.
- * Solo permite acceso si el email está verificado.
- */
+// 🔹 Login con verificación
 export const loginUser = async (email, password) => {
   try {
     const userCredential = await auth().signInWithEmailAndPassword(email, password);
     const user = userCredential.user;
 
-    if (!user.emailVerified) {
-      // No cerramos sesión, solo avisamos
-      throw new Error('EMAIL_NOT_VERIFIED');
+    // 🔹 CAMBIO: Ya no lanzamos error aquí. Devolvemos el usuario para que la UI decida qué hacer.
+    if (user.emailVerified) {
+      // Si está verificado, actualizar Firestore
+      await updateVerificationStatus(user.uid);
+    } else {
+      console.log('⚠️ Usuario logueado pero correo NO verificado.');
     }
 
     return user;
   } catch (error) {
-    throw new Error(error.message);
+    console.log('🔥 Error en loginUser:', error);
+    throw error;
   }
 };
 
-/**
- * Crea un nuevo usuario (solo admin debería hacerlo).
- * Envía un correo de verificación automáticamente.
- */
-export const registerUser = async (email, password, role = 'user') => {
-  const userCredential = await auth().createUserWithEmailAndPassword(email, password);
-  const user = userCredential.user;
+// 🔹 Obtener rol del usuario desde Firestore (Robustecido)
+export const getUserRole = async (uid, email = null) => {
+  try {
+    console.log(`🔍 Intentando obtener rol para UID: ${uid}`);
 
-  // Envía correo de verificación
-  await user.sendEmailVerification();
+    // 1. Intento principal: Buscar por ID del documento
+    const docSnap = await firestore().collection('users').doc(uid).get();
 
-  // Guarda rol y datos en Firestore
-  await firestore().collection('users').doc(user.uid).set({
-    email: user.email,
-    role,
-    createdAt: new Date(),
-    emailVerified: true,
-  });
+    if (docSnap.exists) {
+      const data = docSnap.data();
+      if (data && data.role) {
+        console.log('✅ Rol encontrado por UID:', data.role);
+        return data.role;
+      }
+    }
 
-  return user;
+    // 2. Intento secundario: Si falló por UID y tenemos email, buscar por email
+    if (email) {
+        console.log(`⚠️ No se encontró por UID, buscando por email: ${email}`);
+        const querySnap = await firestore().collection('users').where('email', '==', email).limit(1).get();
+
+        if (!querySnap.empty) {
+            const userDoc = querySnap.docs[0];
+            const data = userDoc.data();
+            if (data && data.role) {
+                console.log('✅ Rol encontrado por Email:', data.role);
+                return data.role;
+            }
+        }
+    }
+
+    console.log('⚠️ No se encontró documento de usuario o campo rol. Asignando "user".');
+    return 'user';
+  } catch (error) {
+    console.log('🔥 Error obteniendo rol:', error);
+    return 'user';
+  }
 };
 
-/**
- * Cierra la sesión del usuario actual.
- */
-export const logoutUser = async () => {
-  await auth().signOut();
+// 🔹 Obtener lista de usuarios por rol
+export const getUsersByRole = async (role) => {
+  try {
+    const snap = await firestore().collection('users').where('role', '==', role).get();
+
+    if (snap.empty) {
+      console.log(`⚠️ No se encontraron usuarios con rol: ${role}`);
+      return [];
+    }
+
+    const users = snap.docs.map(doc => ({
+      uid: doc.id,
+      ...doc.data()
+    }));
+
+    console.log(`✅ ${users.length} usuarios encontrados con rol: ${role}`);
+    return users;
+  } catch (error) {
+    console.log(`🔥 Error obteniendo usuarios con rol ${role}:`, error);
+    return [];
+  }
 };
 
-/**
- * Devuelve el rol (admin / user) de un usuario
- */
-export const getUserRole = async (uid) => {
-  if (!uid) return null;
-  const doc = await firestore().collection('users').doc(uid).get();
-  if (!doc.exists) return null;
-  return doc.data().role;
+// 🔹 Actualizar estado de verificación en Firestore
+export const updateVerificationStatus = async (uid) => {
+  try {
+    const userRef = firestore().collection('users').doc(uid);
+    const docSnap = await userRef.get();
+
+    if (docSnap.exists) {
+      const userData = docSnap.data();
+
+      if (userData && !userData.verified) {
+        await userRef.update({
+          verified: true,
+          verifiedAt: new Date(),
+        });
+        console.log(`✅ Usuario ${uid} marcado como verificado.`);
+      }
+    }
+  } catch (e) {
+    console.log('⚠️ Error al actualizar verificación:', e);
+  }
 };
 
-/**
- * Reenvía el correo de verificación al usuario actual.
- */
+// 🔹 Reenviar correo de verificación
 export const resendVerificationEmail = async () => {
   const user = auth().currentUser;
-  if (!user) {
-    throw new Error('No hay un usuario autenticado.');
-  }
-
-  if (user.emailVerified) {
-    throw new Error('El correo ya está verificado.');
-  }
+  if (!user) throw new Error('No hay usuario autenticado.');
 
   await user.sendEmailVerification();
-  return true;
+  console.log(`📨 Correo de verificación reenviado a ${user.email}`);
 };
 
-/**
- * Actualiza el estado de verificación en Firestore si el email ya fue verificado.
- */
-export const refreshEmailVerificationStatus = async () => {
-  const user = auth().currentUser;
-  if (!user) return;
+// 🔹 Cerrar sesión
+export const logoutUser = async () => {
+  try {
+    await auth().signOut();
+  } catch (e) {
+    console.log('Error al cerrar sesión:', e);
+  }
+};
 
-  await user.reload(); // Recarga el estado actual del usuario
-  if (user.emailVerified) {
-    await firestore().collection('users').doc(user.uid).update({
-      emailVerified: true,
+// 🔹 DEBUG: Mostrar datos del usuario específico por EMAIL
+export const logUserData = async (email) => {
+  try {
+    console.log(`⏳ Buscando datos en Firestore para: ${email}`);
+
+    // Buscamos en la colección 'users' donde el campo 'email' coincida
+    const snapshot = await firestore().collection('users').where('email', '==', email).get();
+
+    if (snapshot.empty) {
+      console.log(`⚠️ No se encontró ningún documento para el email: ${email}`);
+      return;
+    }
+
+    // Iteramos (aunque debería ser único) para mostrar los datos
+    snapshot.forEach(doc => {
+      const userData = {
+        uid: doc.id, // Incluimos el UID del documento
+        ...doc.data()
+      };
+
+      console.log('🔍 --- DATOS COMPLETOS DEL USUARIO (Firestore) ---');
+      console.log(JSON.stringify(userData, null, 2));
+      console.log('--------------------------------------------------');
     });
+
+  } catch (error) {
+    console.error('🔥 Error al imprimir datos del usuario:', error);
   }
 };

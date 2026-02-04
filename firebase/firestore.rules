@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function getUserRole(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.role;
+    }
+
+    match /users/{userId} {
+      allow read, write: if request.auth.uid == userId || getUserRole(request.auth.uid) == 'admin';
+    }
+    
+    match /products/{productId} {
+      allow read: if request.auth != null;
+      // La escritura (actualización de stock) está protegida y se gestiona a través de Cloud Functions.
+      allow write: if getUserRole(request.auth.uid) == 'admin';
+    }
+
+    match /preSales/{preSaleId} {
+      allow create: if request.auth != null;
+
+      // Múltiples reglas de lectura basadas en el rol.
+      allow read: if getUserRole(request.auth.uid) == 'admin'
+                  || (resource.data.clientId == request.auth.uid)
+                  || (getUserRole(request.auth.uid) == 'bodeguero' && (resource.data.status == 'PENDIENTE' || resource.data.status == 'LISTA_PARA_ENTREGA'))
+                  || (getUserRole(request.auth.uid) == 'entregador' && resource.data.entregadorId == request.auth.uid);
+
+      // La escritura y actualización se deben realizar a través de Cloud Functions
+      // para garantizar la lógica de negocio. Se deniega la escritura directa para roles no-admin.
+      allow update, delete: if getUserRole(request.auth.uid) == 'admin';
+    }
+  }
+}
