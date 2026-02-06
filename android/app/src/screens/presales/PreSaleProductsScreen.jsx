@@ -71,14 +71,16 @@ export default function PreSaleProductsScreen({ navigation }) {
 
   const renderProductCard = ({ item }) => {
     const { priceToUse } = calcPriceForProduct({ product: item, qty: 1, customer });
+    const bonuses = Array.isArray(item.bonuses) ? item.bonuses : (item.bonus ? [item.bonus] : []);
+    const hasBonus = bonuses.some(b => b && b.enabled);
     return (
       <TouchableOpacity style={styles.card} onPress={() => openQuantity(item)}>
         <Text style={styles.cardName}>{item.name}</Text>
         <Text style={styles.cardPrice}>{formatCurrency(priceToUse)}</Text>
-        {(item.wholesalePrices?.length > 0 || item.bonus?.enabled) && (
+        {(item.wholesalePrices?.length > 0 || hasBonus) && (
           <View style={localStyles.tagContainer}>
             {item.wholesalePrices?.length > 0 && <Text style={localStyles.tag}>Mayoreo</Text>}
-            {item.bonus?.enabled && <Text style={[localStyles.tag, localStyles.bonusTag]}>Bonificación</Text>}
+            {hasBonus && <Text style={[localStyles.tag, localStyles.bonusTag]}>Bonificacion</Text>}
           </View>
         )}
       </TouchableOpacity>

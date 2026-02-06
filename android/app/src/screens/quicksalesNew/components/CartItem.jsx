@@ -78,32 +78,50 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
         <TouchableOpacity style={styles.btn} onPress={() => handleUpdateQuantity(quantity - 1)}>
           <Icon name="remove-circle-outline" size={26} color="#FF9500" />
         </TouchableOpacity>
+
         <QuantityDisplay />
+
         <TouchableOpacity style={styles.btn} onPress={() => handleUpdateQuantity(quantity + 1)}>
-          <Icon name="add-circle-outline" size={26} color="#007AFF" />
+          <Icon name="add-circle-outline" size={26} color="#34C759" />
         </TouchableOpacity>
+
         <TouchableOpacity style={styles.btn} onPress={onDiscount}>
-          <Icon name="pricetag-outline" size={22} color="#34C759" />
+            <Icon name="pricetag-outline" size={22} color="#34C759" />
         </TouchableOpacity>
+
         <TouchableOpacity style={styles.btn} onPress={onRemove}>
-          <Icon name="trash-outline" size={22} color="#FF3B30" />
+            <Icon name="trash-outline" size={22} color="#FF3B30" />
         </TouchableOpacity>
       </View>
     </View>
   );
 
   const BonusItem = () => (
-    <View style={[styles.card, styles.bonusCard]}>
-      <View style={styles.left}>
-        <View style={styles.bonusTag}>
-            <Text style={styles.bonusTagText}>BONIFICACIÓN</Text>
+    <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#F0F8FF', // AliceBlue muy suave
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#BFE6FF',
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        marginBottom: 8,
+        marginLeft: 20, // Indentación visual para conectar con el padre
+        marginTop: -6,  // Acercar al item superior
+        borderLeftWidth: 4,
+        borderLeftColor: '#007AFF', // Línea de acento
+    }}>
+      <View style={{flex: 1, marginRight: 8}}>
+        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+             <Icon name="gift-outline" size={14} color="#007AFF" style={{marginRight: 4}} />
+             <Text style={{color: '#007AFF', fontWeight: 'bold', fontSize: 11}}>BONIFICACIÓN</Text>
         </View>
-        <Text style={styles.title}>{product.name}</Text>
-        <Text style={styles.subtitle}>{quantity} x ¡GRATIS!</Text>
+        <Text style={{fontSize: 13, color: '#333', fontWeight: '500'}} numberOfLines={1}>{product.name}</Text>
       </View>
-      <View style={styles.actions}>
-         <Icon name="gift" size={24} color="#27AE60" />
-         <Text style={[styles.quantityDisplay, {marginLeft: 8, color: '#27AE60'}]}>{quantity}</Text>
+      <View style={{alignItems: 'flex-end', justifyContent: 'center'}}>
+         <Text style={{fontSize: 14, color: '#007AFF', fontWeight: 'bold'}}>x{quantity}</Text>
       </View>
     </View>
   );

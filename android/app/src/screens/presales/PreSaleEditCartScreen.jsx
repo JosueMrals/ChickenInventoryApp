@@ -1,4 +1,4 @@
-import React, { useContext, useMemo, useState } from "react";
+import React, { useContext, useMemo, useState, useEffect, useRef } from "react";
 import { View, Text, TouchableOpacity, FlatList, Alert, SafeAreaView, ActivityIndicator, StyleSheet } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { PreSaleContext } from "./context/preSaleContext";
@@ -17,8 +17,29 @@ export default function PreSaleEditCartScreen({ navigation }) {
     editCart, updateEditCart, removeFromEditCart, addItemToEditCart
   } = useContext(PreSaleContext);
   
+  const allowExitRef = useRef(false);
   const [discountModal, setDiscountModal] = useState({ visible: false, product: null });
   const [addProductModalVisible, setAddProductModalVisible] = useState(false);
+
+  const displayData = useMemo(() => {
+    const normalItems = editCart.filter(i => !i.isBonus);
+    const bonusItems = editCart.filter(i => i.isBonus);
+    const result = [];
+
+    normalItems.forEach(item => {
+        result.push(item);
+        // Buscar bonificaciones vinculadas a este item
+        const myBonuses = bonusItems.filter(b => b.linkedTo === item.id);
+        result.push(...myBonuses);
+    });
+
+    // Casos borde
+    const linkedBonusIds = new Set(result.filter(i => i.isBonus).map(i => i.id));
+    const orphanBonuses = bonusItems.filter(b => !linkedBonusIds.has(b.id));
+    result.push(...orphanBonuses);
+
+    return result;
+  }, [editCart]);
 
   const soldItems = useMemo(() => editCart.filter(item => !item.isBonus), [editCart]);
 
@@ -45,6 +66,7 @@ export default function PreSaleEditCartScreen({ navigation }) {
       await submitPreSale();
       Alert.alert("Pre-Venta Actualizada", "Los cambios han sido guardados.", [
         { text: "OK", onPress: () => {
+            allowExitRef.current = true;
             resetPreSale();
             navigation.navigate("PreSalesList");
         }}
@@ -53,6 +75,36 @@ export default function PreSaleEditCartScreen({ navigation }) {
       Alert.alert("Error", `No se pudo guardar la pre-venta. ${error.message}`);
     }
   };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (allowExitRef.current) {
+        // Salida permitida (ej: después de guardar)
+        return;
+      }
+
+      e.preventDefault();
+
+      Alert.alert(
+        '¿Descartar cambios?',
+        'Si sales ahora, se perderán los cambios de esta edición.',
+        [
+          { text: 'Seguir editando', style: 'cancel', onPress: () => {} },
+          {
+            text: 'Salir sin guardar',
+            style: 'destructive',
+            onPress: () => {
+              // Limpiar datos de edición antes de salir
+              resetPreSale();
+              navigation.dispatch(e.data.action);
+            }
+          }
+        ]
+      );
+    });
+
+    return unsubscribe;
+  }, [navigation, resetPreSale]);
 
   const openDiscount = (item) => {
     if (item.isBonus) return;
@@ -104,7 +156,7 @@ export default function PreSaleEditCartScreen({ navigation }) {
           )}
 
           <FlatList
-            data={editCart}
+            data={displayData}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
               <CartItem

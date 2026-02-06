@@ -33,6 +33,8 @@ export default function LoginScreen({ navigation }) {
   // Animación de entrada
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+  // Referencia para manejar foco del teclado entre inputs
+  const passwordInputRef = useRef(null);
 
   useEffect(() => {
     loadSavedAccounts();
@@ -65,6 +67,14 @@ export default function LoginScreen({ navigation }) {
       return;
     }
 
+    // Validación básica del formato de email para evitar llamadas innecesarias
+    const emailTrimmed = emailInput.trim();
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(emailTrimmed)) {
+      Alert.alert('Correo inválido', 'Por favor ingresa un correo electrónico válido.');
+      return;
+    }
+
     setLoading(true);
     setUnverifiedUser(null);
     try {
@@ -81,6 +91,7 @@ export default function LoginScreen({ navigation }) {
 
       // 2. Obtener rol
       const role = await getUserRole(user.uid, user.email);
+      // Evitar logs que expongan datos sensibles en producción. Mantener solo código si es necesario.
       console.log('✅ Rol obtenido:', role);
 
       // 3. Guardar credenciales localmente para futuro acceso rápido
@@ -98,7 +109,8 @@ export default function LoginScreen({ navigation }) {
       }
 
     } catch (error) {
-      console.log('🔥 Error al iniciar sesión:', error);
+      // Log reducido para evitar exponer stack traces o datos sensibles en la consola
+      console.error('🔥 Error al iniciar sesión:', error?.code || error?.message || error);
       let msg = 'Error al iniciar sesión.';
       if (error.code === 'auth/invalid-email') msg = 'Correo electrónico inválido.';
       if (error.code === 'auth/user-not-found') msg = 'Usuario no encontrado.';
@@ -175,6 +187,8 @@ export default function LoginScreen({ navigation }) {
         style={styles.accountCard}
         onPress={() => handleQuickLogin(account)}
         disabled={loading}
+        accessibilityRole="button"
+        accessibilityLabel={`Iniciar sesión como ${account.displayName || account.email}`}
       >
         <View style={styles.accountAvatar}>
           <Text style={styles.accountInitial}>
@@ -196,6 +210,8 @@ export default function LoginScreen({ navigation }) {
           <TouchableOpacity
             style={styles.deleteButton}
             onPress={() => handleDeleteAccount(account.uid)}
+            accessibilityRole="button"
+            accessibilityLabel={`Eliminar cuenta ${account.email}`}
           >
             <Icon name="trash-outline" size={20} color="#FF3B30" />
           </TouchableOpacity>
@@ -235,6 +251,8 @@ export default function LoginScreen({ navigation }) {
               <TouchableOpacity
                 style={styles.useAnotherAccountButton}
                 onPress={() => setShowAccountList(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Usar otra cuenta"
               >
                 <Icon name="add-circle-outline" size={24} color="#007AFF" style={{ marginRight: 8 }} />
                 <Text style={styles.useAnotherAccountText}>Usar otra cuenta</Text>
@@ -253,6 +271,9 @@ export default function LoginScreen({ navigation }) {
                   autoCapitalize="none"
                   value={email}
                   onChangeText={setEmail}
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordInputRef.current && passwordInputRef.current.focus()}
+                  blurOnSubmit={false}
                   style={styles.input}
                 />
               </View>
@@ -266,9 +287,15 @@ export default function LoginScreen({ navigation }) {
                   secureTextEntry={!showPassword}
                   value={password}
                   onChangeText={setPassword}
+                  ref={passwordInputRef}
+                  returnKeyType="go"
+                  onSubmitEditing={handleLogin}
                   style={styles.input}
                 />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                >
                   <Icon name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#666" />
                 </TouchableOpacity>
               </View>
@@ -278,6 +305,8 @@ export default function LoginScreen({ navigation }) {
                 onPress={handleLogin}
                 disabled={loading}
                 style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+                accessibilityRole="button"
+                accessibilityLabel="Ingresar"
               >
                 {loading ? (
                   <ActivityIndicator color="#fff" />
@@ -291,6 +320,8 @@ export default function LoginScreen({ navigation }) {
                 <TouchableOpacity
                   style={styles.backToAccountsButton}
                   onPress={() => setShowAccountList(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Volver a mis cuentas"
                 >
                   <Text style={styles.backToAccountsText}>Volver a mis cuentas</Text>
                 </TouchableOpacity>
@@ -310,6 +341,8 @@ export default function LoginScreen({ navigation }) {
                 onPress={handleResendVerification}
                 disabled={sendingVerification}
                 style={styles.resendButton}
+                accessibilityRole="button"
+                accessibilityLabel="Reenviar correo de verificación"
               >
                 {sendingVerification ? (
                   <ActivityIndicator size="small" color="#007AFF" />

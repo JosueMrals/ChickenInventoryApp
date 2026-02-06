@@ -6,6 +6,7 @@ import functions from '@react-native-firebase/functions';
 import auth from '@react-native-firebase/auth';
 import { getUsersByRole } from '../../../services/auth';
 import { warehouseStyles as globalStyles } from '../styles/warehouseStyles';
+import { groupItemsByProduct } from '../../../utils/warehouseUtils';
 
 export default function ProductHandoverScreen({ route, navigation }) {
     const { readyOrders } = route.params; // Expecting an array of orders with status 'ready_for_delivery'
@@ -16,28 +17,25 @@ export default function ProductHandoverScreen({ route, navigation }) {
     const [processing, setProcessing] = useState(false);
     const [selectedEntregador, setSelectedEntregador] = useState(null);
 
-    // Calculate totals
-    const { totalOrders, totalItems, aggregatedProducts } = useMemo(() => {
+    // Calculate totals con soporte para bonificaciones
+    const { totalOrders, totalItems, aggregatedProducts, totalRegular, totalBonus } = useMemo(() => {
+        const productsList = groupItemsByProduct(readyOrders);
+
         let itemsCount = 0;
-        const productsMap = {};
+        let reg = 0;
+        let bonus = 0;
 
-        readyOrders.forEach(order => {
-            if (order.items && Array.isArray(order.items)) {
-                order.items.forEach(item => {
-                    const name = item.name || item.productName || 'Desconocido';
-                    itemsCount += (item.quantity || 0);
-                    productsMap[name] = (productsMap[name] || 0) + (item.quantity || 0);
-                });
-            }
+        productsList.forEach(p => {
+            itemsCount += p.totalQty;
+            reg += p.regularQty;
+            bonus += p.bonusQty;
         });
-
-        const productsList = Object.entries(productsMap)
-            .map(([name, quantity]) => ({ name, quantity }))
-            .sort((a, b) => b.quantity - a.quantity);
 
         return {
             totalOrders: readyOrders.length,
             totalItems: itemsCount,
+            totalRegular: reg,
+            totalBonus: bonus,
             aggregatedProducts: productsList
         };
     }, [readyOrders]);
@@ -67,12 +65,34 @@ export default function ProductHandoverScreen({ route, navigation }) {
             return;
         }
 
+        // --- Nueva validación de items pendientes ---
+        let hasPendingItems = false;
+        let pendingCount = 0;
+
+        // Recorrer todas las órdenes seleccionadas
+        readyOrders.forEach(order => {
+            const allItems = [...(order.items || []), ...(order.bonuses || [])];
+            allItems.forEach(item => {
+                // Si el item no tiene status o es 'pending' o 'preparing'
+                if (!item.status || item.status === 'pending' || item.status === 'preparing') {
+                    hasPendingItems = true;
+                    pendingCount++;
+                }
+            });
+        });
+
+        const showValidationWarning = hasPendingItems;
+        const msg = `Se entregarán ${totalOrders} ordenes (${totalItems} productos) a ${selectedEntregador.email || 'el repartidor'}.` +
+            (totalBonus > 0 ? `\n• Venta: ${totalRegular} unid.\n• Regalo: ${totalBonus} unid.` : '') +
+            (showValidationWarning ? `\n\n⚠️ ¡ATENCIÓN! Se han detectado ${pendingCount} productos que aún figuran como PENDIENTES o PREPARANDO. ¿Deseas entregarlos de todos modos?` : '') +
+            `\n\n¿Continuar?`;
+
         Alert.alert(
             'Confirmar Entrega de Carga',
-            `Se entregarán ${totalOrders} ordenes (${totalItems} productos) a ${selectedEntregador.email || 'el repartidor'}. ¿Continuar?`,
+            msg,
             [
                 { text: 'Cancelar', style: 'cancel' },
-                { text: 'Entregar Carga', onPress: processHandover }
+                { text: 'Entregar Carga', onPress: processHandover, style: showValidationWarning ? 'destructive' : 'default' }
             ]
         );
     };
@@ -134,12 +154,33 @@ export default function ProductHandoverScreen({ route, navigation }) {
                 </View>
                  <View style={styles.row}>
                     <Text style={styles.label}>Total Productos:</Text>
-                    <Text style={styles.value}>{totalItems}</Text>
+                    <Text style={styles.value}>{totalItems} Unidades</Text>
                 </View>
+                {(totalBonus > 0) && (
+                    <View style={{flexDirection: 'row', marginTop: 8, marginBottom: 4, backgroundColor: '#f9f9f9', padding: 8, borderRadius: 6}}>
+                        <View style={{flexDirection: 'row', marginRight: 15, alignItems: 'center'}}>
+                            <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: '#43A047', marginRight: 6}} />
+                            <Text style={{fontSize: 12, color: '#333'}}>Venta: <Text style={{fontWeight: 'bold'}}>{totalRegular}</Text></Text>
+                        </View>
+                        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                            <View style={{width: 8, height: 8, borderRadius: 4, backgroundColor: '#007AFF', marginRight: 6}} />
+                            <Text style={{fontSize: 12, color: '#333'}}>Regalo: <Text style={{fontWeight: 'bold'}}>{totalBonus}</Text></Text>
+                        </View>
+                    </View>
+                )}
                 <View style={styles.divider} />
-                <Text style={styles.subTitle}>Detalle:</Text>
+                <Text style={styles.subTitle}>Detalle Consolidado:</Text>
                 {aggregatedProducts.slice(0, 5).map(p => (
-                    <Text key={p.name} style={styles.productText}>• {p.quantity} x {p.name}</Text>
+                    <View key={p.name} style={{marginBottom: 4}}>
+                         <Text style={styles.productText}>
+                             • <Text style={{fontWeight: 'bold'}}>{p.totalQty}</Text> x {p.name}
+                         </Text>
+                         {(p.regularQty > 0 || p.bonusQty > 0) && (
+                             <Text style={{fontSize: 10, color: '#666', marginLeft: 14}}>
+                                 ({p.regularQty > 0 ? `V:${p.regularQty}` : ''}{p.regularQty > 0 && p.bonusQty > 0 ? ' | ' : ''}{p.bonusQty > 0 ? `R:${p.bonusQty}` : ''})
+                             </Text>
+                         )}
+                    </View>
                 ))}
                 {aggregatedProducts.length > 5 && <Text style={styles.moreText}>... y {aggregatedProducts.length - 5} más</Text>}
             </View>

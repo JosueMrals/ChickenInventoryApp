@@ -1,26 +1,7 @@
 import { StyleSheet } from "react-native";
 
 export default StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 20,
-    paddingTop: 16,
-  },
 
-  // ------- HEADER -------
-  headerRow: {
-    paddingTop: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#111",
-  },
 
   complimentary: {
     fontSize: 14,
@@ -30,7 +11,7 @@ export default StyleSheet.create({
 
   // ------- QUANTITY -------
   quantityLabel: {
-    marginTop: 50,
+    marginTop: 10,
     textAlign: "center",
     fontSize: 16,
     color: "#444",
@@ -44,7 +25,7 @@ export default StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 20,
     alignSelf: "center",
-    width: 180,
+    width: 220,
 
     flexDirection: "row",
     alignItems: "center",

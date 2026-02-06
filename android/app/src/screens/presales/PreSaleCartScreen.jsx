@@ -26,6 +26,26 @@ export default function PreSaleCartScreen({ navigation }) {
   const updateCartFn = isEditing ? updateEditCart : updateCart;
   const removeFromCartFn = isEditing ? removeFromEditCart : removeFromCart;
 
+  const displayData = useMemo(() => {
+    const normalItems = cartToDisplay.filter(i => !i.isBonus);
+    const bonusItems = cartToDisplay.filter(i => i.isBonus);
+    const result = [];
+
+    normalItems.forEach(item => {
+        result.push(item);
+        // Buscar bonificaciones vinculadas a este item
+        const myBonuses = bonusItems.filter(b => b.linkedTo === item.id);
+        result.push(...myBonuses);
+    });
+
+    // Casos borde: bonificaciones huérfanas o sin link (no deberían existir, pero por seguridad)
+    const linkedBonusIds = new Set(result.filter(i => i.isBonus).map(i => i.id));
+    const orphanBonuses = bonusItems.filter(b => !linkedBonusIds.has(b.id));
+    result.push(...orphanBonuses);
+
+    return result;
+  }, [cartToDisplay]);
+
   const soldItems = useMemo(() => cartToDisplay.filter(item => !item.isBonus), [cartToDisplay]);
 
   const subtotal = useMemo(() => 
@@ -144,7 +164,7 @@ export default function PreSaleCartScreen({ navigation }) {
           </View>
 
           <FlatList
-            data={cartToDisplay}
+            data={displayData}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
               <CartItem

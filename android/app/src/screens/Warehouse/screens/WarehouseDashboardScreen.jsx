@@ -13,6 +13,7 @@ import globalStyles from '../../../styles/globalStyles';
 import DashboardPanel from '../components/DashboardPanel';
 import PreSaleItem from '../components/PreSaleItem';
 import { useRoute } from '../../../context/RouteContext';
+import { Swipeable } from 'react-native-gesture-handler';
 
 export default function WarehouseDashboardScreen({ navigation }) {
   const [preSales, setPreSales] = useState([]);
@@ -56,11 +57,107 @@ export default function WarehouseDashboardScreen({ navigation }) {
   };
 
   const handleHandoverPress = () => {
-      // Filter only orders that are ready for delivery
-      const readyOrders = preSales.filter(s => s.status === 'ready_for_delivery');
-      if (readyOrders.length === 0) return;
+      // Filter orders that are ready_for_delivery OR preparing (to allow forced partial handover with warning)
+      const accessibleOrders = preSales.filter(s => ['ready_for_delivery', 'preparing'].includes(s.status));
+      if (accessibleOrders.length === 0) return;
 
-      navigation.navigate('ProductHandover', { readyOrders });
+      navigation.navigate('ProductHandover', { readyOrders: accessibleOrders });
+  };
+
+  const handleUpdateStatus = (id, newStatus) => {
+      firestore().collection('presales').doc(id).update({ status: newStatus });
+  };
+
+  const renderSwipeableItem = ({ item }) => {
+      const renderRightActions = (progress, dragX) => {
+          const trans = dragX.interpolate({
+              inputRange: [0, 50, 100, 101],
+              outputRange: [-20, 0, 0, 1],
+          });
+
+          let nextStatus = '';
+          let label = '';
+          let color = '';
+          let icon = '';
+
+          if (item.status === 'pending') {
+              nextStatus = 'preparing';
+              label = 'Preparar';
+              color = '#007AFF';
+              icon = 'construct-outline';
+          } else if (item.status === 'preparing') {
+              nextStatus = 'ready_for_delivery';
+              label = 'Listar';
+              color = '#34C759';
+              icon = 'checkmark-circle-outline';
+          } else {
+              return null;
+          }
+
+          return (
+              <TouchableOpacity
+                  style={{ backgroundColor: color, justifyContent: 'center', alignItems: 'center', width: 80, height: '100%', borderTopRightRadius: 12, borderBottomRightRadius: 12 }}
+                  onPress={() => handleUpdateStatus(item.id, nextStatus)}
+              >
+                  <Icon name={icon} size={24} color="#FFF" />
+                  <Text style={{color: 'white', fontSize: 12, fontWeight: 'bold'}}>{label}</Text>
+              </TouchableOpacity>
+          );
+      };
+
+      const renderLeftActions = (progress, dragX) => {
+          const trans = dragX.interpolate({
+              inputRange: [0, 50, 100, 101],
+              outputRange: [-20, 0, 0, 1],
+          });
+
+          let prevStatus = '';
+          let label = '';
+          let color = '';
+          let icon = '';
+
+          if (item.status === 'preparing') {
+              prevStatus = 'pending';
+              label = 'Pendiente';
+              color = '#F2C94C';
+              icon = 'time-outline';
+          } else if (item.status === 'ready_for_delivery') {
+              prevStatus = 'preparing';
+              label = 'Preparar';
+              color = '#007AFF';
+              icon = 'construct-outline';
+          } else {
+              return null;
+          }
+
+          return (
+              <TouchableOpacity
+                  style={{ backgroundColor: color, justifyContent: 'center', alignItems: 'center', width: 80, height: '100%', borderTopLeftRadius: 12, borderBottomLeftRadius: 12 }}
+                  onPress={() => handleUpdateStatus(item.id, prevStatus)}
+              >
+                  <Icon name={icon} size={24} color="#FFF" />
+                  <Text style={{color: 'white', fontSize: 12, fontWeight: 'bold'}}>{label}</Text>
+              </TouchableOpacity>
+          );
+      };
+
+      return (
+          <Swipeable
+              renderRightActions={renderRightActions}
+              renderLeftActions={renderLeftActions}
+              onSwipeableRightOpen={() => {
+                  // Opcional: Auto-trigger al deslizar completo
+                  if (item.status === 'pending') handleUpdateStatus(item.id, 'preparing');
+                  else if (item.status === 'preparing') handleUpdateStatus(item.id, 'ready_for_delivery');
+              }}
+              onSwipeableLeftOpen={() => {
+                  if (item.status === 'preparing') handleUpdateStatus(item.id, 'pending');
+                  else if (item.status === 'ready_for_delivery') handleUpdateStatus(item.id, 'preparing');
+              }}
+          >
+              <PreSaleItem item={item} onSelect={handleSelectPreSale} />
+          </Swipeable>
+      );
   };
 
   if (loading) {
@@ -88,9 +185,9 @@ export default function WarehouseDashboardScreen({ navigation }) {
       {selectedRoute && (
         <View style={{
             backgroundColor: '#fff',
-            paddingVertical: 15,
-            paddingHorizontal: 20,
-            marginBottom: 10,
+            paddingVertical: 8,
+            paddingHorizontal: 16,
+            marginBottom: 8,
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -104,15 +201,14 @@ export default function WarehouseDashboardScreen({ navigation }) {
         }}>
             <View style={{flexDirection: 'row', alignItems: 'center'}}>
                 <View style={{
-                    width: 40, height: 40, borderRadius: 20,
+                    width: 32, height: 32, borderRadius: 16,
                     backgroundColor: '#E3F2FD', alignItems: 'center', justifyContent: 'center',
-                    marginRight: 12
+                    marginRight: 10
                 }}>
-                    <Icon name="map-outline" size={22} color="#1E88E5" />
+                    <Icon name="map-outline" size={18} color="#1E88E5" />
                 </View>
                 <View>
-                    <Text style={{ fontSize: 13, color: '#888', marginBottom: 2 }}>Ruta Operativa</Text>
-                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#333' }}>{selectedRoute.name}</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#333' }}>{selectedRoute.name}</Text>
                 </View>
             </View>
             {/* Optional: Add status indicator or refresh button here if needed */}
@@ -141,7 +237,7 @@ export default function WarehouseDashboardScreen({ navigation }) {
              <FlatList
                 data={preSales}
                 keyExtractor={item => item.id}
-                renderItem={({ item }) => <PreSaleItem item={item} onSelect={handleSelectPreSale} />}
+                renderItem={renderSwipeableItem}
                 ListEmptyComponent={
                     <View style={{ alignItems: 'center', marginTop: 50 }}>
                         <Icon name="checkmark-circle-outline" size={60} color="#ccc" />

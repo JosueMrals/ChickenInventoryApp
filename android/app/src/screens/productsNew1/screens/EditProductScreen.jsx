@@ -44,18 +44,21 @@ export default function EditProductScreen() {
         quantity: String(p?.quantity ?? ''),
         margin: '', 
       })) || [],
-      // --- Cargar nueva estructura de bonificación o crear una por defecto ---
-      bonus: initialProduct.bonus ? {
-        ...initialProduct.bonus,
-        threshold: String(initialProduct.bonus.threshold || ''),
-        bonusQuantity: String(initialProduct.bonus.bonusQuantity || ''),
-      } : {
-        enabled: false,
-        threshold: '',
-        bonusProductId: null,
-        bonusProductName: '',
-        bonusQuantity: '',
-      },
+      // --- Cargar nueva estructura de bonificaciones: usar `bonuses` si existe, si no migrar `bonus` legacy ---
+      bonuses: (initialProduct.bonuses && Array.isArray(initialProduct.bonuses)) ?
+        initialProduct.bonuses.map(b => ({
+          ...b,
+          threshold: String(b.threshold || ''),
+          bonusQuantity: String(b.bonusQuantity || ''),
+        })) : (initialProduct.bonus ? [
+          {
+            enabled: initialProduct.bonus.enabled || false,
+            threshold: String(initialProduct.bonus.threshold || ''),
+            bonusProductId: initialProduct.bonus.bonusProductId || null,
+            bonusProductName: initialProduct.bonus.bonusProductName || '',
+            bonusQuantity: String(initialProduct.bonus.bonusQuantity || ''),
+          }
+        ] : []),
     };
     
     loadedValues.wholesalePrices.forEach(wp => {
@@ -142,10 +145,18 @@ export default function EditProductScreen() {
     if (values.salePrice && (Number.isNaN(Number(values.salePrice)) || Number(values.salePrice) < 0)) return { ok: false, msg: 'Precio de venta inválido.' };
 
     // --- Nueva validación de bonificaciones ---
-    if (values.bonus?.enabled) {
-      if (!values.bonus.threshold || Number(values.bonus.threshold) <= 0) return {ok: false, msg: "La 'cantidad mínima' de la bonificación debe ser mayor a 0."};
-      if (!values.bonus.bonusProductId) return {ok: false, msg: "Debe seleccionar un producto para la bonificación."};
-      if (!values.bonus.bonusQuantity || Number(values.bonus.bonusQuantity) <= 0) return {ok: false, msg: "La 'cantidad a regalar' de la bonificación debe ser mayor a 0."};
+    if (values.bonuses && values.bonuses.length > 0) {
+      if (values.bonuses.length > 5) return { ok: false, msg: 'Máximo 5 bonificaciones permitidas.' };
+      const enabledBonuses = values.bonuses.map((b, i) => ({ ...b, _idx: i })).filter(b => b.enabled);
+      const seen = new Set();
+      for (const b of enabledBonuses) {
+        const idxDisplay = b._idx + 1;
+        if (!b.threshold || Number(b.threshold) <= 0) return {ok: false, msg: `Bonificación ${idxDisplay}: la 'cantidad mínima' debe ser mayor a 0.`};
+        if (!b.bonusProductId) return {ok: false, msg: `Bonificación ${idxDisplay}: debe seleccionar un producto para la bonificación.`};
+        if (!b.bonusQuantity || Number(b.bonusQuantity) <= 0) return {ok: false, msg: `Bonificación ${idxDisplay}: la 'cantidad a regalar' de la bonificación debe ser mayor a 0.`};
+        if (seen.has(b.bonusProductId)) return { ok: false, msg: `Bonificación ${idxDisplay}: producto repetido en otra bonificación.` };
+        seen.add(b.bonusProductId);
+      }
     }
     return { ok: true };
   }
@@ -164,7 +175,18 @@ export default function EditProductScreen() {
         quantity: Number(wp.quantity)
       }));
 
-      // --- Nuevo payload con la estructura de bonificación ---
+      // --- Nuevo payload con la estructura de bonificación (array) ---
+      // Guardar bonificaciones con datos válidos (activas o inactivas)
+      const bonusesPayload = (values.bonuses || [])
+        .filter(b => b && b.bonusProductId && Number(b.threshold) > 0 && Number(b.bonusQuantity) > 0)
+        .map(b => ({
+          enabled: !!b.enabled,
+          threshold: Number(b.threshold),
+          bonusProductId: b.bonusProductId,
+          bonusProductName: b.bonusProductName || '',
+          bonusQuantity: Number(b.bonusQuantity),
+        }));
+
       const payload = {
         name: values.name,
         barcode: values.barcode,
@@ -174,14 +196,16 @@ export default function EditProductScreen() {
         salePrice: values.salePrice ? Number(values.salePrice) : 0,
         measureType: values.measureType,
         wholesalePrices: processedWholesale,
-        bonus: {
-            enabled: values.bonus.enabled,
-            threshold: values.bonus.enabled ? Number(values.bonus.threshold) : 0,
-            bonusProductId: values.bonus.enabled ? values.bonus.bonusProductId : null,
-            bonusProductName: values.bonus.enabled ? values.bonus.bonusProductName : '',
-            bonusQuantity: values.bonus.enabled ? Number(values.bonus.bonusQuantity) : 0,
-        }
+        bonuses: bonusesPayload,
       };
+
+      // Enviar legacy `bonus` para compatibilidad usando la primera bonificacion activa, o la primera si no hay activas
+      const firstActiveBonus = bonusesPayload.find(b => b.enabled);
+      if (firstActiveBonus) {
+        payload.bonus = firstActiveBonus;
+      } else if (bonusesPayload.length > 0) {
+        payload.bonus = bonusesPayload[0];
+      }
 
       await productsService.updateProduct(initialProduct.id, payload);
 
@@ -227,8 +251,8 @@ export default function EditProductScreen() {
   }
 
   // --- Handler para cambios en el componente de bonificación ---
-  const handleBonusChange = (newBonusData) => {
-    setValues(prev => ({ ...prev, bonus: newBonusData }));
+  const handleBonusesChange = (newBonusesData) => {
+    setValues(prev => ({ ...prev, bonuses: newBonusesData }));
   };
 
   if (loading) return <View style={styles.centered}><ActivityIndicator size="large" /></View>;
@@ -291,7 +315,7 @@ export default function EditProductScreen() {
         </View>
 
         {/* --- SECCIÓN DE BONIFICACIONES REFACTORIZADA --- */}
-        <BonusSetup bonusData={values.bonus} onChange={handleBonusChange} />
+        <BonusSetup bonuses={values.bonuses} onChange={handleBonusesChange} />
 
         <View style={styles.section}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>

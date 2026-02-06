@@ -40,14 +40,8 @@ export default function AddProductScreen() {
     measureType: 'unit',
     wholesalePrices: [],
     initialStock: '',
-    // --- Nueva estructura de bonificaciones ---
-    bonus: {
-      enabled: false,
-      threshold: '',
-      bonusProductId: null,
-      bonusProductName: '',
-      bonusQuantity: '',
-    },
+    // --- Nueva estructura de bonificaciones: array de hasta 5 ---
+    bonuses: [],
   });
 
   const initialRef = useRef(JSON.stringify(values));
@@ -143,12 +137,21 @@ export default function AddProductScreen() {
     if (values.salePrice && (Number.isNaN(Number(values.salePrice)) || Number(values.salePrice) < 0)) return { ok: false, msg: 'Precio de venta inválido.' };
     if (values.initialStock && (Number.isNaN(Number(values.initialStock)) || Number(values.initialStock) < 0)) return { ok: false, msg: 'El stock inicial es inválido.' };
 
-    // --- Nueva validación de bonificaciones ---
-    if (values.bonus?.enabled) {
-      if (!values.bonus.threshold || Number(values.bonus.threshold) <= 0) return {ok: false, msg: "La 'cantidad mínima' de la bonificación debe ser mayor a 0."};
-      if (!values.bonus.bonusProductId) return {ok: false, msg: "Debe seleccionar un producto para la bonificación."};
-      if (!values.bonus.bonusQuantity || Number(values.bonus.bonusQuantity) <= 0) return {ok: false, msg: "La 'cantidad a regalar' de la bonificación debe ser mayor a 0."};
+    // --- Validación de múltiples bonificaciones ---
+    if (values.bonuses && values.bonuses.length > 0) {
+      if (values.bonuses.length > 5) return { ok: false, msg: 'Máximo 5 bonificaciones permitidas.' };
+      const enabledBonuses = values.bonuses.map((b, i) => ({ ...b, _idx: i })).filter(b => b.enabled);
+      const seen = new Set();
+      for (const b of enabledBonuses) {
+        const idxDisplay = b._idx + 1;
+        if (!b.threshold || Number(b.threshold) <= 0) return { ok: false, msg: `Bonificación ${idxDisplay}: la 'cantidad mínima' debe ser mayor a 0.` };
+        if (!b.bonusProductId) return { ok: false, msg: `Bonificación ${idxDisplay}: debe seleccionar un producto a regalar.` };
+        if (!b.bonusQuantity || Number(b.bonusQuantity) <= 0) return { ok: false, msg: `Bonificación ${idxDisplay}: la 'cantidad a regalar' debe ser mayor a 0.` };
+        if (seen.has(b.bonusProductId)) return { ok: false, msg: `Bonificación ${idxDisplay}: producto repetido en otra bonificación.` };
+        seen.add(b.bonusProductId);
+      }
     }
+
     return { ok: true };
   }
 
@@ -184,7 +187,18 @@ export default function AddProductScreen() {
       }));
       const initialStock = Number(values.initialStock) || 0;
 
-      // --- Nuevo payload con la estructura de bonificación ---
+      // --- Nuevo payload con la estructura de bonificaciones (array) ---
+      // Guardar únicamente las bonificaciones activas y con datos válidos
+      const bonusesPayload = (values.bonuses || [])
+        .filter(b => b && b.enabled && b.bonusProductId && Number(b.threshold) > 0 && Number(b.bonusQuantity) > 0)
+        .map(b => ({
+          enabled: true,
+          threshold: Number(b.threshold),
+          bonusProductId: b.bonusProductId,
+          bonusProductName: b.bonusProductName || '',
+          bonusQuantity: Number(b.bonusQuantity),
+        }));
+
       const payload = {
         name: values.name,
         barcode: values.barcode,
@@ -196,14 +210,13 @@ export default function AddProductScreen() {
         measureType: values.measureType,
         wholesalePrices: processedWholesale,
         stock: initialStock,
-        bonus: {
-            enabled: values.bonus.enabled,
-            threshold: values.bonus.enabled ? Number(values.bonus.threshold) : 0,
-            bonusProductId: values.bonus.enabled ? values.bonus.bonusProductId : null,
-            bonusProductName: values.bonus.enabled ? values.bonus.bonusProductName : '',
-            bonusQuantity: values.bonus.enabled ? Number(values.bonus.bonusQuantity) : 0,
-        }
+        bonuses: bonusesPayload,
       };
+
+      // Enviar legacy `bonus` para compatibilidad si solo hay una bonificación
+      if (bonusesPayload.length === 1) {
+        payload.bonus = bonusesPayload[0];
+      }
 
       const newProductId = await productsService.createProduct(payload);
       
@@ -248,9 +261,9 @@ export default function AddProductScreen() {
     setValues(v => ({ ...v, [field]: value }));
   }
 
-  // --- Handler para cambios en el componente de bonificación ---
-  const handleBonusChange = (newBonusData) => {
-    setValues(prev => ({ ...prev, bonus: newBonusData }));
+  // --- Handler para cambios en el componente de bonificaciones ---
+  const handleBonusesChange = (newBonusesArray) => {
+    setValues(prev => ({ ...prev, bonuses: newBonusesArray }));
   };
 
   return (
@@ -313,7 +326,7 @@ export default function AddProductScreen() {
           </View>
 
           {/* --- SECCIÓN DE BONIFICACIONES REFACTORIZADA --- */}
-          <BonusSetup bonusData={values.bonus} onChange={handleBonusChange} />
+          <BonusSetup bonuses={values.bonuses} onChange={handleBonusesChange} />
 
           <View style={styles.section}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>

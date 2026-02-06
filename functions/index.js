@@ -151,13 +151,72 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
         if (pData.entregadorId !== uid) throw new functions.https.HttpsError('permission-denied', 'No asignado');
         if (pData.status !== 'dispatched') throw new functions.https.HttpsError('failed-precondition', 'Estado incorrecto');
 
+        // Actualizamos el estado de la presale a 'paid' y registramos la fecha
         t.update(preSaleRef, { status: 'paid', fechaPago: admin.firestore.FieldValue.serverTimestamp() });
 
+        // Decrementar stock por cada item vendido
         if (pData.items) {
-            pData.items.forEach(item => {
+            // Agrupar bonificaciones a otorgar por productId
+            const bonusesToApply = {};
+
+            for (const item of pData.items) {
                 const pRef = db.collection('products').doc(item.productId);
                 t.update(pRef, { stock: admin.firestore.FieldValue.increment(-item.quantity) });
-            });
+
+                // Leer producto para verificar reglas de bonificación (si las tiene)
+                const prodSnap = await t.get(pRef);
+                if (!prodSnap.exists) continue;
+                const prodData = prodSnap.data();
+                const bonuses = prodData.bonuses || (prodData.bonus ? [prodData.bonus] : []);
+
+                if (Array.isArray(bonuses) && bonuses.length > 0) {
+                    for (const b of bonuses) {
+                        if (!b || !b.enabled) continue;
+                        const threshold = Number(b.threshold) || 0;
+                        const giveQty = Number(b.bonusQuantity) || 0;
+                        if (threshold <= 0 || giveQty <= 0) continue;
+
+                        // Calculamos cuántas veces aplica la bonificación en base a la cantidad vendida
+                        const times = Math.floor(Number(item.quantity) / threshold);
+                        if (times <= 0) continue;
+
+                        const totalAward = times * giveQty;
+                        const bonusProdId = b.bonusProductId;
+                        if (!bonusProdId) continue;
+
+                        if (!bonusesToApply[bonusProdId]) bonusesToApply[bonusProdId] = 0;
+                        bonusesToApply[bonusProdId] += totalAward;
+                    }
+                }
+            }
+
+            // Aplicar decremento de stock por bonificaciones (si hay)
+            const awarded = [];
+            for (const bonusProdId of Object.keys(bonusesToApply)) {
+                const intendedQty = bonusesToApply[bonusProdId];
+                const bRef = db.collection('products').doc(bonusProdId);
+
+                // Leer stock actual del producto regalado
+                const bSnap = await t.get(bRef);
+                const currentStock = bSnap.exists ? Number(bSnap.data().stock || 0) : 0;
+
+                // Determinar cantidad que realmente se puede dar sin dejar stock negativo
+                const givenQty = Math.min(currentStock, intendedQty);
+
+                if (givenQty > 0) {
+                    const newStock = currentStock - givenQty;
+                    t.update(bRef, { stock: newStock, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+                    awarded.push({ productId: bonusProdId, quantity: givenQty });
+                } else {
+                    // Si no hay stock disponible, registramos con cantidad 0 para seguimiento (opcional)
+                    awarded.push({ productId: bonusProdId, quantity: 0 });
+                }
+            }
+
+            // Guardar información de bonificaciones otorgadas en la presale
+            if (awarded.length > 0) {
+                t.update(preSaleRef, { bonusesAwarded: awarded });
+            }
         }
     });
     return { success: true };

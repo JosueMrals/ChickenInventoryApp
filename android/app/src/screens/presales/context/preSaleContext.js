@@ -22,34 +22,42 @@ export function PreSaleProvider({ children }) {
 
   const applyBonuses = useCallback((currentCart) => {
     // 1. Empezar solo con los items que no son bonificaciones
-    let newCart = [...currentCart].filter(item => !item.isBonus);
+    // Usamos filter sobre currentCart para asegurar que iteramos sobre la base limpia si vinieran mezclados,
+    // pero idealmente 'newCart' son solo los productos de venta.
+    const cartItems = currentCart.filter(item => !item.isBonus);
+    let newCart = [...cartItems];
 
     // 2. Iterar sobre los items regulares para calcular sus bonificaciones
-    currentCart.forEach(item => {
-      if (item.isBonus) return; // Ignorar bonificaciones existentes en el cálculo
-
+    cartItems.forEach(item => {
       const product = item.product;
-      const bonusInfo = product?.bonus;
 
-      if (bonusInfo?.enabled && bonusInfo.threshold > 0 && bonusInfo.bonusQuantity > 0 && bonusInfo.bonusProductId) {
-        const numberOfBonuses = Math.floor(item.quantity / bonusInfo.threshold);
+      // Obtener arreglo de bonificaciones: Prioriza 'bonuses' array, fallback a 'bonus' objeto legacy
+      const bonusesConfig = (product.bonuses && Array.isArray(product.bonuses))
+          ? product.bonuses
+          : (product.bonus && product.bonus.enabled ? [product.bonus] : []);
 
-        if (numberOfBonuses > 0) {
-          newCart.push({
-            id: `${item.id}_bonus_${bonusInfo.bonusProductId}`, // ID único para el item de bonificación
-            product: { // Objeto de producto simulado para la bonificación
-                id: bonusInfo.bonusProductId,
-                name: bonusInfo.bonusProductName,
-            },
-            quantity: numberOfBonuses * bonusInfo.bonusQuantity,
-            unitPrice: 0,
-            discount: 0,
-            total: 0,
-            isBonus: true,
-            linkedTo: item.id, // Enlazar al producto que genera la bonificación
-          });
-        }
-      }
+      bonusesConfig.forEach((bonusInfo, idx) => {
+        if (bonusInfo?.enabled && bonusInfo.threshold > 0 && bonusInfo.bonusQuantity > 0 && bonusInfo.bonusProductId) {
+            const numberOfBonuses = Math.floor(item.quantity / bonusInfo.threshold);
+
+            if (numberOfBonuses > 0) {
+              newCart.push({
+                id: `${item.id}_bonus_${idx}_${bonusInfo.bonusProductId}`, // ID único compuesto
+                product: {
+                    id: bonusInfo.bonusProductId,
+                    name: bonusInfo.bonusProductName || 'Producto de regalo',
+                },
+                quantity: numberOfBonuses * bonusInfo.bonusQuantity,
+                unitPrice: 0,
+                discount: 0,
+                total: 0,
+                isBonus: true,
+                linkedTo: item.id, // Enlazar al producto que genera la bonificación
+                linkedToName: product.name // Nombre del producto padre para visualización
+              });
+            }
+          }
+      });
     });
     return newCart;
   }, []);
