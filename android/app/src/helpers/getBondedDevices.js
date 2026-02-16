@@ -1,12 +1,17 @@
-import { NativeModules } from "react-native";
-const { BondedDevicesModule } = NativeModules;
+import RNBluetoothClassic from "react-native-bluetooth-classic";
 
 export async function getBondedDevices() {
   try {
-    const devices = await BondedDevicesModule.getBondedDevices();
-    return devices;
+    const devices = await RNBluetoothClassic.getBondedDevices();
+    // Mapear al formato que espera la UI { name, address }
+    return devices.map(d => ({
+        name: d.name || "Desconocido",
+        address: d.address,
+        id: d.id, // RNBluetoothClassic usa 'id' a veces como mac address
+        ...d
+    }));
   } catch (e) {
-    console.log("Bonded device error:", e);
+    console.warn("Error getting bonded devices:", e);
     return [];
   }
 }

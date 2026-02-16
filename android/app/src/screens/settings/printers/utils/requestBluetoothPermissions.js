@@ -5,15 +5,24 @@ export async function requestBluetoothPermissions() {
     return true;
   }
 
-  const permissions = [
-    PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-    PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-  ];
+  // Android 12+ (API 31+)
+  if (Platform.Version >= 31) {
+      const permissions = [
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+      ];
+      const granted = await PermissionsAndroid.requestMultiple(permissions);
 
-  const granted = await PermissionsAndroid.requestMultiple(permissions);
+      const allGranted = Object.values(granted).every(
+        (result) => result === PermissionsAndroid.RESULTS.GRANTED
+      );
+      return allGranted;
+  }
 
-  return Object.values(granted).every(
-    (result) => result === PermissionsAndroid.RESULTS.GRANTED
+  // Android 11 o inferior: Requiere Location para escanear
+  const granted = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
   );
+
+  return granted === PermissionsAndroid.RESULTS.GRANTED;
 }

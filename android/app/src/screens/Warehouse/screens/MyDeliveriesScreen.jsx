@@ -1,69 +1,58 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import firestore from '@react-native-firebase/firestore';
-import functions from '@react-native-firebase/functions';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useNavigation } from '@react-navigation/native';
 
-// Componente para cada Entrega
-const DeliveryItem = ({ item, onConfirmPayment }) => {
-  // Cálculo seguro de items totales
-  const totalItems = item.items && Array.isArray(item.items)
-    ? item.items.reduce((acc, curr) => acc + (curr.quantity || 0), 0)
-    : 0;
+// Componente para cada Entrega (Versión Resumida)
+const DeliveryItem = ({ item, onGoToPayment }) => {
+  const [expanded, setExpanded] = useState(false);
 
-  // Formateo de fecha seguro
-  const dateString = item.fechaEntregaRepartidor
-    ? new Date(item.fechaEntregaRepartidor.toDate()).toLocaleString()
-    : 'Fecha desconocida';
+  // Fechas y Textos
+  const createdDate = item.createdAt
+    ? new Date(item.createdAt.toDate()).toLocaleDateString() + ' ' + new Date(item.createdAt.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+    : '---';
+
+  const totalItems = item.items ? item.items.reduce((a, b) => a + (b.quantity || 0), 0) : 0;
 
   return (
-    <View style={styles.itemContainer}>
-      <View style={styles.itemHeader}>
-          <View style={styles.headerLeft}>
-            <Icon name="bicycle" size={24} color="#2DCE89" />
-            <Text style={styles.itemTitle}>Orden #{item.id.substring(0, 8).toUpperCase()}</Text>
-          </View>
-          <View style={styles.priceTag}>
-            <Text style={styles.priceText}>${item.total ? item.total.toFixed(2) : '0.00'}</Text>
-          </View>
-      </View>
+    <View style={styles.card}>
+        {/* Header: Orden - Cliente - Total - Estado Pagada dummy (invisible por ahora) */}
+        <TouchableOpacity style={styles.cardHeader} onPress={() => setExpanded(!expanded)}>
+             <View style={{flex: 1}}>
+                 <Text style={styles.orderTitle}>#{item.id.substring(0, 6).toUpperCase()}</Text>
+                 <Text style={styles.customerName}>{item.customerName || 'Cliente General'}</Text>
+                 <Text style={styles.dateText}>{createdDate}</Text>
+             </View>
 
-      <View style={styles.infoRow}>
-        <Icon name="person-outline" size={16} color="#666" />
-        <Text style={styles.infoText}>{item.customerName || 'Cliente sin nombre'}</Text>
-      </View>
+             <View style={{alignItems: 'flex-end'}}>
+                 <Text style={styles.totalText}>${item.total?.toFixed(2)}</Text>
+                 <View style={styles.badge}>
+                    <Text style={styles.badgeText}>Pendiente</Text>
+                 </View>
+             </View>
+        </TouchableOpacity>
 
-      <View style={styles.infoRow}>
-        <Icon name="cube-outline" size={16} color="#666" />
-        <Text style={styles.infoText}>{totalItems} productos</Text>
-      </View>
+        {/* Detalle Expandible */}
+        {expanded && (
+            <View style={styles.cardBody}>
+                <View style={styles.divider} />
+                <Text style={styles.sectionLabel}>Dirección:</Text>
+                <Text style={styles.bodyText}>{item.address || 'Sin dirección'}</Text>
 
-      {item.address ? (
-         <View style={styles.infoRow}>
-            <Icon name="location-outline" size={16} color="#666" />
-            <Text style={styles.infoText}>{item.address}</Text>
-         </View>
-      ) : (
-         <View style={styles.infoRow}>
-            <Icon name="location-outline" size={16} color="#999" />
-            <Text style={[styles.infoText, {color: '#999', fontStyle: 'italic'}]}>Sin dirección especificada</Text>
-         </View>
-      )}
+                {item.phone && <Text style={styles.bodyText}>Tel: {item.phone}</Text>}
 
-      <View style={styles.divider} />
+                <Text style={[styles.sectionLabel, {marginTop: 10}]}>Productos ({totalItems}):</Text>
+                {item.items && item.items.map((prod, i) => (
+                    <Text key={i} style={styles.productText}>• {prod.quantity}x {prod.productName || prod.name}</Text>
+                ))}
+            </View>
+        )}
 
-      <View style={styles.infoRow}>
-         <Icon name="time-outline" size={16} color="#888" />
-         <Text style={styles.dateText}>Asignado: {dateString}</Text>
-      </View>
-
-      <TouchableOpacity
-        style={styles.payButton}
-        onPress={() => onConfirmPayment(item)}
-      >
-        <Icon name="cash-outline" size={20} color="white" style={{marginRight: 8}} />
-        <Text style={styles.payButtonText}>Confirmar Pago y Entrega</Text>
-      </TouchableOpacity>
+        {/* Botón Acción Full Width */}
+        <TouchableOpacity style={styles.mainActionButton} onPress={() => onGoToPayment(item)}>
+            <Text style={styles.mainActionText}>COBRAR ORDEN</Text>
+        </TouchableOpacity>
     </View>
   );
 };
@@ -71,7 +60,7 @@ const DeliveryItem = ({ item, onConfirmPayment }) => {
 export default function MyDeliveriesScreen({ user }) {
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [processingId, setProcessingId] = useState(null);
+  const navigation = useNavigation();
 
   useEffect(() => {
     if (!user || !user.uid) {
@@ -107,35 +96,8 @@ export default function MyDeliveriesScreen({ user }) {
     return () => subscriber();
   }, [user]);
 
-  const handleConfirmPayment = (item) => {
-    Alert.alert(
-        'Confirmar Entrega',
-        `¿Recibiste el pago de $${item.total?.toFixed(2)} y entregaste los productos al cliente ${item.customerName || ''}?`,
-        [
-            { text: 'Cancelar', style: 'cancel' },
-            {
-                text: 'Confirmar',
-                onPress: () => processPayment(item.id)
-            }
-        ]
-    );
-  };
-
-  const processPayment = async (preSaleId) => {
-    setProcessingId(preSaleId);
-    try {
-        const completePaymentFunction = functions().httpsCallable('completePreSalePayment');
-        const result = await completePaymentFunction({ preSaleId });
-
-        if (result.data.success) {
-            Alert.alert('¡Excelente!', 'Entrega finalizada y stock actualizado.');
-        }
-    } catch (error) {
-        console.error("Error al procesar pago:", error);
-        Alert.alert('Error', error.message || 'No se pudo procesar el pago.');
-    } finally {
-        setProcessingId(null);
-    }
+  const handleGoToPayment = (item) => {
+      navigation.navigate('DeliveryPayment', { delivery: item });
   };
 
   if (loading) {
@@ -151,19 +113,10 @@ export default function MyDeliveriesScreen({ user }) {
     <View style={styles.container}>
       <Text style={styles.headerTitle}>Mis Entregas Pendientes</Text>
 
-      {processingId && (
-          <View style={styles.processingOverlay}>
-              <View style={styles.processingBox}>
-                  <ActivityIndicator size="large" color="#2DCE89" />
-                  <Text style={styles.processingText}>Procesando pago...</Text>
-              </View>
-          </View>
-      )}
-
       <FlatList
         data={deliveries}
         keyExtractor={item => item.id}
-        renderItem={({ item }) => <DeliveryItem item={item} onConfirmPayment={handleConfirmPayment} />}
+        renderItem={({ item }) => <DeliveryItem item={item} onGoToPayment={handleGoToPayment} />}
         ListEmptyComponent={
             <View style={styles.centerContainer}>
                 <Icon name="bicycle-outline" size={80} color="#ddd" />
@@ -177,57 +130,98 @@ export default function MyDeliveriesScreen({ user }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: '#F5F6FA' },
+  container: { flex: 1, padding: 16, backgroundColor: '#F2F4F8' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
-  headerTitle: { fontSize: 26, fontWeight: 'bold', marginBottom: 20, color: '#1A1A1A' },
+  headerTitle: { fontSize: 24, fontWeight: '800', marginBottom: 20, color: '#111' },
   emptyText: { textAlign: 'center', marginTop: 10, fontSize: 16, color: '#888', maxWidth: '80%' },
 
-  itemContainer: {
-    backgroundColor: 'white',
-    padding: 20,
-    marginBottom: 16,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4
+  // Estilos Nueva Card
+  card: {
+      backgroundColor: '#fff',
+      borderRadius: 12,
+      marginBottom: 12,
+      padding: 0,
+      elevation: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      overflow: 'hidden'
   },
-  itemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  headerLeft: { flexDirection: 'row', alignItems: 'center' },
-  itemTitle: { fontSize: 18, fontWeight: 'bold', marginLeft: 10, color: '#333' },
-  priceTag: { backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  priceText: { color: '#2E7D32', fontWeight: 'bold', fontSize: 16 },
-
-  infoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-  infoText: { marginLeft: 8, fontSize: 15, color: '#555' },
-  dateText: { marginLeft: 8, fontSize: 13, color: '#888' },
-
-  divider: { height: 1, backgroundColor: '#eee', marginVertical: 10 },
-
-  payButton: {
-    flexDirection: 'row',
-    backgroundColor: '#2DCE89',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
-    shadowColor: '#2DCE89',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4
+  cardHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      padding: 16,
   },
-  payButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-
-  processingOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10,
-    justifyContent: 'center', alignItems: 'center'
+  orderTitle: {
+      fontSize: 14,
+      fontWeight: 'bold',
+      color: '#888',
+      marginBottom: 2
   },
-  processingBox: {
-      backgroundColor: 'white', padding: 25, borderRadius: 16, alignItems: 'center'
+  customerName: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: '#333',
+      marginBottom: 4
   },
-  processingText: { marginTop: 10, fontSize: 16, fontWeight: '600' }
+  dateText: {
+      fontSize: 12,
+      color: '#999',
+  },
+  totalText: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: '#2DCE89',
+      marginBottom: 4
+  },
+  badge: {
+     backgroundColor: '#FFECB3',
+     paddingHorizontal: 8,
+     paddingVertical: 2,
+     borderRadius: 4,
+     alignSelf: 'flex-end'
+  },
+  badgeText: {
+      fontSize: 10,
+      fontWeight: 'bold',
+      color: '#FF6F00'
+  },
+  cardBody: {
+      paddingHorizontal: 16,
+      paddingBottom: 16
+  },
+  divider: {
+      height: 1,
+      backgroundColor: '#eee',
+      marginVertical: 10
+  },
+  sectionLabel: {
+      fontSize: 12,
+      fontWeight: 'bold',
+      color: '#555',
+      marginBottom: 2
+  },
+  bodyText: {
+      fontSize: 14,
+      color: '#444',
+      marginBottom: 4
+  },
+  productText: {
+      fontSize: 13,
+      color: '#666',
+      marginLeft: 6
+  },
+  mainActionButton: {
+      backgroundColor: '#2DCE89',
+      paddingVertical: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+  },
+  mainActionText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 14,
+      letterSpacing: 0.5
+  }
 });

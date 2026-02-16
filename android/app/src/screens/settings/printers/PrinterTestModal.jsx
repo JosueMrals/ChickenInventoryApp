@@ -9,8 +9,16 @@ export default function PrinterTestModal({ visible, onClose, onTest }) {
         <View style={styles.modalBox}>
           <Text style={styles.modalTitle}>Probar Impresión</Text>
 
-          <TouchableOpacity style={styles.testButton} onPress={onTest}>
-            <Text style={styles.testText}>Imprimir Ticket de Prueba</Text>
+          <TouchableOpacity style={styles.testButton} onPress={() => onTest("simple")}>
+            <Text style={styles.testText}>Prueba Simple "HOLA"</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.testButton} onPress={() => onTest("standard")}>
+            <Text style={styles.testText}>Ticket Completo (Estándar)</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.testButton, { backgroundColor: "#666" }]} onPress={() => onTest("feed")}>
+             <Text style={styles.testText}>Alimentar Papel (Feed)</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>

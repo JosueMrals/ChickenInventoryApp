@@ -65,7 +65,7 @@ export default function DashboardScreen({ user, role }) {
       { key: 'credits', label: 'Créditos', icon: 'card-outline', color: '#FF3B30', screen: 'Credits', roles: ['admin', 'vendedor'] },
       { key: 'reports', label: 'Reportes', icon: 'bar-chart-outline', color: '#5856D6', screen: 'Reports', roles: ['admin'] },
       { key: 'users', label: 'Usuarios', icon: 'people-outline', color: '#34C759', screen: 'Register', roles: ['admin'] },
-      { key: 'settings', label: 'Configuración', icon: 'settings-outline', color: '#8E8E93', screen: 'Settings', roles: ['admin'] },
+      { key: 'settings', label: 'Configuración', icon: 'settings-outline', color: '#8E8E93', screen: 'Settings', roles: ['admin','entregador'] },
       { key: 'routes', label: 'Rutas', icon: 'location-outline', color: '#E91E63', screen: 'Routes', roles: ['admin'] },
       { key: 'prepare-presales', label: 'Preparar Pre-Ventas', icon: 'file-tray-stacked-outline', color: '#F2C94C', screen: 'PreparePreSales', roles: ['admin','bodeguero'] },
       { key: 'my-deliveries', label: 'Mis Entregas', icon: 'bicycle-outline', color: '#2DCE89', screen: 'MyDeliveries', roles: ['admin','entregador'] },
@@ -96,7 +96,7 @@ export default function DashboardScreen({ user, role }) {
         break;
       case 'entregador':
         layout = [
-            [{ key: 'my-deliveries', size: 1 }],
+            [{ key: 'my-deliveries', size: 1 }, { key: 'settings', size: 1 }],
         ];
         break;
       default:

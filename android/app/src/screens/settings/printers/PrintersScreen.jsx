@@ -6,111 +6,333 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Linking,
+  AppState,
+  ScrollView,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "./styles/printerStyles";
 import {
   savePrinter,
   loadPrinter,
-  clearPrinter,
-  build58mmReceipt,
+  printTest,
+  printTicket,
+  getSavedPrintersList,
+  addSavedPrinter,
+  removeSavedPrinter,
+  updatePrinterName,
 } from "./services/printerService";
 import { requestBluetoothPermissions } from "./utils/requestBluetoothPermissions";
 import { getBondedDevices } from "../../../helpers/getBondedDevices";
-import { BluetoothPrinter } from "@tillpos/react-native-bluetooth-printer";
+import EditPrinterNameModal from "./EditPrinterNameModal";
+import PrinterTestModal from "./PrinterTestModal"; // Use simpler modal
 
 export default function PrintersScreen() {
-  const [devices, setDevices] = useState([]);
+  const [bondedDevices, setBondedDevices] = useState([]);
+  const [savedPrinters, setSavedPrinters] = useState([]);
   const [selectedPrinter, setSelectedPrinter] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // Edit State
+  const [isEditing, setIsEditing] = useState(false);
+  const [printerToEdit, setPrinterToEdit] = useState(null);
+
+  // Test State
+  const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+
   useEffect(() => {
     init();
+
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active") {
+        scan();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
   const init = async () => {
     const ok = await requestBluetoothPermissions();
     if (!ok) return Alert.alert("Permiso requerido", "Debe aceptar permisos Bluetooth.");
 
+    await refreshSavedPrinters();
     const saved = await loadPrinter();
     if (saved) setSelectedPrinter(saved);
 
     scan();
   };
 
+  const refreshSavedPrinters = async () => {
+    const list = await getSavedPrintersList();
+    setSavedPrinters(list);
+  };
+
   const scan = async () => {
     setLoading(true);
 
-    const list = await getBondedDevices();
-    console.log("EMPAREJADOS:", list);
+    try {
+      const list = await getBondedDevices();
+      console.log("Bonded List:", list);
+      setBondedDevices(list || []);
+    } catch (error) {
+      console.error("Scan error:", error);
+      Alert.alert("Error de Bluetooth", "No se pudieron obtener los dispositivos vinculados: " + error.message);
+      setBondedDevices([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    if (!list || list.length === 0) {
-      Alert.alert("Aviso", "No se encontraron dispositivos emparejados.");
+  const handleAddPrinter = async (dev) => {
+    const newList = await addSavedPrinter(dev);
+    setSavedPrinters(newList);
+    // Auto select on add if it's the first one? Maybe not.
+  };
+
+  const handleDeletePrinter = async (dev) => {
+    Alert.alert(
+      "Eliminar Impresora",
+      `¿Desea eliminar la impresora "${dev.customName || dev.name}" de la lista?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Eliminar",
+          style: "destructive",
+          onPress: async () => {
+             const newList = await removeSavedPrinter(dev.address);
+             setSavedPrinters(newList);
+             if (selectedPrinter?.address === dev.address) {
+               setSelectedPrinter(null);
+             }
+          }
+        },
+      ]
+    );
+  };
+
+  const handleEditPrinter = (dev) => {
+    setPrinterToEdit(dev);
+    setIsEditing(true);
+  };
+
+  const saveEditName = async (newName) => {
+    if (!printerToEdit) return;
+    const finalName = newName.trim() || printerToEdit.name;
+    const newList = await updatePrinterName(printerToEdit.address, finalName);
+
+    setSavedPrinters(newList);
+
+    // Si editamos la seleccionada, actualizar estado local
+    if (selectedPrinter?.address === printerToEdit.address) {
+       setSelectedPrinter({ ...selectedPrinter, customName: finalName });
     }
 
-    setDevices(list);
-    setLoading(false);
+    setIsEditing(false);
+    setPrinterToEdit(null);
   };
 
   const selectPrinter = async (dev) => {
-    setSelectedPrinter(dev);
-    await savePrinter(dev);
-    Alert.alert("Seleccionada", dev.name);
+    try {
+        setSelectedPrinter(dev);
+        await savePrinter(dev);
+        // Alert.alert("Seleccionada", dev.customName || dev.name);
+    } catch (e) {
+        console.error(e);
+    }
+  };
+
+  const openBluetoothSettings = () => {
+    Linking.sendIntent("android.settings.BLUETOOTH_SETTINGS");
   };
 
   const testPrint = async () => {
     if (!selectedPrinter) return Alert.alert("Seleccione una impresora.");
-
-    try {
-      await BluetoothPrinter.connectDevice(selectedPrinter.address);
-
-      await BluetoothPrinter.printBill(`
-      PRUEBA DE IMPRESIÓN
-      -----------------------
-      ${selectedPrinter.name}
-      OK
-      `);
-
-      Alert.alert("Impreso", "Ticket enviado.");
-    } catch (e) {
-      Alert.alert("Error", e.message);
-    }
+    setIsTestModalOpen(true);
   };
+
+  const handleTestOption = async (type) => {
+      if (!selectedPrinter) {
+          Alert.alert("Error", "Seleccione una impresora primero");
+          return;
+      }
+
+      try {
+          setLoading(true);
+          console.log(`[TEST] Iniciando prueba tipo: ${type} en impresora: ${selectedPrinter.name}`);
+
+          // COMANDOS ESC/POS ESTÁNDAR (58mm)
+          const ESC = "\x1B";
+          const GS = "\x1D";
+          const INIT = ESC + "@"; // Inicializar impresora
+          const ALIGN_CENTER = ESC + "a" + "\x01";
+          const ALIGN_LEFT = ESC + "a" + "\x00";
+
+          // Importante: printAndFeed (ESC d n) imprime el buffer y avanza n líneas
+          // Es más seguro que usar solo \n
+          const PRINT_AND_FEED = ESC + "d" + "\x03";
+
+          if (type === "standard") {
+              // Recomiendo no usar una función externa opaca si falla.
+              // Prueba construir un ticket estándar simple aquí mismo:
+              let ticket = "";
+              ticket += INIT;
+              ticket += ALIGN_CENTER;
+              ticket += "--------------------------------\n";
+              ticket += "      TEST DE IMPRESION\n";
+              ticket += "--------------------------------\n";
+              ticket += ALIGN_LEFT;
+              ticket += "Impresora: " + (selectedPrinter.name || "Genérica") + "\n";
+              ticket += "Ancho: 58mm\n";
+              ticket += "Estado: Conectado OK\n";
+              ticket += "--------------------------------\n";
+              ticket += PRINT_AND_FEED; // Imprimir y avanzar
+
+              console.log("[TEST] Enviando ticket estándar manual...");
+              await printTicket(ticket, selectedPrinter);
+              Alert.alert("Enviado", "Ticket estándar enviado.");
+          }
+          else if (type === "simple") {
+               console.log("[TEST] Enviando prueba simple...");
+
+               // Construcción más robusta para evitar basura en el buffer
+               const payload = INIT +
+                               "HOLA MUNDO" + "\n" +
+                               "TEST 58MM" + "\n" +
+                               PRINT_AND_FEED;
+
+               await printTicket(payload, selectedPrinter);
+               Alert.alert("Enviado", "Comando simple enviado.");
+          }
+          else if (type === "feed") {
+               console.log("[TEST] Enviando Feed...");
+               // Usar comando específico de feed en lugar de solo saltos de linea
+               const payload = ESC + "d" + "\x05"; // Avanzar 5 lineas
+               await printTicket(payload, selectedPrinter);
+          }
+
+          setIsTestModalOpen(false);
+
+      } catch (e) {
+          console.error("[TEST] Error fatal:", e);
+          Alert.alert("Error", "Verifique conexión o papel. \n" + (e.message || ""));
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  // Filtrar dispositivos bonded que NO están en saved
+  const availableDevices = bondedDevices.filter(
+      d => !savedPrinters.some(s => s.address === d.address)
+  );
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Impresoras Bluetooth</Text>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#007AFF" />
-      ) : devices.length === 0 ? (
-        <Text style={{ color: "#666", marginTop: 20 }}>
-          No hay impresoras emparejadas.
-        </Text>
-      ) : (
-        <FlatList
-          data={devices}
-          keyExtractor={(item) => item.address}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.deviceCard}
-              onPress={() => selectPrinter(item)}
-            >
-              <Icon name="print-outline" size={24} color="#007AFF" />
-              <Text style={styles.deviceName}>{item.name}</Text>
+      <View style={styles.rowBetween}>
+        <Text style={styles.header}>Impresoras</Text>
+        <TouchableOpacity onPress={() => { scan(); refreshSavedPrinters(); }}>
+          <Icon name="refresh" size={24} color="#007AFF" />
+        </TouchableOpacity>
+      </View>
 
-              {selectedPrinter?.address === item.address && (
-                <Icon name="checkmark-circle" size={24} color="#34C759" />
-              )}
-            </TouchableOpacity>
-          )}
-        />
-      )}
-
-      <TouchableOpacity style={styles.testBtn} onPress={testPrint}>
-        <Icon name="print" size={20} color="#fff" />
-        <Text style={styles.testText}>Imprimir prueba</Text>
+      <TouchableOpacity style={styles.settingsBtn} onPress={openBluetoothSettings}>
+        <Icon name="bluetooth" size={20} color="#fff" />
+        <Text style={styles.settingsText}>Vincular nueva impresora</Text>
       </TouchableOpacity>
+
+      <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+
+         {/* SECCION: IMPRESORA ACTIVA */}
+         {selectedPrinter && (
+            <View style={styles.selectedBox}>
+              <View style={styles.rowBetween}>
+                <View>
+                    <Text style={styles.selectedLabel}>IMPRESORA ACTIVA</Text>
+                    <Text style={styles.selectedName}>{selectedPrinter.customName || selectedPrinter.name}</Text>
+                    <Text style={styles.selectedAddress}>{selectedPrinter.address}</Text>
+                </View>
+                <TouchableOpacity onPress={testPrint} style={{ alignItems: 'center' }}>
+                    <Icon name="print" size={28} color="#007AFF" />
+                    <Text style={{ fontSize: 10, color: "#007AFF" }}>Probar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+         )}
+
+         {/* SECCION: MIS IMPRESORAS */}
+         <Text style={styles.subTitle}>Mis Impresoras ({savedPrinters.length})</Text>
+         {savedPrinters.length === 0 ? (
+             <Text style={styles.noPrinter}>No tienes impresoras guardadas.</Text>
+         ) : (
+             savedPrinters.map((item) => (
+                <TouchableOpacity
+                  key={item.address}
+                  style={[
+                      styles.deviceCard,
+                      selectedPrinter?.address === item.address && { borderColor: '#007AFF', borderWidth: 1 }
+                  ]}
+                  onPress={() => selectPrinter(item)}
+                >
+                  <Icon name="print-outline" size={24} color="#007AFF" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.deviceName}>{item.customName || item.name}</Text>
+                    <Text style={styles.selectedAddress}>{item.address}</Text>
+                  </View>
+
+                  <View style={styles.rowActions}>
+                    <TouchableOpacity style={styles.iconBtn} onPress={() => handleEditPrinter(item)}>
+                        <Icon name="pencil" size={20} color="#666" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.iconBtn} onPress={() => handleDeletePrinter(item)}>
+                        <Icon name="trash-outline" size={20} color="#FF3B30" />
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+             ))
+         )}
+
+         <View style={{ height: 20 }} />
+
+         {/* SECCION: DISPONIBLES */}
+         <Text style={styles.subTitle}>Disponibles para agregar ({availableDevices.length})</Text>
+         {loading ? (
+           <ActivityIndicator size="small" color="#007AFF" style={{ marginTop: 10 }} />
+         ) : availableDevices.length === 0 ? (
+           <Text style={styles.noPrinter}>No hay otros dispositivos Bluetooth.</Text>
+         ) : (
+           availableDevices.map((item) => (
+             <View key={item.address} style={styles.deviceCard}>
+                <Icon name="bluetooth" size={24} color="#999" />
+                <View style={{ flex: 1 }}>
+                    <Text style={styles.deviceName}>{item.name}</Text>
+                    <Text style={styles.selectedAddress}>{item.address}</Text>
+                </View>
+                <TouchableOpacity onPress={() => handleAddPrinter(item)}>
+                    <Icon name="add-circle" size={28} color="#34C759" />
+                </TouchableOpacity>
+             </View>
+           ))
+         )}
+
+      </ScrollView>
+
+      {/* Modal Editar */}
+      <EditPrinterNameModal
+        visible={isEditing}
+        currentName={printerToEdit?.customName || printerToEdit?.name}
+        onClose={() => setIsEditing(false)}
+        onSave={saveEditName}
+      />
+
+      <PrinterTestModal
+        visible={isTestModalOpen}
+        onClose={() => setIsTestModalOpen(false)}
+        onTest={handleTestOption}
+      />
+
     </View>
   );
 }

@@ -30,6 +30,8 @@ import WarehouseDashboardScreen from './android/app/src/screens/Warehouse/screen
 import WarehouseOrderDetailScreen from './android/app/src/screens/Warehouse/screens/WarehouseOrderDetailScreen';
 import ProductHandoverScreen from './android/app/src/screens/Warehouse/screens/ProductHandoverScreen';
 import MyDeliveriesScreen from './android/app/src/screens/Warehouse/screens/MyDeliveriesScreen';
+import DeliveryPaymentScreen from './android/app/src/screens/Warehouse/screens/DeliveryPaymentScreen';
+import DeliveryDoneScreen from './android/app/src/screens/Warehouse/screens/DeliveryDoneScreen';
 // ------------------------------------
 
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
@@ -306,6 +308,10 @@ export default function App() {
                     <Stack.Screen name="AppDrawer" component={AppDrawer} />
                     {/* Pantallas globales accesibles desde Settings */}
                     <Stack.Screen name="PrintersScreen" component={PrintersScreen} />
+
+                    {/* Warehouse Delivery Flow */}
+                    <Stack.Screen name="DeliveryPayment" component={DeliveryPaymentScreen} />
+                    <Stack.Screen name="DeliveryDone" component={DeliveryDoneScreen} />
                 </Stack.Navigator>
               </View>
             </TouchableWithoutFeedback>

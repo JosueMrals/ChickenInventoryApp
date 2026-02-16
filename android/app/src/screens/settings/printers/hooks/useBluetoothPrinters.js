@@ -1,39 +1,28 @@
-import { useState, useEffect } from "react";
-import { BleManager } from "react-native-ble-plx";
+import { useState } from "react";
+import { getBondedDevices } from "../../../helpers/getBondedDevices";
+import { connectPrinter, disconnectPrinter } from "../services/printerService";
 
 export function useBluetoothPrinters() {
-  const manager = new BleManager();
   const [printers, setPrinters] = useState([]);
   const [scanning, setScanning] = useState(false);
   const [connectedPrinter, setConnectedPrinter] = useState(null);
 
-  const scanPrinters = () => {
+  const scanPrinters = async () => {
     setScanning(true);
-    setPrinters([]);
-
-    manager.startDeviceScan(null, null, (error, device) => {
-      if (error) {
-        console.log("Scan error:", error);
-        setScanning(false);
-        return;
-      }
-
-      if (device.name?.toLowerCase().includes("printer")) {
-        setPrinters(prev => [...prev, device]);
-      }
-    });
-
-    setTimeout(() => {
-      manager.stopDeviceScan();
+    try {
+      const list = await getBondedDevices();
+      setPrinters(list);
+    } catch (e) {
+      console.log(e);
+    } finally {
       setScanning(false);
-    }, 5000);
+    }
   };
 
   const connect = async (device) => {
     try {
-      const connected = await manager.connectToDevice(device.id);
-      await connected.discoverAllServicesAndCharacteristics();
-      setConnectedPrinter(connected);
+      await connectPrinter(device.address);
+      setConnectedPrinter(device);
       return true;
     } catch (err) {
       console.log("Connection error:", err);
@@ -42,9 +31,11 @@ export function useBluetoothPrinters() {
   };
 
   const disconnect = async () => {
-    if (connectedPrinter) {
-      await manager.cancelDeviceConnection(connectedPrinter.id);
+    try {
+      await disconnectPrinter();
       setConnectedPrinter(null);
+    } catch (e) {
+      console.log(e);
     }
   };
 

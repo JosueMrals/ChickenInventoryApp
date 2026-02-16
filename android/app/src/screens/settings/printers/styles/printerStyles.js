@@ -39,8 +39,13 @@ export default StyleSheet.create({
 
   selectedName: {
     fontSize: 16,
-    fontWeight: "600",
-    color: "#007AFF",
+    fontWeight: "700",
+    color: "#1565C0",
+  },
+
+  selectedAddress: {
+    fontSize: 12,
+    color: "#777",
   },
 
   rowBetween: {
@@ -88,4 +93,133 @@ export default StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
   },
+
+  settingsBtn: {
+    backgroundColor: "#34C759",
+    padding: 12,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 16,
+  },
+
+  settingsText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+
+  selectedContainer: {
+    backgroundColor: "#E3F2FD",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#90CAF9",
+  },
+
+  selectedLabel: {
+    fontSize: 12,
+    color: "#555",
+    marginBottom: 2,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  modalBox: {
+    backgroundColor: "#fff",
+    padding: 24,
+    borderRadius: 16,
+    width: "80%",
+    alignItems: "center",
+  },
+
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 20,
+    color: "#333",
+  },
+
+  testButton: {
+    backgroundColor: "#007AFF",
+    paddingVertical: 14,
+    width: "100%",
+    borderRadius: 12,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+
+  closeBtn: {
+    paddingVertical: 12,
+    width: "100%",
+    alignItems: "center",
+  },
+
+  closeText: {
+    fontSize: 16,
+    color: "#FF3B30",
+    fontWeight: "600",
+  },
+
+  input: {
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 20,
+    fontSize: 16,
+  },
+
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    gap: 10,
+  },
+
+  cancelBtn: {
+    flex: 1,
+    padding: 12,
+    alignItems: "center",
+    backgroundColor: "#F2F2F7",
+    borderRadius: 8,
+  },
+
+  cancelText: {
+    color: "#007AFF",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+
+  saveBtn: {
+    flex: 1,
+    padding: 12,
+    alignItems: "center",
+    backgroundColor: "#007AFF",
+    borderRadius: 8,
+  },
+
+  saveText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+
+  iconBtn: {
+    padding: 8,
+  },
+
+  rowActions: {
+      flexDirection: "row",
+      alignItems: "center",
+  }
 });
