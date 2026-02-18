@@ -8,7 +8,7 @@ import ModuleCardGrid from './components/ModuleCardGrid';
 import styles from './styles/dashboardStyles';
 
 export default function DashboardScreen({ user, role }) {
-  const { stats, loading } = useDashboardStats(role);
+  const { stats, loading } = useDashboardStats(role, user);
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -43,8 +43,8 @@ export default function DashboardScreen({ user, role }) {
         break;
       case 'entregador':
         layout = [
-          [{ key: 'assignedDeliveries', size: 1 }],
-          [{ key: 'totalToCollect', size: 1 }]
+          [{ key: 'assignedDeliveries', size: 2 }],
+          [{ key: 'totalToCollect', size: 2 }]
         ];
         break;
       default:
@@ -124,10 +124,6 @@ export default function DashboardScreen({ user, role }) {
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
       <DashboardHeader user={user} role={role} />
-      <View style={styles.statsContainer}>
-        <StatCardGrid availableStats={availableStats} layout={statsLayout} />
-      </View>
-      <Text style={styles.sectionTitle}>Operaciones</Text>
 
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         <ModuleCardGrid

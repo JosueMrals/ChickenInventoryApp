@@ -20,14 +20,16 @@ const getStatusColor = (status) => {
     }
 };
 
-const PreSaleItem = ({ item, onSelect }) => {
+const PreSaleItem = ({ item, onSelect, customerName }) => {
   const totalItems = item.items && Array.isArray(item.items)
     ? item.items.reduce((acc, curr) => acc + (curr.quantity || 0), 0)
     : 0;
 
-  const customerName = item.customer?.firstName
+  const fallbackName = item.customer?.firstName
         ? `${item.customer.firstName} ${item.customer.lastName || ''}`
         : item.customerName || 'Cliente sin nombre';
+
+  const displayName = customerName || fallbackName;
 
   const customerPhone = item.customer?.phone || 'Sin teléfono';
 
@@ -46,7 +48,7 @@ const PreSaleItem = ({ item, onSelect }) => {
       <View style={styles.customerContainer}>
         <View style={styles.customerRow}>
             <Icon name="person-outline" size={16} color="#666" style={{marginRight: 6}} />
-            <Text style={styles.customerText}>{customerName}</Text>
+            <Text style={styles.customerText}>{displayName}</Text>
         </View>
         <View style={styles.customerRow}>
             <Icon name="call-outline" size={16} color="#666" style={{marginRight: 6}} />

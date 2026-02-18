@@ -163,54 +163,10 @@ export default function PrintersScreen() {
           setLoading(true);
           console.log(`[TEST] Iniciando prueba tipo: ${type} en impresora: ${selectedPrinter.name}`);
 
-          // COMANDOS ESC/POS ESTÁNDAR (58mm)
-          const ESC = "\x1B";
-          const GS = "\x1D";
-          const INIT = ESC + "@"; // Inicializar impresora
-          const ALIGN_CENTER = ESC + "a" + "\x01";
-          const ALIGN_LEFT = ESC + "a" + "\x00";
+          await printTest(selectedPrinter, type);
 
-          // Importante: printAndFeed (ESC d n) imprime el buffer y avanza n líneas
-          // Es más seguro que usar solo \n
-          const PRINT_AND_FEED = ESC + "d" + "\x03";
-
-          if (type === "standard") {
-              // Recomiendo no usar una función externa opaca si falla.
-              // Prueba construir un ticket estándar simple aquí mismo:
-              let ticket = "";
-              ticket += INIT;
-              ticket += ALIGN_CENTER;
-              ticket += "--------------------------------\n";
-              ticket += "      TEST DE IMPRESION\n";
-              ticket += "--------------------------------\n";
-              ticket += ALIGN_LEFT;
-              ticket += "Impresora: " + (selectedPrinter.name || "Genérica") + "\n";
-              ticket += "Ancho: 58mm\n";
-              ticket += "Estado: Conectado OK\n";
-              ticket += "--------------------------------\n";
-              ticket += PRINT_AND_FEED; // Imprimir y avanzar
-
-              console.log("[TEST] Enviando ticket estándar manual...");
-              await printTicket(ticket, selectedPrinter);
-              Alert.alert("Enviado", "Ticket estándar enviado.");
-          }
-          else if (type === "simple") {
-               console.log("[TEST] Enviando prueba simple...");
-
-               // Construcción más robusta para evitar basura en el buffer
-               const payload = INIT +
-                               "HOLA MUNDO" + "\n" +
-                               "TEST 58MM" + "\n" +
-                               PRINT_AND_FEED;
-
-               await printTicket(payload, selectedPrinter);
-               Alert.alert("Enviado", "Comando simple enviado.");
-          }
-          else if (type === "feed") {
-               console.log("[TEST] Enviando Feed...");
-               // Usar comando específico de feed en lugar de solo saltos de linea
-               const payload = ESC + "d" + "\x05"; // Avanzar 5 lineas
-               await printTicket(payload, selectedPrinter);
+          if (type !== "feed") {
+            Alert.alert("Enviado", "Prueba de imagen enviada.");
           }
 
           setIsTestModalOpen(false);

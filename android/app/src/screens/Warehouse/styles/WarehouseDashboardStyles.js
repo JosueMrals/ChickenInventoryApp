@@ -40,6 +40,35 @@ export default StyleSheet.create({
   contentContainer: {
     flex: 1,
   },
+  delivererStats: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
   emptyText: {
     fontSize: 16,
     color: '#999',

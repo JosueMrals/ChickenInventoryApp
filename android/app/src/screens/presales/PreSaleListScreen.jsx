@@ -5,11 +5,12 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import PreSaleCard from './components/PreSaleCard';
 import { useFocusEffect } from '@react-navigation/native';
 import globalStyles from '../../styles/globalStyles';
+import { resolveCustomerName } from '../../utils/customerUtils';
 
 const TABS = ['Pendientes', 'Pagadas'];
 
 export default function PreSaleListScreen({ navigation }) {
-    const { preSales, loadPreSales, loading } = useContext(PreSaleContext);
+    const { preSales, loadPreSales, loading, customersById } = useContext(PreSaleContext);
     const [activeTab, setActiveTab] = useState(TABS[0]);
 
     useFocusEffect(
@@ -61,7 +62,7 @@ export default function PreSaleListScreen({ navigation }) {
                             data={filteredData}
                             renderItem={({ item }) => (
                                 <TouchableOpacity onPress={() => navigation.navigate('PreSaleDetail', { presale: item })}>
-                                    <PreSaleCard presale={item} />
+                                    <PreSaleCard presale={item} customerName={resolveCustomerName(item, customersById)} />
                                 </TouchableOpacity>
                             )}
                             keyExtractor={item => item.id}

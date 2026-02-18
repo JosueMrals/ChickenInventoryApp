@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { resolveCustomerName } from '../../../utils/customerUtils';
 
 const formatDate = (timestamp) => {
     if (!timestamp || !timestamp.toDate) return 'Fecha inválida';
@@ -13,8 +14,9 @@ const formatDate = (timestamp) => {
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
-export default function PreSaleCard({ presale }) {
+export default function PreSaleCard({ presale, customerName }) {
     const hasBonuses = presale.bonuses && presale.bonuses.length > 0;
+    const displayName = customerName || resolveCustomerName(presale);
 
     return (
         <View style={styles.card}>
@@ -22,7 +24,7 @@ export default function PreSaleCard({ presale }) {
                 <View style={styles.headerInfo}>
                     <Icon name="person-circle-outline" size={20} color="#555" />
                     <Text style={styles.customerName}>
-                        {presale.customer?.firstName || 'Cliente no'} {presale.customer?.lastName || 'asignado'}
+                        {displayName}
                     </Text>
                 </View>
                 <View style={[styles.statusBadge, presale.status === 'paid' ? styles.paidBadge : styles.pendingBadge]}>

@@ -1,6 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import RNBluetoothClassic from "react-native-bluetooth-classic";
 import { encode as btoa } from "base-64";
+import RNFS from "react-native-fs";
+import { Buffer } from "buffer";
+import { PNG } from "pngjs/browser";
 
 const KEY = "SELECTED_PRINTER";
 const KEY_LIST = "SAVED_PRINTERS_LIST";
@@ -101,8 +104,9 @@ export async function ensureConnection(address) {
       }
 
       console.log("Conectando a:", address);
-      // Crear instancia del dispositivo por address (no conecta aún)
-      const device = await RNBluetoothClassic.getBondedDevice(address);
+      // Obtener lista de vinculados y buscar por address o id
+      const bonded = await RNBluetoothClassic.getBondedDevices();
+      const device = bonded.find(d => d.address === address || d.id === address);
 
       if (!device) {
           throw new Error("Dispositivo no encontrado en vinculados");
@@ -210,6 +214,291 @@ export async function printRaw(textOrBytes, device) {
   return true;
 }
 
+const RASTER_MAX_WIDTH_58MM = 384;
+const RASTER_BAND_HEIGHT = 120;
+
+const FONT_5X7 = {
+  "A": ["01110","10001","10001","11111","10001","10001","10001"],
+  "B": ["11110","10001","10001","11110","10001","10001","11110"],
+  "C": ["01111","10000","10000","10000","10000","10000","01111"],
+  "D": ["11110","10001","10001","10001","10001","10001","11110"],
+  "E": ["11111","10000","10000","11110","10000","10000","11111"],
+  "F": ["11111","10000","10000","11110","10000","10000","10000"],
+  "G": ["01111","10000","10000","10111","10001","10001","01111"],
+  "H": ["10001","10001","10001","11111","10001","10001","10001"],
+  "I": ["11111","00100","00100","00100","00100","00100","11111"],
+  "J": ["00111","00010","00010","00010","10010","10010","01100"],
+  "K": ["10001","10010","10100","11000","10100","10010","10001"],
+  "L": ["10000","10000","10000","10000","10000","10000","11111"],
+  "M": ["10001","11011","10101","10101","10001","10001","10001"],
+  "N": ["10001","11001","10101","10011","10001","10001","10001"],
+  "O": ["01110","10001","10001","10001","10001","10001","01110"],
+  "P": ["11110","10001","10001","11110","10000","10000","10000"],
+  "Q": ["01110","10001","10001","10001","10101","10010","01101"],
+  "R": ["11110","10001","10001","11110","10100","10010","10001"],
+  "S": ["01111","10000","10000","01110","00001","00001","11110"],
+  "T": ["11111","00100","00100","00100","00100","00100","00100"],
+  "U": ["10001","10001","10001","10001","10001","10001","01110"],
+  "V": ["10001","10001","10001","10001","10001","01010","00100"],
+  "W": ["10001","10001","10001","10101","10101","11011","10001"],
+  "X": ["10001","10001","01010","00100","01010","10001","10001"],
+  "Y": ["10001","10001","01010","00100","00100","00100","00100"],
+  "Z": ["11111","00001","00010","00100","01000","10000","11111"],
+  "0": ["01110","10001","10011","10101","11001","10001","01110"],
+  "1": ["00100","01100","00100","00100","00100","00100","01110"],
+  "2": ["01110","10001","00001","00010","00100","01000","11111"],
+  "3": ["11110","00001","00001","01110","00001","00001","11110"],
+  "4": ["00010","00110","01010","10010","11111","00010","00010"],
+  "5": ["11111","10000","10000","11110","00001","00001","11110"],
+  "6": ["01110","10000","10000","11110","10001","10001","01110"],
+  "7": ["11111","00001","00010","00100","01000","01000","01000"],
+  "8": ["01110","10001","10001","01110","10001","10001","01110"],
+  "9": ["01110","10001","10001","01111","00001","00001","01110"],
+  "-": ["00000","00000","00000","11111","00000","00000","00000"],
+  " ": ["00000","00000","00000","00000","00000","00000","00000"],
+  ".": ["00000","00000","00000","00000","00000","01100","01100"],
+  ",": ["00000","00000","00000","00000","00000","01100","01000"],
+  ":": ["00000","01100","01100","00000","01100","01100","00000"],
+  "/": ["00001","00010","00100","01000","10000","00000","00000"],
+  "#": ["01010","01010","11111","01010","11111","01010","01010"],
+  "\$": ["00100","01111","10100","01110","00101","11110","00100"],
+};
+
+function normalizeTestLine(line) {
+  return line.toUpperCase().replace(/[^A-Z0-9 \-]/g, " ");
+}
+
+function normalizeRasterLine(line) {
+  const cleaned = line
+    .replace(/•/g, "-")
+    .replace(/C\$/g, "C");
+
+  return cleaned
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 \-.:/,$#]/g, " ");
+}
+
+function renderTextToMonoBitmap(lines, options = {}) {
+  const charW = 5;
+  const charH = 7;
+  const charSpacing = 1;
+  const lineSpacing = 2;
+  const maxWidth = options.maxWidth || RASTER_MAX_WIDTH_58MM;
+
+  const safeLines = lines;
+  const maxChars = Math.max(1, ...safeLines.map((l) => l.length));
+  const textWidth = maxChars * (charW + charSpacing) - charSpacing;
+  const width = Math.min(maxWidth, textWidth);
+  const height = safeLines.length * (charH + lineSpacing) - lineSpacing;
+
+  const bitmap = new Uint8Array(width * height);
+  const leftPad = Math.max(0, Math.floor((width - textWidth) / 2));
+
+  safeLines.forEach((line, lineIndex) => {
+    let xCursor = leftPad;
+    const yCursor = lineIndex * (charH + lineSpacing);
+
+    for (let i = 0; i < line.length; i++) {
+      const glyph = FONT_5X7[line[i]] || FONT_5X7[" "];
+      for (let y = 0; y < charH; y++) {
+        const row = glyph[y];
+        for (let x = 0; x < charW; x++) {
+          const px = xCursor + x;
+          const py = yCursor + y;
+          if (px >= 0 && px < width && py >= 0 && py < height) {
+            if (row[x] === "1") {
+              bitmap[py * width + px] = 1;
+            }
+          }
+        }
+      }
+      xCursor += charW + charSpacing;
+      if (xCursor >= width) break;
+    }
+  });
+
+  return { bitmap, width, height };
+}
+
+function buildRasterImageCommand(lines, normalizer = normalizeRasterLine) {
+  const normalized = lines.map((l) => normalizer(l || " "));
+  const { bitmap, width, height } = renderTextToMonoBitmap(normalized, { maxWidth: RASTER_MAX_WIDTH_58MM });
+  return buildRasterImageCommandFromBitmap(bitmap, width, height);
+}
+
+function buildRasterImageCommandFromBitmap(bitmap, width, height) {
+  const widthBytes = Math.ceil(width / 8);
+  const data = new Uint8Array(widthBytes * height);
+
+  for (let y = 0; y < height; y++) {
+    for (let xByte = 0; xByte < widthBytes; xByte++) {
+      let byte = 0;
+      for (let bit = 0; bit < 8; bit++) {
+        const x = xByte * 8 + bit;
+        if (x < width && bitmap[y * width + x]) {
+          byte |= 0x80 >> bit;
+        }
+      }
+      data[y * widthBytes + xByte] = byte;
+    }
+  }
+
+  const xL = widthBytes & 0xff;
+  const xH = (widthBytes >> 8) & 0xff;
+  const yL = height & 0xff;
+  const yH = (height >> 8) & 0xff;
+
+  return [0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH, ...Array.from(data)];
+}
+
+function buildImageTestPayload(type, printer) {
+  const lines = [];
+  if (type === "simple") {
+    lines.push("HOLA MUNDO", "TEST 58MM");
+  } else if (type === "feed") {
+    lines.push("FEED", "PAPEL");
+  } else {
+    lines.push("TEST DE IMPRESION", "CHICKEN INVENTORY");
+    if (printer?.name) {
+      lines.push(`IMPRESORA ${printer.name}`);
+    } else {
+      lines.push("IMPRESORA BT");
+    }
+    lines.push("ESTADO OK");
+  }
+
+  const init = [0x1B, 0x40];
+  const raster = buildRasterImageCommand(lines, normalizeTestLine);
+  const feed = [0x1B, 0x64, 0x03];
+  const cut = [0x1D, 0x56, 0x42, 0x00];
+
+  return [...init, ...raster, ...feed, ...cut];
+}
+
+function buildImageReceiptPayloadFromText(text) {
+  const lines = text.split("\n").map((l) => (l.trim() ? l : " "));
+  const init = [0x1B, 0x40];
+  const raster = buildRasterImageCommand(lines, normalizeRasterLine);
+  const feed = [0x1B, 0x64, 0x04];
+  const cut = [0x1D, 0x56, 0x42, 0x00];
+
+  return [...init, ...raster, ...feed, ...cut];
+}
+
+function decodePngToMonoBitmap(base64, options = {}) {
+  const png = PNG.sync.read(Buffer.from(base64, "base64"));
+  const { width, height, data } = png;
+  const targetWidth = Math.min(width, options.maxWidth || RASTER_MAX_WIDTH_58MM);
+  const scale = targetWidth / width;
+  const targetHeight = Math.max(1, Math.round(height * scale));
+  const mono = new Uint8Array(targetWidth * targetHeight);
+  const threshold = options.threshold ?? 170;
+  const invert = options.invert ?? false;
+
+  for (let y = 0; y < targetHeight; y++) {
+    const srcY = Math.min(height - 1, Math.floor(y / scale));
+    for (let x = 0; x < targetWidth; x++) {
+      const srcX = Math.min(width - 1, Math.floor(x / scale));
+      const idx = (srcY * width + srcX) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3];
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b);
+      const isBlack = a > 32 && lum < threshold;
+      mono[y * targetWidth + x] = invert ? (isBlack ? 0 : 1) : (isBlack ? 1 : 0);
+    }
+  }
+
+  return { bitmap: mono, width: targetWidth, height: targetHeight };
+}
+
+function buildImageReceiptPayloadFromBitmap(bitmap, width, height) {
+  const init = [0x1B, 0x40];
+  const raster = buildRasterImageCommandFromBitmap(bitmap, width, height);
+  const feed = [0x1B, 0x64, 0x04];
+  const cut = [0x1D, 0x56, 0x42, 0x00];
+
+  return [...init, ...raster, ...feed, ...cut];
+}
+
+function buildRasterBandCommand(bitmap, width, height, yOffset, bandHeight) {
+  const widthBytes = Math.ceil(width / 8);
+  const data = new Uint8Array(widthBytes * bandHeight);
+
+  for (let y = 0; y < bandHeight; y++) {
+    const srcY = yOffset + y;
+    if (srcY >= height) break;
+    for (let xByte = 0; xByte < widthBytes; xByte++) {
+      let byte = 0;
+      for (let bit = 0; bit < 8; bit++) {
+        const x = xByte * 8 + bit;
+        if (x < width && bitmap[srcY * width + x]) {
+          byte |= 0x80 >> bit;
+        }
+      }
+      data[y * widthBytes + xByte] = byte;
+    }
+  }
+
+  const xL = widthBytes & 0xff;
+  const xH = (widthBytes >> 8) & 0xff;
+  const yL = bandHeight & 0xff;
+  const yH = (bandHeight >> 8) & 0xff;
+
+  return [0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH, ...Array.from(data)];
+}
+
+async function sendRasterBitmap(deviceObj, bitmap, width, height) {
+  await printRaw([0x1B, 0x40], deviceObj);
+
+  for (let y = 0; y < height; y += RASTER_BAND_HEIGHT) {
+    const bandHeight = Math.min(RASTER_BAND_HEIGHT, height - y);
+    const bandCmd = buildRasterBandCommand(bitmap, width, height, y, bandHeight);
+    await printRaw(bandCmd, deviceObj);
+  }
+
+  await printRaw([0x1B, 0x64, 0x04], deviceObj);
+  await printRaw([0x1D, 0x56, 0x42, 0x00], deviceObj);
+}
+
+async function sendEscStarBitmap(deviceObj, bitmap, width, height) {
+  await printRaw([0x1B, 0x40], deviceObj);
+
+  const widthL = width & 0xff;
+  const widthH = (width >> 8) & 0xff;
+
+  for (let y = 0; y < height; y += 24) {
+    const rowCmd = [0x1B, 0x2A, 0x21, widthL, widthH];
+
+    for (let x = 0; x < width; x++) {
+      let b0 = 0;
+      let b1 = 0;
+      let b2 = 0;
+
+      for (let k = 0; k < 8; k++) {
+        const y0 = y + k;
+        const y1 = y + 8 + k;
+        const y2 = y + 16 + k;
+
+        if (y0 < height && bitmap[y0 * width + x]) b0 |= 0x80 >> k;
+        if (y1 < height && bitmap[y1 * width + x]) b1 |= 0x80 >> k;
+        if (y2 < height && bitmap[y2 * width + x]) b2 |= 0x80 >> k;
+      }
+
+      rowCmd.push(b0, b1, b2);
+    }
+
+    rowCmd.push(0x0A);
+    await printRaw(rowCmd, deviceObj);
+  }
+
+  await printRaw([0x1B, 0x64, 0x04], deviceObj);
+  await printRaw([0x1D, 0x56, 0x42, 0x00], deviceObj);
+}
+
 /**
  * Función genérica para conectar e imprimir cualquier contenido
  */
@@ -310,55 +599,73 @@ export function build58mmReceipt(sale) {
   return text;
 }
 
-export async function printTest(printer) {
-      const ESC = "\x1B";
-      const GS = "\x1D";
-      const INIT = ESC + "@";
-      const CP437 = ESC + "t" + "\x00";
-      const ALIGN_CENTER = ESC + "a" + "\x01";
-      const ALIGN_LEFT = ESC + "a" + "\x00";
-      const CUT = GS + "V" + "\x42" + "\x00";
-      const BOLD_ON = ESC + "E" + "\x01";
-      const BOLD_OFF = ESC + "E" + "\x00";
-      const DOUBLE_HEIGHT = GS + "!" + "\x10";
-      const NORMAL = GS + "!" + "\x00";
+export async function printTest(printer, type = "standard") {
+  const device = printer || await loadPrinter();
+  if (!device) throw new Error("No hay impresora seleccionada.");
+  const deviceObj = await ensureConnection(device.address);
+  const payload = buildImageTestPayload(type, device);
+  await printRaw(payload, deviceObj);
+}
 
-      let cmd = "\x00\x00" + INIT + CP437;
+export async function printPreSaleReceiptImage(sale, bonuses = []) {
+  const device = await loadPrinter();
+  if (!device) throw new Error("No hay impresora seleccionada.");
 
-      cmd += ALIGN_CENTER;
-      cmd += DOUBLE_HEIGHT + BOLD_ON + "TEST DE IMPRESION\n" + BOLD_OFF + NORMAL;
-      cmd += "Chicken Inventory App\n\n";
-      cmd += ALIGN_LEFT;
+  const text = buildPreSaleReceiptText(sale, bonuses);
+  const payload = buildImageReceiptPayloadFromText(text);
+  const deviceObj = await ensureConnection(device.address);
+  await printRaw(payload, deviceObj);
+}
 
-      cmd += "Impresora: " + (printer ? printer.name : "Default") + "\n";
-      cmd += "Direccion: " + (printer ? printer.address : "---") + "\n";
-      cmd += "Fecha: " + new Date().toLocaleString() + "\n";
-      cmd += "--------------------------------\n";
-      cmd += ALIGN_CENTER + BOLD_ON + "PRUEBA DE CARACTERES" + BOLD_OFF + ALIGN_LEFT + "\n";
-      cmd += "Acentos: á é í ó ú ñ Ñ\n";
-      cmd += "Simbolos: $ % & / ( ) = ? ¡ ! @\n";
-      cmd += "Numeros: 1234567890\n";
-      cmd += "--------------------------------\n";
+export async function printPngImageFromUri(uri, options = {}) {
+  const device = await loadPrinter();
+  if (!device) throw new Error("No hay impresora seleccionada.");
 
-      // Debug Info en el propio ticket para validar
-      cmd += "DEBUG INFO:\n";
-      cmd += "Encoding: CP437 forced (ESC t 0)\n";
-      cmd += "Kanji Mode: OFF (FS .)\n";
-      cmd += "--------------------------------\n";
+  const filePath = normalizeFileUri(uri);
+  const base64 = await RNFS.readFile(filePath, "base64");
+  if (!base64) {
+    throw new Error("No se pudo leer la imagen del ticket");
+  }
 
-      const INVERT_ON = GS + "B" + "\x01";
-      const INVERT_OFF = GS + "B" + "\x00";
-      cmd += ALIGN_CENTER + INVERT_ON + " TEXTO INVERTIDO " + INVERT_OFF + ALIGN_LEFT + "\n\n";
+  const { bitmap, width, height } = decodePngToMonoBitmap(base64, {
+    maxWidth: RASTER_MAX_WIDTH_58MM,
+    threshold: options.threshold,
+    invert: options.invert,
+  });
 
-      cmd += "Si puedes leer esto,\nla impresora esta configurada\ncorrectamente.\n";
-      cmd += "\n\n\n" + CUT;
+  if (!width || !height) {
+    throw new Error("Imagen del ticket vacia");
+  }
 
-      console.log("[PRINTER_SERVICE] Enviando comando de test (Standard).");
-      await printTicket(cmd, printer);
+  const deviceObj = await ensureConnection(device.address);
+  await sendBitmapToPrinter(deviceObj, bitmap, width, height, options);
+}
+
+export async function printPngImageFromBase64(base64, options = {}) {
+  const device = await loadPrinter();
+  if (!device) throw new Error("No hay impresora seleccionada.");
+
+  const normalized = normalizeBase64(base64);
+  if (!normalized) {
+    throw new Error("No se pudo leer la imagen del ticket");
+  }
+
+  const { bitmap, width, height } = decodePngToMonoBitmap(normalized, {
+    maxWidth: RASTER_MAX_WIDTH_58MM,
+    threshold: options.threshold,
+    invert: options.invert,
+  });
+
+  if (!width || !height) {
+    throw new Error("Imagen del ticket vacia");
+  }
+
+  const deviceObj = await ensureConnection(device.address);
+  await sendBitmapToPrinter(deviceObj, bitmap, width, height, options);
 }
 
 /**
- * Función para imprimir el ticket de entrega (Entrega Bodega -> Repartidor)
+ * Función para imprimir el ticket de entrega
  */
 export async function printDeliveryTicket(sale) {
   const device = await loadPrinter();
@@ -387,6 +694,20 @@ export async function printDeliveryTicket(sale) {
   await printTicket(command, device);
 }
 
+function formatReceiptItemLines(rawName, qtyValue, totalValue, nameWidth = 16) {
+  const name = sanitize(rawName || "Item");
+  const qty = String(qtyValue || 0).padStart(3, " ");
+  const totalStr = Number(totalValue || 0).toFixed(2).padStart(8, " ");
+  const trimmed = name.slice(0, 32);
+
+  if (trimmed.length > nameWidth) {
+    const spacer = " ".repeat(nameWidth);
+    return [trimmed, `${spacer} ${qty} ${totalStr}`];
+  }
+
+  return [`${trimmed.padEnd(nameWidth, " ")} ${qty} ${totalStr}`];
+}
+
 function buildDeliveryReceiptText(sale) {
   const line = "--------------------------------\n";
   let text = "\n";
@@ -401,20 +722,36 @@ function buildDeliveryReceiptText(sale) {
   if (sale.items) {
       sale.items.forEach((item) => {
           const rawName = item.productName || item.name || "Item";
-          const name = sanitize(rawName).slice(0, 16);
-          const qty = String(item.quantity || item.qty || 0).padStart(3, " ");
-          const totalVal = (item.total || ((item.unitPrice || item.price) * (item.quantity || item.qty))).toFixed(2);
-          const totalStr = totalVal.padStart(8, " ");
-          text += `${name.padEnd(16, " ")} ${qty} ${totalStr}\n`;
+          const qtyValue = item.quantity || item.qty || 0;
+          const totalVal = item.total || ((item.unitPrice || item.price) * qtyValue);
+          const lines = formatReceiptItemLines(rawName, qtyValue, totalVal, 16);
+          lines.forEach((lineText) => {
+            text += `${lineText}\n`;
+          });
       });
   }
 
-  if (sale.bonusesAwarded && sale.bonusesAwarded.length > 0) {
+  const bonuses = sale.bonusesAwarded || sale.bonuses || [];
+  if (bonuses.length > 0) {
+      const items = sale.items || [];
+      const buildBonusLine = (bonus) => {
+        const qty = String(bonus.quantity || bonus.qty || 0);
+        const rawName = bonus.productName || bonus.name || "Regalo";
+        const bonusName = sanitize(rawName).slice(0, 14);
+        const linkedItem = items.find((item) => item.id === bonus.linkedTo || item.productId === bonus.linkedTo);
+        const linkedNameRaw = bonus.linkedToName || linkedItem?.productName || linkedItem?.name || "";
+        const linkedName = linkedNameRaw ? sanitize(linkedNameRaw).slice(0, 12) : "";
+        let lineText = `• ${qty}x ${bonusName}`;
+        if (linkedName) {
+          lineText += ` (por ${linkedName})`;
+        }
+        return lineText.slice(0, 32);
+      };
+
       text += line;
-      text += "Bonificaciones:\n";
-      sale.bonusesAwarded.forEach(b => {
-         const bName = sanitize(b.productName || 'Prod Bonificado').slice(0, 20);
-         text += `• ${b.quantity}x ${bName}\n`;
+      text += "Regalos:\n";
+      bonuses.forEach((b) => {
+         text += `${buildBonusLine(b)}\n`;
       });
   }
 
@@ -436,6 +773,57 @@ function buildDeliveryReceiptText(sale) {
   return text;
 }
 
+function buildPreSaleReceiptText(sale, bonuses) {
+  const line = "--------------------------------";
+  let text = "";
+  text += "PRE-VENTA PAGADA\n";
+  text += line + "\n";
+
+  const dateStr = getFormattedDate(sale.date || sale.fechaPago);
+  text += `Cliente: ${sanitize(sale.customerName || "Cliente General")}\n`;
+  text += `Fecha:   ${dateStr}\n`;
+  text += line + "\n";
+
+  text += "Producto          Cant     Total\n";
+  if (sale.items) {
+    sale.items.forEach((item) => {
+      const rawName = item.productName || item.name || "Item";
+      const qtyValue = item.quantity || item.qty || 0;
+      const totalVal = item.total || ((item.unitPrice || item.price) * qtyValue);
+      const lines = formatReceiptItemLines(rawName, qtyValue, totalVal, 16);
+      lines.forEach((lineText) => {
+        text += `${lineText}\n`;
+      });
+    });
+  }
+
+  if (bonuses && bonuses.length > 0) {
+    text += line + "\n";
+    text += "Bonificaciones:\n";
+    bonuses.forEach((b) => {
+      const bName = sanitize(b.productName || "Prod Bonificado").slice(0, 20);
+      text += `- ${b.quantity}x ${bName}\n`;
+    });
+  }
+
+  text += line + "\n";
+
+  const total = (sale.total || 0).toFixed(2);
+  const paid = (sale.amountPaid || sale.total || 0).toFixed(2);
+  const change = (sale.change || 0).toFixed(2);
+
+  text += `TOTAL A PAGAR:     C$${total}\n`;
+  text += `Pagado:            C$${paid}\n`;
+  if (Number(change) > 0) {
+    text += `Cambio:            C$${change}\n`;
+  }
+
+  text += line + "\n";
+  text += "GRACIAS POR SU COMPRA\n";
+
+  return text;
+}
+
 function getFormattedDate(date) {
     try {
         if (!date) return new Date().toLocaleString();
@@ -449,4 +837,26 @@ function getFormattedDate(date) {
 function sanitize(str) {
   if (!str) return "";
   return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeFileUri(uri) {
+  if (!uri) return uri;
+  if (uri.startsWith("file://")) {
+    return uri.replace("file://", "");
+  }
+  return uri;
+}
+
+function normalizeBase64(base64) {
+  if (!base64) return base64;
+  const prefix = "data:image/png;base64,";
+  return base64.startsWith(prefix) ? base64.slice(prefix.length) : base64;
+}
+
+async function sendBitmapToPrinter(deviceObj, bitmap, width, height, options = {}) {
+  if (options.mode === "escstar") {
+    await sendEscStarBitmap(deviceObj, bitmap, width, height);
+  } else {
+    await sendRasterBitmap(deviceObj, bitmap, width, height);
+  }
 }

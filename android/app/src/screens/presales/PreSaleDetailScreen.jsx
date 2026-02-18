@@ -6,6 +6,7 @@ import { PreSaleContext } from './context/preSaleContext';
 import { getPreSaleHistory } from '../../services/preSaleService';
 import HistoryDetailModal from './components/HistoryDetailModal';
 import { useRoute as useRouteContext } from '../../context/RouteContext'; // Rename to avoid conflict with navigation route
+import { resolveCustomerName } from '../../utils/customerUtils';
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
@@ -65,7 +66,7 @@ const FinancialSummary = React.memo(({ presale }) => (
 
 export default function PreSaleDetailScreen({ route, navigation }) {
     const { presale } = route.params;
-    const { loadPreSaleForEditing } = useContext(PreSaleContext);
+    const { loadPreSaleForEditing, customersById } = useContext(PreSaleContext);
     const [history, setHistory] = useState([]);
     const [loadingHistory, setLoadingHistory] = useState(true);
     const [isEditing, setIsEditing] = useState(false);
@@ -120,8 +121,9 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 
     const listData = useMemo(() => {
         const data = [];
+        const customerName = resolveCustomerName(presale, customersById);
         data.push({ type: 'section_title', key: 'title_customer', title: 'Cliente' });
-        data.push({ type: 'info_row', key: 'customer_name', icon: 'person-outline', label: 'Nombre', value: `${presale.customer?.firstName || ''} ${presale.customer?.lastName || ''}` });
+        data.push({ type: 'info_row', key: 'customer_name', icon: 'person-outline', label: 'Nombre', value: customerName });
         data.push({ type: 'info_row', key: 'date', icon: 'calendar-outline', label: 'Fecha', value: presale.createdAt?.toDate ? presale.createdAt.toDate().toLocaleDateString('es-ES') : 'N/A' });
 
         // Mostrar Ruta si existe
@@ -148,8 +150,8 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         }
 
         return data;
-    }, [presale, history, loadingHistory]);
-    
+    }, [presale, history, loadingHistory, customersById]);
+
     const renderItem = useCallback(({ item }) => {
         switch (item.type) {
             case 'section_title': return <SectionTitle title={item.title} color={item.color} />;

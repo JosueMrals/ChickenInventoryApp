@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, TouchableOpacity, TextInput, Alert, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import firestore from '@react-native-firebase/firestore';
 import { completePreSalePayment } from '../services/deliveryService';
+import { resolveCustomerName } from '../../../utils/customerUtils';
 
 export default function DeliveryPaymentScreen({ navigation, route }) {
   const { delivery } = route.params;
@@ -9,6 +11,23 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
 
   const [amountPaid, setAmountPaid] = useState('');
   const [loading, setLoading] = useState(false);
+  const [customersById, setCustomersById] = useState({});
+
+  useEffect(() => {
+    const unsub = firestore()
+      .collection('customers')
+      .onSnapshot((snapshot) => {
+        const map = snapshot.docs.reduce((acc, doc) => {
+          acc[doc.id] = { id: doc.id, ...doc.data() };
+          return acc;
+        }, {});
+        setCustomersById(map);
+      });
+
+    return () => unsub();
+  }, []);
+
+  const customerName = resolveCustomerName(delivery, customersById, 'Cliente');
 
   const change = useMemo(() => {
     const paid = parseFloat(amountPaid || 0);
@@ -58,7 +77,7 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
       <ScrollView contentContainerStyle={styles.content}>
 
         <View style={styles.summaryCard}>
-            <Text style={styles.customerName}>{delivery.customerName || 'Cliente'}</Text>
+            <Text style={styles.customerName}>{customerName}</Text>
             <Text style={styles.address}>{delivery.address || 'Sin dirección'}</Text>
             <View style={styles.divider} />
             <View style={styles.row}>
@@ -241,4 +260,3 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
-

@@ -149,7 +149,7 @@ function AppDrawer({ route }) {
       />
 
       <Drawer.Screen name="MyDeliveries">
-        {(props) => <MyDeliveriesScreen {...props} user={user} />}
+        {(props) => <MyDeliveriesScreen {...props} user={user} role={role} />}
       </Drawer.Screen>
       {/* ---------------- */}
 

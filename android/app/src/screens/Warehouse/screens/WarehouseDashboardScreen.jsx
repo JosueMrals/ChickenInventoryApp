@@ -7,18 +7,23 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import firestore from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
 import Icon from 'react-native-vector-icons/Ionicons';
 import styles from '../styles/WarehouseDashboardStyles';
 import globalStyles from '../../../styles/globalStyles';
 import DashboardPanel from '../components/DashboardPanel';
 import PreSaleItem from '../components/PreSaleItem';
 import { useRoute } from '../../../context/RouteContext';
+import { resolveCustomerName } from '../../../utils/customerUtils';
 import { Swipeable } from 'react-native-gesture-handler';
 
 export default function WarehouseDashboardScreen({ navigation }) {
   const [preSales, setPreSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard'); // 'list' | 'dashboard'
+  const [customersById, setCustomersById] = useState({});
+  const [todayPaidTotal, setTodayPaidTotal] = useState(0);
+  const [todayAssignedCount, setTodayAssignedCount] = useState(0);
   const { selectedRoute } = useRoute();
 
   useEffect(() => {
@@ -51,6 +56,62 @@ export default function WarehouseDashboardScreen({ navigation }) {
       });
     return () => subscriber();
   }, [selectedRoute]); // Recargar si cambia la ruta
+
+  useEffect(() => {
+    const unsub = firestore()
+      .collection('customers')
+      .onSnapshot((snapshot) => {
+        const map = snapshot.docs.reduce((acc, doc) => {
+          acc[doc.id] = { id: doc.id, ...doc.data() };
+          return acc;
+        }, {});
+        setCustomersById(map);
+      });
+
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const user = auth().currentUser;
+    if (!user?.uid) return undefined;
+
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+
+    const paidQuery = firestore()
+      .collection('presales')
+      .where('status', '==', 'paid')
+      .where('entregadorId', '==', user.uid)
+      .where('fechaPago', '>=', start)
+      .where('fechaPago', '<=', end);
+
+    const assignedQuery = firestore()
+      .collection('presales')
+      .where('status', '==', 'dispatched')
+      .where('entregadorId', '==', user.uid)
+      .where('fechaEntregaRepartidor', '>=', start)
+      .where('fechaEntregaRepartidor', '<=', end);
+
+    const paidSub = paidQuery.onSnapshot((snapshot) => {
+      const total = snapshot.docs.reduce((sum, doc) => {
+        const value = Number(doc.data()?.total || 0);
+        return sum + value;
+      }, 0);
+      setTodayPaidTotal(total);
+    });
+
+    const assignedSub = assignedQuery.onSnapshot((snapshot) => {
+      setTodayAssignedCount(snapshot.size);
+    });
+
+    return () => {
+      paidSub();
+      assignedSub();
+    };
+  }, []);
 
   const handleSelectPreSale = (presale) => {
       navigation.navigate('WarehouseOrderDetail', { presale });
@@ -155,7 +216,11 @@ export default function WarehouseDashboardScreen({ navigation }) {
                   else if (item.status === 'ready_for_delivery') handleUpdateStatus(item.id, 'preparing');
               }}
           >
-              <PreSaleItem item={item} onSelect={handleSelectPreSale} />
+              <PreSaleItem
+                item={item}
+                onSelect={handleSelectPreSale}
+                customerName={resolveCustomerName(item, customersById)}
+              />
           </Swipeable>
       );
   };
@@ -216,13 +281,13 @@ export default function WarehouseDashboardScreen({ navigation }) {
       )}
 
       <View style={styles.tabContainer}>
-	  	<TouchableOpacity
-			  style={[styles.tabButton, activeTab === 'dashboard' && styles.activeTabButton]}
-			  onPress={() => setActiveTab('dashboard')}
-		  >
-			  <Icon name="grid-outline" size={20} color={activeTab === 'dashboard' ? '#5856D6' : '#888'} />
-			  <Text style={[styles.tabText, activeTab === 'dashboard' && styles.activeTabText]}>Panel Control</Text>
-		  </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'dashboard' && styles.activeTabButton]}
+          onPress={() => setActiveTab('dashboard')}
+        >
+          <Icon name="grid-outline" size={20} color={activeTab === 'dashboard' ? '#5856D6' : '#888'} />
+          <Text style={[styles.tabText, activeTab === 'dashboard' && styles.activeTabText]}>Panel Control</Text>
+        </TouchableOpacity>
         <TouchableOpacity
             style={[styles.tabButton, activeTab === 'list' && styles.activeTabButton]}
             onPress={() => setActiveTab('list')}
@@ -233,25 +298,37 @@ export default function WarehouseDashboardScreen({ navigation }) {
       </View>
 
       <View style={styles.contentContainer}>
-        {activeTab === 'list' ? (
-             <FlatList
-                data={preSales}
-                keyExtractor={item => item.id}
-                renderItem={renderSwipeableItem}
-                ListEmptyComponent={
-                    <View style={{ alignItems: 'center', marginTop: 50 }}>
-                        <Icon name="checkmark-circle-outline" size={60} color="#ccc" />
-                        <Text style={styles.emptyText}>No hay órdenes activas.</Text>
-                        {selectedRoute && <Text style={{color: '#999', fontSize: 12, marginTop: 4}}>En la ruta seleccionada</Text>}
-                    </View>
-                }
-                contentContainerStyle={{ paddingBottom: 20 }}
-            />
-        ) : (
+        {activeTab === 'dashboard' ? (
+          <>
+            <View style={styles.delivererStats}>
+              <View style={styles.statCard}>
+                <Text style={styles.statLabel}>Cobrado hoy</Text>
+                <Text style={styles.statValue}>${todayPaidTotal.toFixed(2)}</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statLabel}>Entregas hoy</Text>
+                <Text style={styles.statValue}>{todayAssignedCount}</Text>
+              </View>
+            </View>
             <DashboardPanel
-                preSales={preSales}
-                onHandoverPress={handleHandoverPress}
+              preSales={preSales}
+              onHandoverPress={handleHandoverPress}
             />
+          </>
+        ) : (
+          <FlatList
+            data={preSales}
+            keyExtractor={item => item.id}
+            renderItem={renderSwipeableItem}
+            ListEmptyComponent={
+                <View style={{ alignItems: 'center', marginTop: 50 }}>
+                    <Icon name="checkmark-circle-outline" size={60} color="#ccc" />
+                    <Text style={styles.emptyText}>No hay órdenes activas.</Text>
+                    {selectedRoute && <Text style={{color: '#999', fontSize: 12, marginTop: 4}}>En la ruta seleccionada</Text>}
+                </View>
+            }
+            contentContainerStyle={{ paddingBottom: 20 }}
+          />
         )}
       </View>
     </View>

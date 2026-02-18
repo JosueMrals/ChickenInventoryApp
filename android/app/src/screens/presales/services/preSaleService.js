@@ -1,5 +1,6 @@
 import firestore from "@react-native-firebase/firestore";
 import auth from "@react-native-firebase/auth";
+import { buildCustomerName } from "../../../utils/customerUtils";
 
 async function getNextPreSaleNumber() {
   const ref = firestore().collection("counters").doc("presales");
@@ -59,9 +60,7 @@ export async function registerPreSale({
     soldById: user?.uid || "",
 
     customerId: customer?.id ?? null,
-    customerName: customer
-      ? `${customer.firstName} ${customer.lastName}`
-      : "Preventa",
+    customerName: buildCustomerName(customer, "Preventa"),
     customerPhone: customer?.phone ?? "",
   };
 

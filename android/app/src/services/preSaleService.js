@@ -1,5 +1,6 @@
 import firestore from '@react-native-firebase/firestore';
 import auth from "@react-native-firebase/auth";
+import { buildCustomerName } from "../utils/customerUtils";
 
 const presalesCollection = firestore().collection('presales');
 const salesCollection = firestore().collection('sales');
@@ -32,8 +33,13 @@ export const savePreSaleToFirestore = async (preSaleData) => {
 
   const { route, ...restData } = preSaleData;
 
+  const customerId = preSaleData.customer?.id || null;
+  const customerName = buildCustomerName(preSaleData.customer, "Cliente sin nombre");
+
   const newPreSale = {
     customer: preSaleData.customer,
+    customerId,
+    customerName,
     subtotal: preSaleData.subtotal,
     totalDiscount: preSaleData.totalDiscount,
     total: preSaleData.total,
@@ -67,8 +73,13 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
   const route = newPreSaleData.route || oldPreSaleData.route || null;
   const routeId = newPreSaleData.route?.id || oldPreSaleData.routeId || null;
 
+  const customerId = newPreSaleData.customer?.id || null;
+  const customerName = buildCustomerName(newPreSaleData.customer, "Cliente sin nombre");
+
   const updatedPreSale = {
     customer: newPreSaleData.customer,
+    customerId,
+    customerName,
     subtotal: newPreSaleData.subtotal,
     totalDiscount: newPreSaleData.totalDiscount,
     total: newPreSaleData.total,

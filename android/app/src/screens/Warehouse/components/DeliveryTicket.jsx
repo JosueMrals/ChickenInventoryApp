@@ -14,6 +14,9 @@ const DeliveryTicket = ({ sale }) => {
     return new Date(date).toLocaleString();
   };
 
+  const bonuses = sale.bonusesAwarded || sale.bonuses || [];
+  const hasBonuses = Array.isArray(bonuses) && bonuses.length > 0;
+
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.header}>TICKET DE ENTREGA</Text>
@@ -47,11 +50,23 @@ const DeliveryTicket = ({ sale }) => {
 
       <View style={styles.divider} />
 
-      {sale.bonusesAwarded && sale.bonusesAwarded.length > 0 && (
+      {hasBonuses && (
          <View>
-             <Text style={styles.bonusHeader}>Bonificaciones Entregadas:</Text>
-             {sale.bonusesAwarded.map((b, i) => (
-                 <Text key={i} style={styles.bonusItem}>• {b.quantity}x {b.productName || 'Producto Bonificado'} (Ref: {b.productId})</Text>
+             <Text style={styles.bonusHeader}>Regalos:</Text>
+             {bonuses.map((b, i) => (
+                 <View key={i} style={styles.bonusRow}>
+                     <Text style={styles.bonusQty}>{b.quantity}x</Text>
+                     <View style={styles.bonusInfo}>
+                         <Text style={styles.bonusName} numberOfLines={1}>
+                             {b.productName || b.name || 'Producto Bonificado'}
+                         </Text>
+                         {b.linkedToName ? (
+                           <Text style={styles.bonusRef} numberOfLines={1}>
+                             por {b.linkedToName}
+                           </Text>
+                         ) : null}
+                     </View>
+                 </View>
              ))}
              <View style={styles.divider} />
          </View>
@@ -155,16 +170,32 @@ const styles = StyleSheet.create({
     fontWeight: '600'
   },
   bonusHeader: {
-      fontSize: 14,
+      fontSize: 12,
       fontWeight: 'bold',
       color: '#e67eff',
       marginBottom: 4
   },
-  bonusItem: {
-      fontSize: 13,
-      color: '#555',
-      marginLeft: 8,
-      fontStyle: 'italic'
+  bonusRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 4
+  },
+  bonusQty: {
+      width: 32,
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#555'
+  },
+  bonusInfo: {
+      flex: 1
+  },
+  bonusName: {
+      fontSize: 12,
+      color: '#555'
+  },
+  bonusRef: {
+      fontSize: 11,
+      color: '#888'
   },
   footer: {
     marginTop: 20,

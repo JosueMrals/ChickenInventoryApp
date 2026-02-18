@@ -7,6 +7,7 @@ import {
 } from "../../../services/preSaleService";
 import { getProducts } from "../../productsNew1/services/productsService";
 import { useRoute } from "../../../context/RouteContext";
+import firestore from "@react-native-firebase/firestore";
 
 export const PreSaleContext = createContext();
 
@@ -17,6 +18,7 @@ export function PreSaleProvider({ children }) {
   const [preSales, setPreSales] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editingPreSale, setEditingPreSale] = useState(null);
+  const [customersById, setCustomersById] = useState({});
 
   const { selectedRoute } = useRoute();
 
@@ -220,13 +222,28 @@ export function PreSaleProvider({ children }) {
     }
   };
 
+  useEffect(() => {
+    const unsub = firestore()
+      .collection("customers")
+      .onSnapshot((snapshot) => {
+        const map = snapshot.docs.reduce((acc, doc) => {
+          acc[doc.id] = { id: doc.id, ...doc.data() };
+          return acc;
+        }, {});
+        setCustomersById(map);
+      });
+
+    return () => unsub();
+  }, []);
+
   return (
     <PreSaleContext.Provider
       value={{ 
         cart, customer, setCustomer, addItem, updateCart, removeFromCart, resetPreSale,
         preSales, loading, loadPreSales, submitPreSale,
         editingPreSale, loadPreSaleForEditing,
-        editCart, addItemToEditCart, updateEditCart, removeFromEditCart
+        editCart, addItemToEditCart, updateEditCart, removeFromEditCart,
+        customersById
       }}
     >
       {children}

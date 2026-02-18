@@ -7,6 +7,7 @@ import auth from '@react-native-firebase/auth';
 import globalStyles from '../../../styles/globalStyles';
 import styles from '../styles/WarehouseOrderDetailStyles';
 import { getUsersByRole } from '../../../services/auth';
+import { resolveCustomerName } from '../../../utils/customerUtils';
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
@@ -57,6 +58,21 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
     const [showEntregadorPicker, setShowEntregadorPicker] = useState(false);
     const [searchText, setSearchText] = useState('');
     const [processingEntregadorId, setProcessingEntregadorId] = useState(null);
+    const [customersById, setCustomersById] = useState({});
+
+    useEffect(() => {
+        const unsub = firestore()
+          .collection('customers')
+          .onSnapshot((snapshot) => {
+            const map = snapshot.docs.reduce((acc, doc) => {
+              acc[doc.id] = { id: doc.id, ...doc.data() };
+              return acc;
+            }, {});
+            setCustomersById(map);
+          });
+
+        return () => unsub();
+    }, []);
 
     useEffect(() => {
         const fetchEntregadores = async () => {
@@ -132,9 +148,7 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
 
     const listData = useMemo(() => {
         const data = [];
-        const customerName = presale.customer?.firstName
-            ? `${presale.customer.firstName} ${presale.customer.lastName || ''}`
-            : presale.customerName || 'Cliente sin nombre';
+        const customerName = resolveCustomerName(presale, customersById);
 
         const statusLabel = STATUS_LABELS[presale.status] || presale.status;
 
@@ -157,7 +171,7 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
         }
 
         return data;
-    }, [presale]);
+    }, [presale, customersById]);
 
     const renderItem = useCallback(({ item }) => {
         switch (item.type) {

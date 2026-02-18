@@ -1,15 +1,39 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import DeliveryTicket from '../components/DeliveryTicket';
 import ViewShot from 'react-native-view-shot';
 import { printDeliveryTicket } from '../../settings/printers/services/printerService';
 import Share from 'react-native-share';
+import firestore from '@react-native-firebase/firestore';
+import { resolveCustomerName } from '../../../utils/customerUtils';
 
 export default function DeliveryDoneScreen({ navigation, route }) {
   const { sale } = route.params;
   const viewShotRef = useRef();
   const [printing, setPrinting] = useState(false);
+  const [customersById, setCustomersById] = useState({});
+
+  const ticketWidth = 384;
+  const bonuses = sale?.bonusesAwarded || sale?.bonuses || [];
+  const hasBonuses = Array.isArray(bonuses) && bonuses.length > 0;
+
+  useEffect(() => {
+    const unsub = firestore()
+      .collection('customers')
+      .onSnapshot((snapshot) => {
+        const map = snapshot.docs.reduce((acc, doc) => {
+          acc[doc.id] = { id: doc.id, ...doc.data() };
+          return acc;
+        }, {});
+        setCustomersById(map);
+      });
+
+    return () => unsub();
+  }, []);
+
+  const customerName = resolveCustomerName(sale, customersById, 'Cliente General');
+  const ticketSale = { ...sale, customerName };
 
   const handleFinish = () => {
     navigation.popToTop(); // Go back to MyDeliveries (assuming it is root of stack or close)
@@ -41,7 +65,7 @@ export default function DeliveryDoneScreen({ navigation, route }) {
     if (printing) return;
     setPrinting(true);
     try {
-        await printDeliveryTicket(sale);
+        await printDeliveryTicket(ticketSale);
     } catch (error) {
         Alert.alert("Error de Impresión", error.message || "Verifique la conexión con la impresora");
     } finally {
@@ -57,11 +81,23 @@ export default function DeliveryDoneScreen({ navigation, route }) {
         <Text style={styles.subtitle}>El pago ha sido registrado correctamente.</Text>
       </View>
 
-      <View style={styles.ticketContainer}>
-        <ViewShot ref={viewShotRef} options={{ format: "png", quality: 0.9 }} style={{ backgroundColor: '#fff' }}>
-             <DeliveryTicket sale={sale} />
-        </ViewShot>
-      </View>
+      <ScrollView contentContainerStyle={styles.ticketScroll} showsVerticalScrollIndicator={false}>
+        <View style={styles.ticketContainer}>
+          {hasBonuses && (
+            <View style={styles.bonusBanner}>
+              <Icon name="gift-outline" size={16} color="#7C3AED" />
+              <Text style={styles.bonusBannerText}>Incluye {bonuses.length} regalo(s)</Text>
+            </View>
+          )}
+          <ViewShot
+            ref={viewShotRef}
+            options={{ format: "png", quality: 0.9 }}
+            style={[styles.ticketShot, { width: ticketWidth }]}
+          >
+               <DeliveryTicket sale={ticketSale} />
+          </ViewShot>
+        </View>
+      </ScrollView>
 
       <View style={styles.footer}>
         <View style={styles.rowButtons}>
@@ -113,9 +149,17 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 5,
   },
+  ticketScroll: {
+    paddingVertical: 12,
+  },
   ticketContainer: {
-    flex: 1,
-    padding: 20,
+    flexGrow: 1,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+  },
+  ticketShot: {
+    backgroundColor: '#fff',
+    alignSelf: 'center',
   },
   footer: {
     padding: 20,
@@ -162,5 +206,22 @@ const styles = StyleSheet.create({
      color: '#555',
      fontSize: 16,
      fontWeight: '600',
+  },
+  bonusBanner: {
+    width: '100%',
+    maxWidth: 384,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3E8FF',
+    borderRadius: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+    gap: 6,
+  },
+  bonusBannerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6D28D9',
   },
 });
