@@ -60,13 +60,23 @@ export default function WarehouseDashboardScreen({ navigation }) {
   useEffect(() => {
     const unsub = firestore()
       .collection('customers')
-      .onSnapshot((snapshot) => {
-        const map = snapshot.docs.reduce((acc, doc) => {
-          acc[doc.id] = { id: doc.id, ...doc.data() };
-          return acc;
-        }, {});
-        setCustomersById(map);
-      });
+      .onSnapshot(
+        (snapshot) => {
+          if (!snapshot) {
+            setCustomersById({});
+            return;
+          }
+          const map = snapshot.docs.reduce((acc, doc) => {
+            acc[doc.id] = { id: doc.id, ...doc.data() };
+            return acc;
+          }, {});
+          setCustomersById(map);
+        },
+        (error) => {
+          console.error('Error al escuchar customers:', error);
+          setCustomersById({});
+        }
+      );
 
     return () => unsub();
   }, []);
@@ -96,15 +106,29 @@ export default function WarehouseDashboardScreen({ navigation }) {
       .where('fechaEntregaRepartidor', '<=', end);
 
     const paidSub = paidQuery.onSnapshot((snapshot) => {
+      if (!snapshot) {
+        setTodayPaidTotal(0);
+        return;
+      }
       const total = snapshot.docs.reduce((sum, doc) => {
         const value = Number(doc.data()?.total || 0);
         return sum + value;
       }, 0);
       setTodayPaidTotal(total);
+    }, (error) => {
+      console.error('Error al escuchar pagos de hoy:', error);
+      setTodayPaidTotal(0);
     });
 
     const assignedSub = assignedQuery.onSnapshot((snapshot) => {
+      if (!snapshot) {
+        setTodayAssignedCount(0);
+        return;
+      }
       setTodayAssignedCount(snapshot.size);
+    }, (error) => {
+      console.error('Error al escuchar entregas asignadas:', error);
+      setTodayAssignedCount(0);
     });
 
     return () => {

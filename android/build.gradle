@@ -22,3 +22,18 @@ buildscript {
 
 // Aplica el plugin de Google Services usando el método tradicional
 apply plugin: "com.facebook.react.rootproject"
+
+// Fuerza el SDK en react-native-print sin modificar node_modules.
+subprojects { project ->
+    if (project.name == "react-native-print") {
+        project.afterEvaluate {
+            def androidExt = project.extensions.findByName("android")
+            if (androidExt != null) {
+                androidExt.compileSdkVersion = rootProject.ext.compileSdkVersion
+                if (androidExt.defaultConfig != null) {
+                    androidExt.defaultConfig.targetSdkVersion = rootProject.ext.targetSdkVersion
+                }
+            }
+        }
+    }
+}

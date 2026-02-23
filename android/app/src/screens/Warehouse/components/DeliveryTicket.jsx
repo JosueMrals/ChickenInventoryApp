@@ -1,8 +1,15 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
 
-const DeliveryTicket = ({ sale }) => {
+const DeliveryTicket = ({ sale, settings }) => {
   if (!sale) return null;
+
+  const fontFamily = settings?.fontFamily || 'System';
+  const baseFontSize = Number(settings?.fontSize || 14);
+  const headerImageUri = settings?.headerImageUri || '';
+  const headerUri = headerImageUri && !headerImageUri.startsWith('file://') && !headerImageUri.startsWith('content://') && !headerImageUri.startsWith('http')
+    ? `file://${headerImageUri}`
+    : headerImageUri;
 
   const getFormattedDate = (date) => {
     if (!date) return new Date().toLocaleString();
@@ -19,30 +26,35 @@ const DeliveryTicket = ({ sale }) => {
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.header}>TICKET DE ENTREGA</Text>
-      <Text style={styles.subHeader}>Pre-Venta #{sale.id ? sale.id.substring(0, 8).toUpperCase() : '---'}</Text>
+      {headerUri ? (
+        <Image source={{ uri: headerUri }} style={styles.headerImage} resizeMode="contain" />
+      ) : null}
+      <Text style={[styles.header, { fontFamily, fontSize: baseFontSize + 6 }]}>TICKET DE ENTREGA</Text>
+      <Text style={[styles.subHeader, { fontFamily, fontSize: baseFontSize }]}>
+        Pre-Venta #{sale.id ? sale.id.substring(0, 8).toUpperCase() : '---'}
+      </Text>
 
       <View style={styles.divider} />
 
-      <Text style={styles.label}>Cliente:</Text>
-      <Text style={styles.value}>{sale.customerName || 'Cliente General'}</Text>
+      <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Cliente:</Text>
+      <Text style={[styles.value, { fontFamily, fontSize: baseFontSize + 2 }]}>{sale.customerName || 'Cliente General'}</Text>
 
-      <Text style={styles.label}>Fecha Pago:</Text>
-      <Text style={styles.value}>{getFormattedDate(sale.fechaPago)}</Text>
+      <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Fecha Pago:</Text>
+      <Text style={[styles.value, { fontFamily, fontSize: baseFontSize + 2 }]}>{getFormattedDate(sale.fechaPago)}</Text>
 
       <View style={styles.divider} />
 
       <View style={styles.row}>
-        <Text style={[styles.headerText, { flex: 2 }]}>Producto</Text>
-        <Text style={[styles.headerText, { flex: 0.5 }]}>Cant</Text>
-        <Text style={[styles.headerText, { flex: 1, textAlign: 'right' }]}>Total</Text>
+        <Text style={[styles.headerText, { flex: 2, fontFamily, fontSize: baseFontSize - 2 }]}>Producto</Text>
+        <Text style={[styles.headerText, { flex: 0.5, fontFamily, fontSize: baseFontSize - 2 }]}>Cant</Text>
+        <Text style={[styles.headerText, { flex: 1, textAlign: 'right', fontFamily, fontSize: baseFontSize - 2 }]}>Total</Text>
       </View>
 
       {sale.items && sale.items.map((item, index) => (
         <View key={index} style={styles.row}>
-          <Text style={[styles.cellText, { flex: 2 }]}>{item.productName || item.name}</Text>
-          <Text style={[styles.cellText, { flex: 0.5 }]}>{item.quantity}</Text>
-          <Text style={[styles.cellText, { flex: 1, textAlign: 'right' }]}>
+          <Text style={[styles.cellText, { flex: 2, fontFamily, fontSize: baseFontSize }]}>{item.productName || item.name}</Text>
+          <Text style={[styles.cellText, { flex: 0.5, fontFamily, fontSize: baseFontSize }]}>{item.quantity}</Text>
+          <Text style={[styles.cellText, { flex: 1, textAlign: 'right', fontFamily, fontSize: baseFontSize }]}>
             ${(item.total || (item.unitPrice * item.quantity)).toFixed(2)}
           </Text>
         </View>
@@ -52,16 +64,16 @@ const DeliveryTicket = ({ sale }) => {
 
       {hasBonuses && (
          <View>
-             <Text style={styles.bonusHeader}>Regalos:</Text>
+             <Text style={[styles.bonusHeader, { fontFamily, fontSize: baseFontSize - 2 }]}>Regalos:</Text>
              {bonuses.map((b, i) => (
                  <View key={i} style={styles.bonusRow}>
-                     <Text style={styles.bonusQty}>{b.quantity}x</Text>
+                     <Text style={[styles.bonusQty, { fontFamily, fontSize: baseFontSize - 2 }]}>{b.quantity}x</Text>
                      <View style={styles.bonusInfo}>
-                         <Text style={styles.bonusName} numberOfLines={1}>
+                         <Text style={[styles.bonusName, { fontFamily, fontSize: baseFontSize - 2 }]} numberOfLines={1}>
                              {b.productName || b.name || 'Producto Bonificado'}
                          </Text>
                          {b.linkedToName ? (
-                           <Text style={styles.bonusRef} numberOfLines={1}>
+                           <Text style={[styles.bonusRef, { fontFamily, fontSize: baseFontSize - 3 }]} numberOfLines={1}>
                              por {b.linkedToName}
                            </Text>
                          ) : null}
@@ -73,23 +85,27 @@ const DeliveryTicket = ({ sale }) => {
       )}
 
       <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>TOTAL A PAGAR:</Text>
-        <Text style={styles.totalValue}>${sale.total ? sale.total.toFixed(2) : '0.00'}</Text>
+        <Text style={[styles.totalLabel, { fontFamily, fontSize: baseFontSize + 4 }]}>TOTAL A PAGAR:</Text>
+        <Text style={[styles.totalValue, { fontFamily, fontSize: baseFontSize + 4 }]}>${sale.total ? sale.total.toFixed(2) : '0.00'}</Text>
       </View>
 
        <View style={styles.totalRow}>
-        <Text style={styles.subTotalLabel}>Pagado:</Text>
-        <Text style={styles.subTotalValue}>${sale.amountPaid ? Number(sale.amountPaid).toFixed(2) : (sale.total || 0).toFixed(2)}</Text>
+        <Text style={[styles.subTotalLabel, { fontFamily, fontSize: baseFontSize }]}>
+          Pagado:
+        </Text>
+        <Text style={[styles.subTotalValue, { fontFamily, fontSize: baseFontSize }]}>
+          ${sale.amountPaid ? Number(sale.amountPaid).toFixed(2) : (sale.total || 0).toFixed(2)}
+        </Text>
       </View>
 
       {sale.change > 0 && (
         <View style={styles.totalRow}>
-            <Text style={styles.subTotalLabel}>Cambio:</Text>
-            <Text style={styles.subTotalValue}>${Number(sale.change).toFixed(2)}</Text>
+            <Text style={[styles.subTotalLabel, { fontFamily, fontSize: baseFontSize }]}>Cambio:</Text>
+            <Text style={[styles.subTotalValue, { fontFamily, fontSize: baseFontSize }]}>${Number(sale.change).toFixed(2)}</Text>
         </View>
       )}
 
-      <Text style={styles.footer}>¡Gracias por su compra!</Text>
+      <Text style={[styles.footer, { fontFamily, fontSize: baseFontSize - 2 }]}>¡Gracias por su compra!</Text>
     </ScrollView>
   );
 };
@@ -102,6 +118,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#eee',
     margin: 10,
+  },
+  headerImage: {
+    width: '100%',
+    height: 70,
+    marginBottom: 10,
   },
   header: {
     fontSize: 20,

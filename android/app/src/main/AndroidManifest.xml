@@ -17,6 +17,10 @@
     <!-- Necesario para escaneo en Android 10-12 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 
+    <!-- Permisos para galeria de imagenes -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
 
     <application
       android:name=".MainApplication"

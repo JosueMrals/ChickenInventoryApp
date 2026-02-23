@@ -112,6 +112,13 @@ export default function SettingsScreen({ navigation }) {
                     'Configurar impresoras térmicas'
                 )}
 
+                {renderSettingItem(
+                    'Personalizacion de ticket',
+                    'receipt-outline',
+                    () => navigation.navigate('TicketCustomizationScreen'),
+                    'Imagen, tipografia y tamano de impresion'
+                )}
+
                 <Text style={styles.sectionHeader}>Sistema</Text>
                 <TouchableOpacity style={styles.settingItem} onPress={handleCheckUpdate} disabled={checkingUpdate}>
                     <View style={styles.iconContainer}>

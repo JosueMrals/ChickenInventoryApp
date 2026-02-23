@@ -7,29 +7,53 @@ import { printDeliveryTicket } from '../../settings/printers/services/printerSer
 import Share from 'react-native-share';
 import firestore from '@react-native-firebase/firestore';
 import { resolveCustomerName } from '../../../utils/customerUtils';
+import { getTicketCustomizationSettings, DEFAULT_TICKET_SETTINGS } from '../../settings/ticketCustomization/ticketCustomizationService';
 
 export default function DeliveryDoneScreen({ navigation, route }) {
   const { sale } = route.params;
   const viewShotRef = useRef();
   const [printing, setPrinting] = useState(false);
   const [customersById, setCustomersById] = useState({});
+  const [ticketSettings, setTicketSettings] = useState(DEFAULT_TICKET_SETTINGS);
 
-  const ticketWidth = 384;
+  const ticketWidth = ticketSettings.paperWidthMm >= 75 ? 576 : 384;
   const bonuses = sale?.bonusesAwarded || sale?.bonuses || [];
   const hasBonuses = Array.isArray(bonuses) && bonuses.length > 0;
 
   useEffect(() => {
     const unsub = firestore()
       .collection('customers')
-      .onSnapshot((snapshot) => {
-        const map = snapshot.docs.reduce((acc, doc) => {
-          acc[doc.id] = { id: doc.id, ...doc.data() };
-          return acc;
-        }, {});
-        setCustomersById(map);
-      });
+      .onSnapshot(
+        (snapshot) => {
+          if (!snapshot) {
+            setCustomersById({});
+            return;
+          }
+          const map = snapshot.docs.reduce((acc, doc) => {
+            acc[doc.id] = { id: doc.id, ...doc.data() };
+            return acc;
+          }, {});
+          setCustomersById(map);
+        },
+        (error) => {
+          console.error('Error al escuchar customers:', error);
+          setCustomersById({});
+        }
+      );
 
     return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSettings = async () => {
+      const stored = await getTicketCustomizationSettings();
+      if (mounted) setTicketSettings(stored);
+    };
+    loadSettings();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const customerName = resolveCustomerName(sale, customersById, 'Cliente General');
@@ -84,7 +108,7 @@ export default function DeliveryDoneScreen({ navigation, route }) {
       <ScrollView contentContainerStyle={styles.ticketScroll} showsVerticalScrollIndicator={false}>
         <View style={styles.ticketContainer}>
           {hasBonuses && (
-            <View style={styles.bonusBanner}>
+            <View style={[styles.bonusBanner, { maxWidth: ticketWidth }]}>
               <Icon name="gift-outline" size={16} color="#7C3AED" />
               <Text style={styles.bonusBannerText}>Incluye {bonuses.length} regalo(s)</Text>
             </View>
@@ -94,7 +118,7 @@ export default function DeliveryDoneScreen({ navigation, route }) {
             options={{ format: "png", quality: 0.9 }}
             style={[styles.ticketShot, { width: ticketWidth }]}
           >
-               <DeliveryTicket sale={ticketSale} />
+               <DeliveryTicket sale={ticketSale} settings={ticketSettings} />
           </ViewShot>
         </View>
       </ScrollView>

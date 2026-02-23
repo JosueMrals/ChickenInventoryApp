@@ -37,6 +37,7 @@ import DeliveryDoneScreen from './android/app/src/screens/Warehouse/screens/Deli
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
 import ProductsStack from './android/app/src/navigation/ProductsStack';
 import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen';
+import TicketCustomizationScreen from './android/app/src/screens/settings/ticketCustomization/TicketCustomizationScreen';
 import SettingsScreen from './android/app/src/screens/settings/SettingsScreen'; // Nuevo Import
 import RoutesScreen from './android/app/src/screens/routes/RoutesScreen';
 import AddRouteScreen from './android/app/src/screens/routes/AddRouteScreen';
@@ -308,6 +309,7 @@ export default function App() {
                     <Stack.Screen name="AppDrawer" component={AppDrawer} />
                     {/* Pantallas globales accesibles desde Settings */}
                     <Stack.Screen name="PrintersScreen" component={PrintersScreen} />
+                    <Stack.Screen name="TicketCustomizationScreen" component={TicketCustomizationScreen} />
 
                     {/* Warehouse Delivery Flow */}
                     <Stack.Screen name="DeliveryPayment" component={DeliveryPaymentScreen} />

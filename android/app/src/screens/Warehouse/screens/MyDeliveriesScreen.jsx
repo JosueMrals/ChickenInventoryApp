@@ -147,13 +147,23 @@ export default function MyDeliveriesScreen({ user, role }) {
   useEffect(() => {
     const unsub = firestore()
       .collection('customers')
-      .onSnapshot((snapshot) => {
-        const map = snapshot.docs.reduce((acc, doc) => {
-          acc[doc.id] = { id: doc.id, ...doc.data() };
-          return acc;
-        }, {});
-        setCustomersById(map);
-      });
+      .onSnapshot(
+        (snapshot) => {
+          if (!snapshot) {
+            setCustomersById({});
+            return;
+          }
+          const map = snapshot.docs.reduce((acc, doc) => {
+            acc[doc.id] = { id: doc.id, ...doc.data() };
+            return acc;
+          }, {});
+          setCustomersById(map);
+        },
+        (error) => {
+          console.error('Error al escuchar customers:', error);
+          setCustomersById({});
+        }
+      );
 
     return () => unsub();
   }, []);
@@ -181,6 +191,11 @@ export default function MyDeliveriesScreen({ user, role }) {
     }
 
     const subscriber = query.onSnapshot(querySnapshot => {
+        if (!querySnapshot) {
+          setDeliveries([]);
+          setLoading(false);
+          return;
+        }
         const sales = [];
         querySnapshot.forEach(doc => sales.push({ id: doc.id, ...doc.data() }));
 
@@ -195,6 +210,7 @@ export default function MyDeliveriesScreen({ user, role }) {
         setLoading(false);
       }, error => {
         console.error("Error al escuchar entregas:", error);
+        setDeliveries([]);
         setLoading(false);
       });
 
@@ -212,6 +228,11 @@ export default function MyDeliveriesScreen({ user, role }) {
     }
 
     const historySubscriber = historyQuery.onSnapshot(querySnapshot => {
+        if (!querySnapshot) {
+          setHistory([]);
+          setLoadingHistory(false);
+          return;
+        }
         const sales = [];
         querySnapshot.forEach(doc => sales.push({ id: doc.id, ...doc.data() }));
 
@@ -224,7 +245,8 @@ export default function MyDeliveriesScreen({ user, role }) {
         setHistory(sales);
         setLoadingHistory(false);
       }, error => {
-        console.error("Error al escuchar historial de entregas:", error);
+        console.error("Error al escuchar historial:", error);
+        setHistory([]);
         setLoadingHistory(false);
       });
 
@@ -260,22 +282,13 @@ export default function MyDeliveriesScreen({ user, role }) {
     });
   }, [history, historyFilter, historyDateFilter, customersById]);
 
-  const totalCollected = useMemo(() => {
-    return filteredHistory.reduce((sum, item) => sum + Number(item.total || 0), 0);
-  }, [filteredHistory]);
-
-  const pendingTotal = useMemo(() => {
-    return filteredDeliveries.reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const totalPending = useMemo(() => {
+    return filteredDeliveries.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
   }, [filteredDeliveries]);
 
-  if (loading) {
-    return (
-        <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color="#2DCE89" />
-            <Text style={{ marginTop: 10 }}>Cargando tus entregas...</Text>
-        </View>
-    );
-  }
+  const totalCollected = useMemo(() => {
+    return filteredHistory.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+  }, [filteredHistory]);
 
   return (
     <View style={globalStyles.container}>
@@ -341,8 +354,8 @@ export default function MyDeliveriesScreen({ user, role }) {
                     pendingTotal: {
                       icon: 'cash-outline',
                       color: '#34C759',
-                      title: 'Por cobrar',
-                      value: `$${pendingTotal.toFixed(2)}`,
+                      title: 'Total pendiente',
+                      value: `$${totalPending.toFixed(2)}`,
                     },
                   }}
                   layout={[[
@@ -351,24 +364,31 @@ export default function MyDeliveriesScreen({ user, role }) {
                   ]]}
                 />
               </View>
-              <FlatList
-                data={filteredDeliveries}
-                keyExtractor={item => item.id}
-                renderItem={({ item }) => (
-                  <DeliveryItem
-                    item={item}
-                    onGoToPayment={handleGoToPayment}
-                    customerName={resolveCustomerName(item, customersById)}
-                  />
-                )}
-                ListEmptyComponent={
+              {loading ? (
+                <View style={styles.centerContainer}>
+                  <ActivityIndicator size="small" color="#2DCE89" />
+                  <Text style={{ marginTop: 6 }}>Cargando tus entregas...</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={filteredDeliveries}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => (
+                    <DeliveryItem
+                      item={item}
+                      onGoToPayment={handleGoToPayment}
+                      customerName={resolveCustomerName(item, customersById)}
+                    />
+                  )}
+                  ListEmptyComponent={(
                     <View style={styles.centerContainer}>
-                        <Icon name="bicycle-outline" size={80} color="#ddd" />
-                        <Text style={styles.emptyText}>No tienes entregas pendientes por cobrar.</Text>
+                      <Icon name="bicycle-outline" size={80} color="#ddd" />
+                      <Text style={styles.emptyText}>No tienes entregas pendientes por cobrar.</Text>
                     </View>
-                }
-                contentContainerStyle={{ paddingBottom: 20 }}
-              />
+                  )}
+                  contentContainerStyle={{ paddingBottom: 20, flexGrow: 1 }}
+                />
+              )}
             </View>
           ) : (
             <View style={styles.panelContent}>
@@ -435,7 +455,7 @@ export default function MyDeliveriesScreen({ user, role }) {
               ) : (
                 <FlatList
                   data={filteredHistory}
-                  keyExtractor={item => item.id}
+                  keyExtractor={(item) => item.id}
                   renderItem={({ item }) => (
                     <HistoryItem
                       item={item}
@@ -443,13 +463,13 @@ export default function MyDeliveriesScreen({ user, role }) {
                       customerName={resolveCustomerName(item, customersById)}
                     />
                   )}
-                  ListEmptyComponent={
+                  ListEmptyComponent={(
                     <View style={styles.centerContainer}>
                       <Icon name="receipt-outline" size={80} color="#ddd" />
-                      <Text style={styles.emptyText}>No hay entregas en el historial.</Text>
+                      <Text style={styles.emptyText}>No tienes entregas cobradas.</Text>
                     </View>
-                  }
-                  contentContainerStyle={{ paddingBottom: 20 }}
+                  )}
+                  contentContainerStyle={{ paddingBottom: 20, flexGrow: 1 }}
                 />
               )}
             </View>
@@ -461,7 +481,7 @@ export default function MyDeliveriesScreen({ user, role }) {
 }
 
 const styles = StyleSheet.create({
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 20 },
+  centerContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 20 },
   emptyText: { textAlign: 'center', marginTop: 10, fontSize: 16, color: '#888', maxWidth: '80%' },
   sectionTitle: { fontSize: 18, fontWeight: '800', color: '#111', marginBottom: 6 },
   bodyLayout: { flex: 1 },
@@ -533,94 +553,89 @@ const styles = StyleSheet.create({
   historyMeta: { fontSize: 12, color: '#888' },
   historyRight: { alignItems: 'flex-end', gap: 4 },
   historyTotal: { fontSize: 16, fontWeight: 'bold', color: '#2DCE89' },
-
-  // Estilos Nueva Card
   card: {
-      backgroundColor: '#fff',
-      borderRadius: 12,
-      marginBottom: 12,
-      padding: 0,
-      elevation: 2,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      overflow: 'hidden'
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    padding: 0,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    overflow: 'hidden',
   },
   cardHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
   },
   orderTitle: {
-      fontSize: 14,
-      fontWeight: 'bold',
-      color: '#888',
-      marginBottom: 2
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#888',
+    marginBottom: 2,
   },
   customerName: {
-      fontSize: 16,
-      fontWeight: 'bold',
-      color: '#333',
-      marginBottom: 4
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
   },
   dateText: {
-      fontSize: 12,
-      color: '#999',
+    fontSize: 12,
+    color: '#999',
   },
   totalText: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: '#2DCE89',
-      marginBottom: 4
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2DCE89',
+    marginBottom: 4,
   },
   badge: {
-     backgroundColor: '#FFECB3',
-     paddingHorizontal: 8,
-     paddingVertical: 2,
-     borderRadius: 4,
-     alignSelf: 'flex-end'
+    backgroundColor: '#FFECB3',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    alignSelf: 'flex-end',
   },
   badgeText: {
-      fontSize: 10,
-      fontWeight: 'bold',
-      color: '#FF6F00'
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#FF6F00',
   },
-  cardBody: {
-      paddingHorizontal: 16,
-      paddingBottom: 16
-  },
+  cardBody: {},
   divider: {
-      height: 1,
-      backgroundColor: '#eee',
-      marginVertical: 10
+    height: 1,
+    backgroundColor: '#eee',
+    marginVertical: 10,
   },
   sectionLabel: {
-      fontSize: 12,
-      fontWeight: 'bold',
-      color: '#555',
-      marginBottom: 2
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#555',
+    marginBottom: 2,
   },
   bodyText: {
-      fontSize: 14,
-      color: '#444',
-      marginBottom: 4
+    fontSize: 14,
+    color: '#444',
+    marginBottom: 4,
   },
   productText: {
-      fontSize: 13,
-      color: '#666',
-      marginLeft: 6
+    fontSize: 13,
+    color: '#666',
+    marginLeft: 6,
   },
   mainActionButton: {
-      backgroundColor: '#2DCE89',
-      paddingVertical: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
+    backgroundColor: '#2DCE89',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   mainActionText: {
-      color: '#fff',
-      fontWeight: 'bold',
-      fontSize: 14,
-      letterSpacing: 0.5
-  }
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+    letterSpacing: 0.5,
+  },
 });

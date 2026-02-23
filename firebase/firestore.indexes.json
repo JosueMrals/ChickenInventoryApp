@@ -33,11 +33,62 @@
       ]
     },
     {
+      "collectionGroup": "sales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "customerId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "inventoryMovements",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "productId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "presales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "routeId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "presales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "routeId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "presales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "entregadorId", "order": "ASCENDING" },
+        { "fieldPath": "routeId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "presales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "entregadorId", "order": "ASCENDING" },
+        { "fieldPath": "fechaPago", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "presales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "entregadorId", "order": "ASCENDING" },
+        { "fieldPath": "fechaEntregaRepartidor", "order": "ASCENDING" }
       ]
     }
   ],

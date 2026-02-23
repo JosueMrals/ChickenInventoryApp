@@ -8,6 +8,7 @@ import {
 import { getProducts } from "../../productsNew1/services/productsService";
 import { useRoute } from "../../../context/RouteContext";
 import firestore from "@react-native-firebase/firestore";
+import auth from "@react-native-firebase/auth";
 
 export const PreSaleContext = createContext();
 
@@ -223,17 +224,47 @@ export function PreSaleProvider({ children }) {
   };
 
   useEffect(() => {
-    const unsub = firestore()
-      .collection("customers")
-      .onSnapshot((snapshot) => {
-        const map = snapshot.docs.reduce((acc, doc) => {
-          acc[doc.id] = { id: doc.id, ...doc.data() };
-          return acc;
-        }, {});
-        setCustomersById(map);
-      });
+    let customersUnsub = null;
+    const authUnsub = auth().onAuthStateChanged((user) => {
+      if (customersUnsub) {
+        customersUnsub();
+        customersUnsub = null;
+      }
 
-    return () => unsub();
+      if (!user) {
+        setCustomersById({});
+        return;
+      }
+
+      customersUnsub = firestore()
+        .collection("customers")
+        .onSnapshot(
+          (snapshot) => {
+            if (!snapshot) {
+              setCustomersById({});
+              return;
+            }
+            const map = snapshot.docs.reduce((acc, doc) => {
+              acc[doc.id] = { id: doc.id, ...doc.data() };
+              return acc;
+            }, {});
+            setCustomersById(map);
+          },
+          (error) => {
+            console.error("Firestore customers snapshot error:", error);
+            setCustomersById({});
+          }
+        );
+    });
+
+    return () => {
+      if (customersUnsub) {
+        customersUnsub();
+      }
+      if (authUnsub) {
+        authUnsub();
+      }
+    };
   }, []);
 
   return (

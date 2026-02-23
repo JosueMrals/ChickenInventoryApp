@@ -16,13 +16,23 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
   useEffect(() => {
     const unsub = firestore()
       .collection('customers')
-      .onSnapshot((snapshot) => {
-        const map = snapshot.docs.reduce((acc, doc) => {
-          acc[doc.id] = { id: doc.id, ...doc.data() };
-          return acc;
-        }, {});
-        setCustomersById(map);
-      });
+      .onSnapshot(
+        (snapshot) => {
+          if (!snapshot) {
+            setCustomersById({});
+            return;
+          }
+          const map = snapshot.docs.reduce((acc, doc) => {
+            acc[doc.id] = { id: doc.id, ...doc.data() };
+            return acc;
+          }, {});
+          setCustomersById(map);
+        },
+        (error) => {
+          console.error('Error al escuchar customers:', error);
+          setCustomersById({});
+        }
+      );
 
     return () => unsub();
   }, []);

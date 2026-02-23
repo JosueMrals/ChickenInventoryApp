@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { firestore } from '../../../services/firebaseConfig';
+import { auth, firestore } from '../../../services/firebaseConfig';
 
 export default function useCustomerSearch() {
   const [customers, setCustomers] = useState([]);
@@ -8,15 +8,44 @@ export default function useCustomerSearch() {
   const ref = useRef([]);
 
   useEffect(() => {
-    const unsub = firestore()
-      .collection('customers')
-      .orderBy('firstName', 'asc')
-      .onSnapshot(snapshot => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setCustomers(data);
-        ref.current = data;
-      });
-    return unsub;
+    let customersUnsub = null;
+    const authUnsub = auth().onAuthStateChanged((user) => {
+      if (customersUnsub) {
+        customersUnsub();
+        customersUnsub = null;
+      }
+
+      if (!user) {
+        setCustomers([]);
+        ref.current = [];
+        return;
+      }
+
+      customersUnsub = firestore()
+        .collection('customers')
+        .orderBy('firstName', 'asc')
+        .onSnapshot(
+          (snapshot) => {
+            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setCustomers(data);
+            ref.current = data;
+          },
+          (error) => {
+            console.error('[useCustomerSearch] Snapshot error:', error);
+            setCustomers([]);
+            ref.current = [];
+          }
+        );
+    });
+
+    return () => {
+      if (customersUnsub) {
+        customersUnsub();
+      }
+      if (authUnsub) {
+        authUnsub();
+      }
+    };
   }, []);
 
   useEffect(() => {
