@@ -17,6 +17,7 @@ const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 export default function PreSaleCard({ presale, customerName }) {
     const hasBonuses = presale.bonuses && presale.bonuses.length > 0;
     const displayName = customerName || resolveCustomerName(presale);
+    const isCredit = presale.paymentMethod === 'credit' || presale.status === 'credit_pending';
 
     return (
         <View style={styles.card}>
@@ -27,8 +28,15 @@ export default function PreSaleCard({ presale, customerName }) {
                         {displayName}
                     </Text>
                 </View>
-                <View style={[styles.statusBadge, presale.status === 'paid' ? styles.paidBadge : styles.pendingBadge]}>
-                    <Text style={styles.statusText}>{presale.status === 'paid' ? 'Pagada' : 'Pendiente'}</Text>
+                <View style={styles.headerBadges}>
+                    {isCredit && (
+                        <View style={styles.creditBadge}>
+                            <Text style={styles.creditText}>Crédito</Text>
+                        </View>
+                    )}
+                    <View style={[styles.statusBadge, presale.status === 'paid' ? styles.paidBadge : styles.pendingBadge]}>
+                        <Text style={styles.statusText}>{presale.status === 'paid' ? 'Pagada' : 'Pendiente'}</Text>
+                    </View>
                 </View>
             </View>
 
@@ -90,6 +98,22 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         marginLeft: 8,
         color: '#333',
+    },
+    headerBadges: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    creditBadge: {
+        backgroundColor: '#FFF4E5',
+        borderRadius: 10,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+    },
+    creditText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#B45309',
     },
     statusBadge: {
         borderRadius: 12,

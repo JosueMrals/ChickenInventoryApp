@@ -7,7 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import globalStyles from '../../styles/globalStyles';
 import { resolveCustomerName } from '../../utils/customerUtils';
 
-const TABS = ['Pendientes', 'Pagadas'];
+const TABS = ['Pendientes', 'Crédito', 'Pagadas'];
 
 export default function PreSaleListScreen({ navigation }) {
     const { preSales, loadPreSales, loading, customersById } = useContext(PreSaleContext);
@@ -21,6 +21,7 @@ export default function PreSaleListScreen({ navigation }) {
 
     const filteredData = useMemo(() => {
         if (activeTab === 'Pendientes') return preSales.filter(p => p.status === 'pending');
+        if (activeTab === 'Crédito') return preSales.filter(p => p.status === 'credit_pending' || p.paymentMethod === 'credit');
         if (activeTab === 'Pagadas') return preSales.filter(p => p.status === 'paid');
         return [];
     }, [preSales, activeTab]);

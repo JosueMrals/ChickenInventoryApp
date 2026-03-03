@@ -5,6 +5,69 @@ import { buildCustomerName } from "../utils/customerUtils";
 const presalesCollection = firestore().collection('presales');
 const salesCollection = firestore().collection('sales');
 const countersCollection = firestore().collection('counters');
+const productsCollection = firestore().collection('products');
+
+const mapItemsToPayload = (items = []) => items.map(({ product, ...rest }) => ({
+  ...rest,
+  productId: product.id,
+  productName: product.name,
+}));
+
+const buildQtyMap = (items = []) => items.reduce((acc, item) => {
+  const productId = item.productId || item.id || item.product?.id;
+  if (!productId) return acc;
+  const qty = Number(item.quantity) || 0;
+  if (!qty) return acc;
+  acc[productId] = (acc[productId] || 0) + qty;
+  return acc;
+}, {});
+
+const mergeQtyMaps = (items = [], bonuses = []) => {
+  const baseMap = buildQtyMap(items);
+  const bonusMap = buildQtyMap(bonuses);
+  Object.keys(bonusMap).forEach((key) => {
+    baseMap[key] = (baseMap[key] || 0) + bonusMap[key];
+  });
+  return baseMap;
+};
+
+const diffQtyMaps = (oldMap = {}, newMap = {}) => {
+  const productIds = new Set([...Object.keys(oldMap), ...Object.keys(newMap)]);
+  const deltas = {};
+  productIds.forEach((id) => {
+    const delta = (newMap[id] || 0) - (oldMap[id] || 0);
+    if (delta !== 0) deltas[id] = delta;
+  });
+  return deltas;
+};
+
+const applyStockDeltas = (tx, deltas = {}) => {
+  Object.keys(deltas).forEach((productId) => {
+    const delta = deltas[productId];
+    if (!delta) return;
+    tx.update(productsCollection.doc(productId), {
+      stock: firestore.FieldValue.increment(-delta),
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+    });
+  });
+};
+
+const validateStockAvailability = async (tx, deltas = {}) => {
+  const productIds = Object.keys(deltas).filter((id) => deltas[id] > 0);
+  if (!productIds.length) return;
+
+  const docs = await Promise.all(productIds.map((id) => tx.get(productsCollection.doc(id))));
+  docs.forEach((docSnap) => {
+    const needed = deltas[docSnap.id] || 0;
+    const currentStock = docSnap.exists ? Number(docSnap.data()?.stock || 0) : 0;
+    if (!docSnap.exists) {
+      throw new Error(`Producto no encontrado: ${docSnap.id}`);
+    }
+    if (currentStock < needed) {
+      throw new Error(`Stock insuficiente para ${docSnap.data()?.name || docSnap.id}. Disponible: ${currentStock}, requerido: ${needed}`);
+    }
+  });
+};
 
 // Helper to get next sale number (reused from quick sales)
 const getNextSaleNumber = async () => {
@@ -31,10 +94,16 @@ export const savePreSaleToFirestore = async (preSaleData) => {
   const preSaleNumber = await getNextPreSaleNumber();
   const user = auth().currentUser;
 
-  const { route, ...restData } = preSaleData;
+  const { route, paymentMethod } = preSaleData;
 
   const customerId = preSaleData.customer?.id || null;
   const customerName = buildCustomerName(preSaleData.customer, "Cliente sin nombre");
+
+  const isCredit = paymentMethod === 'credit';
+
+  const items = mapItemsToPayload(preSaleData.cart.filter(item => !item.isBonus));
+  const bonuses = mapItemsToPayload(preSaleData.cart.filter(item => item.isBonus));
+  const inventoryMap = mergeQtyMaps(items, bonuses);
 
   const newPreSale = {
     customer: preSaleData.customer,
@@ -44,23 +113,32 @@ export const savePreSaleToFirestore = async (preSaleData) => {
     totalDiscount: preSaleData.totalDiscount,
     total: preSaleData.total,
     preSaleNumber,
-    status: 'pending',
+    paymentMethod: paymentMethod || 'cash',
+    status: isCredit ? 'credit_pending' : 'pending',
     createdAt: firestore.FieldValue.serverTimestamp(),
     createdBy: user?.email || 'N/A',
-    // Separar items y bonificaciones
-    items: preSaleData.cart.filter(item => !item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
-    bonuses: preSaleData.cart.filter(item => item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
+    items,
+    bonuses,
     route: route || null,
-    routeId: route?.id || null
+    routeId: route?.id || null,
+    inventoryDeducted: true,
+    inventoryDeductedAt: firestore.FieldValue.serverTimestamp(),
+    inventoryDeductedBy: user?.email || 'N/A',
   };
-  const docRef = await presalesCollection.add(newPreSale);
-  
+
+  const docRef = presalesCollection.doc();
   const historyRef = docRef.collection('history').doc();
-  await historyRef.set({
-    timestamp: firestore.FieldValue.serverTimestamp(),
-    user: user?.email || 'N/A',
-    action: 'CREATE',
-    details: `Pre-venta #${preSaleNumber} creada. Total: ${newPreSale.total.toFixed(2)}`,
+
+  await firestore().runTransaction(async (tx) => {
+    await validateStockAvailability(tx, inventoryMap);
+    tx.set(docRef, newPreSale);
+    applyStockDeltas(tx, inventoryMap);
+    tx.set(historyRef, {
+      timestamp: firestore.FieldValue.serverTimestamp(),
+      user: user?.email || 'N/A',
+      action: 'CREATE',
+      details: `Pre-venta #${preSaleNumber} creada. Total: ${newPreSale.total.toFixed(2)}`,
+    });
   });
 
   return { ...newPreSale, id: docRef.id };
@@ -75,6 +153,21 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
 
   const customerId = newPreSaleData.customer?.id || null;
   const customerName = buildCustomerName(newPreSaleData.customer, "Cliente sin nombre");
+  const paymentMethod = newPreSaleData.paymentMethod || oldPreSaleData.paymentMethod || 'cash';
+  const isCredit = paymentMethod === 'credit';
+  const creditStatusMap = {
+    pending: 'credit_pending',
+    preparing: 'credit_preparing',
+    ready_for_delivery: 'credit_ready_for_delivery'
+  };
+  const creditStatuses = new Set(['credit_pending', 'credit_preparing', 'credit_ready_for_delivery']);
+  const baseStatus = oldPreSaleData.status || 'pending';
+  const normalizedStatus = isCredit
+    ? (creditStatuses.has(baseStatus) ? baseStatus : (creditStatusMap[baseStatus] || 'credit_pending'))
+    : (creditStatuses.has(baseStatus) ? 'pending' : baseStatus);
+
+  const items = mapItemsToPayload(newPreSaleData.cart.filter(item => !item.isBonus));
+  const bonuses = mapItemsToPayload(newPreSaleData.cart.filter(item => item.isBonus));
 
   const updatedPreSale = {
     customer: newPreSaleData.customer,
@@ -83,29 +176,41 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
     subtotal: newPreSaleData.subtotal,
     totalDiscount: newPreSaleData.totalDiscount,
     total: newPreSaleData.total,
+    paymentMethod,
+    status: normalizedStatus,
     updatedAt: firestore.FieldValue.serverTimestamp(),
     updatedBy: user?.email || 'N/A',
-    // Separar items y bonificaciones
-    items: newPreSaleData.cart.filter(item => !item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
-    bonuses: newPreSaleData.cart.filter(item => item.isBonus).map(({ product, ...rest }) => ({ ...rest, productId: product.id, productName: product.name })),
+    items,
+    bonuses,
     route: route,
-    routeId: routeId
+    routeId: routeId,
+    inventoryDeducted: !!oldPreSaleData.inventoryDeducted,
+    inventoryDeductedAt: oldPreSaleData.inventoryDeductedAt || null,
+    inventoryDeductedBy: oldPreSaleData.inventoryDeductedBy || null,
   };
 
   const historyRef = preSaleRef.collection('history').doc();
-  
   const writeBatch = firestore().batch();
-  
-  writeBatch.update(preSaleRef, updatedPreSale);
-  
-  writeBatch.set(historyRef, {
-    timestamp: firestore.FieldValue.serverTimestamp(),
-    user: user?.email || 'N/A',
-    action: 'EDIT',
-    details: `Pre-venta actualizada. Total anterior: ${oldPreSaleData.total.toFixed(2)}, nuevo total: ${updatedPreSale.total.toFixed(2)}.`,
+
+  await firestore().runTransaction(async (tx) => {
+    if (updatedPreSale.inventoryDeducted) {
+      const oldInventoryMap = mergeQtyMaps(oldPreSaleData.items || [], oldPreSaleData.bonuses || []);
+      const newInventoryMap = mergeQtyMaps(items, bonuses);
+      const deltas = diffQtyMaps(oldInventoryMap, newInventoryMap);
+      await validateStockAvailability(tx, deltas);
+      applyStockDeltas(tx, deltas);
+    }
+
+    tx.update(preSaleRef, updatedPreSale);
+
+    tx.set(historyRef, {
+      timestamp: firestore.FieldValue.serverTimestamp(),
+      user: user?.email || 'N/A',
+      action: 'EDIT',
+      details: `Pre-venta actualizada. Total anterior: ${oldPreSaleData.total.toFixed(2)}, nuevo total: ${updatedPreSale.total.toFixed(2)}.`,
+    });
   });
 
-  await writeBatch.commit();
   return { ...updatedPreSale, id: preSaleId };
 };
 
@@ -125,6 +230,12 @@ export const getPreSalesFromFirestore = async (filters = {}) => {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
+export const getPreSaleById = async (preSaleId) => {
+  const doc = await presalesCollection.doc(preSaleId).get();
+  if (!doc.exists) return null;
+  return { id: doc.id, ...doc.data() };
+};
+
 export const convertPreSaleToSale = async (preSale, paymentDetails) => {
   // ... (existing code remains the same)
 };
@@ -135,7 +246,7 @@ export const updateAggregateProductStatus = async (productName, newStatus, fromS
 
   // Buscar todas las órdenes activas que contengan este producto
   // Nota: Buscamos órdenes no finalizadas. 'dispatched', 'delivered' y 'cancelled' se ignoran.
-  const activeStatuses = ['pending', 'preparing', 'ready_for_delivery'];
+  const activeStatuses = ['pending', 'credit_pending', 'credit_preparing', 'credit_ready_for_delivery', 'preparing', 'ready_for_delivery'];
   const snapshot = await presalesCollection.where('status', 'in', activeStatuses).get();
 
   let updateCount = 0;
@@ -188,12 +299,12 @@ export const updateAggregateProductStatus = async (productName, newStatus, fromS
       let nextOrderStatus = data.status;
 
       if (allReady) {
-        nextOrderStatus = 'ready_for_delivery';
+        nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery';
       } else if (allPending) {
-        nextOrderStatus = 'pending';
+        nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_pending' : 'pending';
       } else {
         // Estado mixto: al menos uno en proceso o listo, pero no todos
-        nextOrderStatus = 'preparing';
+        nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing';
       }
 
       batch.update(doc.ref, {

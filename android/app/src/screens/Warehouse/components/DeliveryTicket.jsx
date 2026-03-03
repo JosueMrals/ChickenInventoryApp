@@ -23,6 +23,7 @@ const DeliveryTicket = ({ sale, settings }) => {
 
   const bonuses = sale.bonusesAwarded || sale.bonuses || [];
   const hasBonuses = Array.isArray(bonuses) && bonuses.length > 0;
+  const isCredit = sale.paymentMethod === 'credit' || String(sale.status || '').startsWith('credit_');
 
   return (
     <ScrollView style={styles.container}>
@@ -33,6 +34,11 @@ const DeliveryTicket = ({ sale, settings }) => {
       <Text style={[styles.subHeader, { fontFamily, fontSize: baseFontSize }]}>
         Pre-Venta #{sale.id ? sale.id.substring(0, 8).toUpperCase() : '---'}
       </Text>
+      {isCredit && (
+        <View style={styles.creditBanner}>
+          <Text style={[styles.creditBannerText, { fontFamily, fontSize: baseFontSize - 1 }]}>PRE-VENTA A CRÉDITO</Text>
+        </View>
+      )}
 
       <View style={styles.divider} />
 
@@ -41,6 +47,9 @@ const DeliveryTicket = ({ sale, settings }) => {
 
       <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Fecha Pago:</Text>
       <Text style={[styles.value, { fontFamily, fontSize: baseFontSize + 2 }]}>{getFormattedDate(sale.fechaPago)}</Text>
+
+      <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Tipo:</Text>
+      <Text style={[styles.value, { fontFamily, fontSize: baseFontSize + 2 }]}>{isCredit ? 'Crédito' : 'Contado'}</Text>
 
       <View style={styles.divider} />
 
@@ -224,6 +233,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
     fontStyle: 'italic',
+  },
+  creditBanner: {
+    alignSelf: 'center',
+    backgroundColor: '#111827',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  creditBannerText: {
+    color: '#fff',
+    fontWeight: '700',
   }
 });
 

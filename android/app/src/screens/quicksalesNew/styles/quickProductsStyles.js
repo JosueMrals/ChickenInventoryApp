@@ -72,32 +72,32 @@ export default StyleSheet.create({
   // -------- PRODUCT CARDS --------
   card: {
     backgroundColor: '#FFF',
-    padding: 14,
-    marginHorizontal: 10,
-    marginVertical: 8,
+    padding: 10,
+    marginHorizontal: 6,
+    marginVertical: 6,
     flex: 1,
-    borderRadius: 14,
-    elevation: 3,
-    minHeight: 90,
+    borderRadius: 12,
+    elevation: 2,
+    minHeight: 86,
     justifyContent: 'space-between',
     shadowColor: '#000',
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.06,
     shadowRadius: 3,
     shadowOffset: { width: 0, height: 2 },
   },
 
   cardName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: '#111',
-    marginBottom: 6,
+    marginBottom: 4,
   },
 
   cardPrice: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
     color: '#007AFF',
-    marginBottom: 6,
+    marginBottom: 0,
   },
 
   // -------- CART BUTTON --------

@@ -73,10 +73,22 @@ export default function PreSaleProductsScreen({ navigation }) {
     const { priceToUse } = calcPriceForProduct({ product: item, qty: 1, customer });
     const bonuses = Array.isArray(item.bonuses) ? item.bonuses : (item.bonus ? [item.bonus] : []);
     const hasBonus = bonuses.some(b => b && b.enabled);
+    const rawStock = item.stock ?? item.availableStock ?? item.inventory;
+    const hasStock = rawStock !== undefined && rawStock !== null;
+    const stockValue = hasStock ? Number(rawStock) : null;
+    const isLowStock = stockValue !== null && stockValue <= 5;
+
     return (
       <TouchableOpacity style={styles.card} onPress={() => openQuantity(item)}>
-        <Text style={styles.cardName}>{item.name}</Text>
-        <Text style={styles.cardPrice}>{formatCurrency(priceToUse)}</Text>
+        <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+        <View style={localStyles.priceRow}>
+          <Text style={styles.cardPrice}>{formatCurrency(priceToUse)}</Text>
+          <View style={[localStyles.stockBadge, isLowStock && localStyles.stockBadgeLow]}>
+            <Text style={[localStyles.stockText, isLowStock && localStyles.stockTextLow]}>
+              Stock: {hasStock ? stockValue : "--"}
+            </Text>
+          </View>
+        </View>
         {(item.wholesalePrices?.length > 0 || hasBonus) && (
           <View style={localStyles.tagContainer}>
             {item.wholesalePrices?.length > 0 && <Text style={localStyles.tag}>Mayoreo</Text>}
@@ -132,6 +144,7 @@ export default function PreSaleProductsScreen({ navigation }) {
             numColumns={2}
             keyExtractor={(item) => item.id}
             contentContainerStyle={localStyles.listContent}
+            columnWrapperStyle={localStyles.columnWrapper}
             keyboardShouldPersistTaps="handled"
           />
 
@@ -154,7 +167,34 @@ export default function PreSaleProductsScreen({ navigation }) {
 const localStyles = StyleSheet.create({
   flexOne: { flex: 1, backgroundColor: '#f2f2f2' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  listContent: { paddingBottom: 100 },
+  listContent: { paddingBottom: 100, paddingHorizontal: 10, paddingTop: 4 },
+  columnWrapper: { justifyContent: 'space-between' },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  stockBadge: {
+    backgroundColor: '#EEF6FF',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#D7E9FF',
+  },
+  stockBadgeLow: {
+    backgroundColor: '#FFF1F0',
+    borderColor: '#FFD6D6',
+  },
+  stockText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#1F5FBF',
+  },
+  stockTextLow: {
+    color: '#C0392B',
+  },
   tagContainer: {
     flexDirection: 'row',
     marginTop: 4,

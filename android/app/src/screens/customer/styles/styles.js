@@ -29,8 +29,8 @@ export default StyleSheet.create({
   card: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
+    padding: 10,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#EFEFEF',
     shadowColor: '#000',
@@ -40,24 +40,37 @@ export default StyleSheet.create({
     elevation: 2,
   },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  name: { fontSize: 16, fontWeight: '700', color: '#111' },
+  nameBlock: { flex: 1, marginRight: 10 },
+  name: { fontSize: 15, fontWeight: '700', color: '#111' },
   nameLarge: { fontSize: 20, fontWeight: '800', color: '#111' },
-  text: { color: '#444', marginTop: 4 },
-  smallText: { color: '#777', fontSize: 12 },
+  text: { color: '#444', marginTop: 4, fontSize: 13 },
+  smallText: { color: '#777', fontSize: 11 },
+
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  dot: { color: '#B0B5BD', marginHorizontal: 6, fontSize: 10 },
 
   tagColumn: { alignItems: 'flex-end' },
   typeBadge: {
     backgroundColor: '#F2F6FF',
     color: '#0B60FF',
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 3,
     borderRadius: 6,
     fontWeight: '700',
     overflow: 'hidden',
     alignSelf: 'flex-end',
+    fontSize: 11,
+  },
+  discountBadge: {
+    color: '#007AFF',
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '700',
   },
 
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rowBetweenCompact: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
+  creditText: { color: '#111', fontSize: 12, fontWeight: '600' },
   actions: { flexDirection: 'row', alignItems: 'center' },
 
   fab: {
@@ -136,4 +149,6 @@ export default StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+
+  listContent: { paddingBottom: 120 },
 });

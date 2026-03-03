@@ -10,52 +10,37 @@ import StatCardGrid from '../../dashboard/components/StatCardGrid';
 
 // Componente para cada Entrega (Versión Resumida)
 const DeliveryItem = ({ item, onGoToPayment, customerName }) => {
-  const [expanded, setExpanded] = useState(false);
+  const isCredit = item.paymentMethod === 'credit' || String(item.status || '').startsWith('credit_');
 
-  // Fechas y Textos
   const createdDate = item.createdAt
     ? new Date(item.createdAt.toDate()).toLocaleDateString() + ' ' + new Date(item.createdAt.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     : '---';
 
-  const totalItems = item.items ? item.items.reduce((a, b) => a + (b.quantity || 0), 0) : 0;
-
   return (
     <View style={styles.card}>
-        {/* Header: Orden - Cliente - Total - Estado Pagada dummy (invisible por ahora) */}
-        <TouchableOpacity style={styles.cardHeader} onPress={() => setExpanded(!expanded)}>
+        <View style={styles.cardHeader}>
              <View style={{flex: 1}}>
-                 <Text style={styles.orderTitle}>#{item.id.substring(0, 6).toUpperCase()}</Text>
                  <Text style={styles.customerName}>{customerName || 'Cliente General'}</Text>
-                 <Text style={styles.dateText}>{createdDate}</Text>
+                 <Text style={styles.metaText}>#{item.id.substring(0, 6).toUpperCase()} · {createdDate}</Text>
              </View>
 
              <View style={{alignItems: 'flex-end'}}>
                  <Text style={styles.totalText}>${item.total?.toFixed(2)}</Text>
-                 <View style={styles.badge}>
-                    <Text style={styles.badgeText}>Pendiente</Text>
+                 <View style={styles.badgeRow}>
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>Pendiente</Text>
+                    </View>
+                    {isCredit && (
+                      <View style={styles.creditBadge}>
+                        <Text style={styles.creditBadgeText}>Crédito</Text>
+                      </View>
+                    )}
                  </View>
              </View>
-        </TouchableOpacity>
+        </View>
 
-        {/* Detalle Expandible */}
-        {expanded && (
-            <View style={styles.cardBody}>
-                <View style={styles.divider} />
-                <Text style={styles.sectionLabel}>Dirección:</Text>
-                <Text style={styles.bodyText}>{item.address || 'Sin dirección'}</Text>
-
-                {item.phone && <Text style={styles.bodyText}>Tel: {item.phone}</Text>}
-
-                <Text style={[styles.sectionLabel, {marginTop: 10}]}>Productos ({totalItems}):</Text>
-                {item.items && item.items.map((prod, i) => (
-                    <Text key={i} style={styles.productText}>• {prod.quantity}x {prod.productName || prod.name}</Text>
-                ))}
-            </View>
-        )}
-
-        {/* Botón Acción Full Width */}
         <TouchableOpacity style={styles.mainActionButton} onPress={() => onGoToPayment(item)}>
-            <Text style={styles.mainActionText}>COBRAR ORDEN</Text>
+            <Text style={styles.mainActionText}>COBRAR</Text>
         </TouchableOpacity>
     </View>
   );
@@ -125,6 +110,13 @@ const HistoryItem = ({ item, onOpen, customerName }) => {
           <Icon name="chevron-forward" size={20} color="#94A3B8" />
         </View>
       </View>
+      {(item.paymentMethod === 'credit' || String(item.status || '').startsWith('credit_')) && (
+        <View style={styles.historyBadgeRow}>
+          <View style={styles.creditBadge}>
+            <Text style={styles.creditBadgeText}>Crédito</Text>
+          </View>
+        </View>
+      )}
     </TouchableOpacity>
   );
 };
@@ -523,7 +515,7 @@ const styles = StyleSheet.create({
   },
   filterChips: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   statsContainer: {
-    marginBottom: 12,
+    marginBottom: -5,
   },
   chip: {
     paddingHorizontal: 12,
@@ -553,42 +545,49 @@ const styles = StyleSheet.create({
   historyMeta: { fontSize: 12, color: '#888' },
   historyRight: { alignItems: 'flex-end', gap: 4 },
   historyTotal: { fontSize: 16, fontWeight: 'bold', color: '#2DCE89' },
+  historyBadgeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
+  creditBadge: {
+    backgroundColor: '#1F2937',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  creditBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 10,
     padding: 0,
-    elevation: 2,
+    elevation: 1,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
     overflow: 'hidden',
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    padding: 16,
-  },
-  orderTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#888',
-    marginBottom: 2,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
   },
   customerName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 2,
   },
-  dateText: {
-    fontSize: 12,
-    color: '#999',
+  metaText: {
+    fontSize: 11,
+    color: '#6B7280',
   },
   totalText: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '800',
     color: '#2DCE89',
     marginBottom: 4,
   },
@@ -596,13 +595,30 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFECB3',
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: 10,
     alignSelf: 'flex-end',
   },
-  badgeText: {
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  creditBadge: {
+    backgroundColor: '#1F2937',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  creditBadgeText: {
     fontSize: 10,
     fontWeight: 'bold',
-    color: '#FF6F00',
+    color: '#fff',
+  },
+  creditHint: {
+    fontSize: 12,
+    color: '#111827',
+    marginTop: 6,
+    fontWeight: '600',
   },
   cardBody: {},
   divider: {
@@ -628,14 +644,14 @@ const styles = StyleSheet.create({
   },
   mainActionButton: {
     backgroundColor: '#2DCE89',
-    paddingVertical: 14,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   mainActionText: {
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-    letterSpacing: 0.5,
+    fontWeight: '700',
+    fontSize: 12,
+    letterSpacing: 0.6,
   },
 });

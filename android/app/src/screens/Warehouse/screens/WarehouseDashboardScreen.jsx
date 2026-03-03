@@ -30,7 +30,7 @@ export default function WarehouseDashboardScreen({ navigation }) {
     // Solo obtener órdenes relevantes para Bodega (pending -> preparing -> ready_for_delivery)
     let query = firestore()
       .collection('presales')
-      .where('status', 'in', ['pending', 'preparing', 'ready_for_delivery']);
+      .where('status', 'in', ['pending', 'credit_pending', 'credit_preparing', 'credit_ready_for_delivery', 'preparing', 'ready_for_delivery']);
 
     // Filtrar por ruta si está seleccionada
     if (selectedRoute && selectedRoute.id) {
@@ -143,7 +143,7 @@ export default function WarehouseDashboardScreen({ navigation }) {
 
   const handleHandoverPress = () => {
       // Filter orders that are ready_for_delivery OR preparing (to allow forced partial handover with warning)
-      const accessibleOrders = preSales.filter(s => ['ready_for_delivery', 'preparing'].includes(s.status));
+      const accessibleOrders = preSales.filter(s => ['ready_for_delivery', 'credit_ready_for_delivery', 'preparing', 'credit_preparing'].includes(s.status));
       if (accessibleOrders.length === 0) return;
 
       navigation.navigate('ProductHandover', { readyOrders: accessibleOrders });
@@ -165,13 +165,13 @@ export default function WarehouseDashboardScreen({ navigation }) {
           let color = '';
           let icon = '';
 
-          if (item.status === 'pending') {
-              nextStatus = 'preparing';
+          if (item.status === 'pending' || item.status === 'credit_pending') {
+              nextStatus = item.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing';
               label = 'Preparar';
               color = '#007AFF';
               icon = 'construct-outline';
-          } else if (item.status === 'preparing') {
-              nextStatus = 'ready_for_delivery';
+          } else if (item.status === 'preparing' || item.status === 'credit_preparing') {
+              nextStatus = item.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery';
               label = 'Listar';
               color = '#34C759';
               icon = 'checkmark-circle-outline';
@@ -201,13 +201,13 @@ export default function WarehouseDashboardScreen({ navigation }) {
           let color = '';
           let icon = '';
 
-          if (item.status === 'preparing') {
-              prevStatus = 'pending';
+          if (item.status === 'preparing' || item.status === 'credit_preparing') {
+              prevStatus = item.paymentMethod === 'credit' ? 'credit_pending' : 'pending';
               label = 'Pendiente';
               color = '#F2C94C';
               icon = 'time-outline';
-          } else if (item.status === 'ready_for_delivery') {
-              prevStatus = 'preparing';
+          } else if (item.status === 'ready_for_delivery' || item.status === 'credit_ready_for_delivery') {
+              prevStatus = item.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing';
               label = 'Preparar';
               color = '#007AFF';
               icon = 'construct-outline';
@@ -232,12 +232,12 @@ export default function WarehouseDashboardScreen({ navigation }) {
               renderLeftActions={renderLeftActions}
               onSwipeableRightOpen={() => {
                   // Opcional: Auto-trigger al deslizar completo
-                  if (item.status === 'pending') handleUpdateStatus(item.id, 'preparing');
-                  else if (item.status === 'preparing') handleUpdateStatus(item.id, 'ready_for_delivery');
+                  if (item.status === 'pending' || item.status === 'credit_pending') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing');
+                  else if (item.status === 'preparing' || item.status === 'credit_preparing') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery');
               }}
               onSwipeableLeftOpen={() => {
-                  if (item.status === 'preparing') handleUpdateStatus(item.id, 'pending');
-                  else if (item.status === 'ready_for_delivery') handleUpdateStatus(item.id, 'preparing');
+                  if (item.status === 'preparing' || item.status === 'credit_preparing') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_pending' : 'pending');
+                  else if (item.status === 'ready_for_delivery' || item.status === 'credit_ready_for_delivery') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing');
               }}
           >
               <PreSaleItem

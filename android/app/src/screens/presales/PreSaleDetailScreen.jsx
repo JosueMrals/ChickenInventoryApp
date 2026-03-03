@@ -125,6 +125,13 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         data.push({ type: 'section_title', key: 'title_customer', title: 'Cliente' });
         data.push({ type: 'info_row', key: 'customer_name', icon: 'person-outline', label: 'Nombre', value: customerName });
         data.push({ type: 'info_row', key: 'date', icon: 'calendar-outline', label: 'Fecha', value: presale.createdAt?.toDate ? presale.createdAt.toDate().toLocaleDateString('es-ES') : 'N/A' });
+        data.push({
+            type: 'info_row',
+            key: 'payment_method',
+            icon: 'card-outline',
+            label: 'Tipo',
+            value: presale.paymentMethod === 'credit' || presale.status === 'credit_pending' ? 'Crédito' : 'Contado',
+        });
 
         // Mostrar Ruta si existe
         if (presale.route) {
@@ -210,7 +217,7 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 					historyItem={selectedHistoryItem}
 				/>
 
-				{presale.status === 'pending' && (
+				{(presale.status === 'pending' || presale.status === 'credit_pending') && (
 					<View style={styles.footer}>
 						<TouchableOpacity style={[styles.editButton, { flex: 1, flexDirection: 'row', width: 'auto' }]} onPress={handleEdit} disabled={isEditing}>
 							{isEditing ? <ActivityIndicator color="#007AFF" /> : (

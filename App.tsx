@@ -15,7 +15,10 @@ import UserManagementScreen from './android/app/src/screens/users/UserManagement
 
 import SalesScreen from './android/app/src/screens/sales/SalesScreen';
 import CustomersScreen from './android/app/src/screens/customer/CustomerListScreen';
+import CustomerFormModal from './android/app/src/screens/customer/CustomerFormModal';
 import DashboardScreen from './android/app/src/screens/dashboard/DashboardScreen';
+import CreditsScreen from './android/app/src/screens/credits/screens/CreditsScreen';
+import CreditsHistoryScreen from './android/app/src/screens/credits/screens/CreditsHistoryScreen';
 
 import QuickSaleStack from './android/app/src/navigation/QuickSaleStack';
 import PreSaleStack from './android/app/src/navigation/PreSaleStack';
@@ -81,6 +84,12 @@ function AppDrawer({ route }) {
       />
       <Drawer.Screen name="Customer">
         {(props) => <CustomersScreen {...props} user={user} role={role} />}
+      </Drawer.Screen>
+      <Drawer.Screen name="Credits">
+        {(props) => <CreditsScreen {...props} user={user} role={role} initialFilter="pending" />}
+      </Drawer.Screen>
+      <Drawer.Screen name="CreditsHistory">
+        {(props) => <CreditsHistoryScreen {...props} user={user} role={role} />}
       </Drawer.Screen>
       <Drawer.Screen
         name="QuickSales"
@@ -307,6 +316,7 @@ export default function App() {
                     <Stack.Screen name="Login" component={LoginScreen} />
                     <Stack.Screen name="RouteSelection" component={RouteSelectionScreen} />
                     <Stack.Screen name="AppDrawer" component={AppDrawer} />
+                    <Stack.Screen name="CustomerForm" component={CustomerFormModal} />
                     {/* Pantallas globales accesibles desde Settings */}
                     <Stack.Screen name="PrintersScreen" component={PrintersScreen} />
                     <Stack.Screen name="TicketCustomizationScreen" component={TicketCustomizationScreen} />

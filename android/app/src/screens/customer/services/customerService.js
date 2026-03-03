@@ -51,6 +51,35 @@ export const fetchCustomers = (onUpdate) => {
   }
 };
 
+const mapCustomer = (doc) => {
+  const d = doc?.data?.() || {};
+  return {
+    id: doc?.id,
+    firstName: d.firstName ?? '',
+    lastName: d.lastName ?? '',
+    phone: d.phone ?? '',
+    cedula: d.cedula ?? '',
+    address: d.address ?? '',
+    creditLimit: d.creditLimit ?? 0,
+    type: d.type ?? 'Común',
+    discount: d.discount ?? 0,
+    createdAt: d.createdAt ?? null,
+    updatedAt: d.updatedAt ?? null,
+    ...d,
+  };
+};
+
+export const getCustomerById = async (id) => {
+  try {
+    const doc = await firestore().collection(COLLECTION).doc(id).get();
+    if (!doc.exists) return null;
+    return mapCustomer(doc);
+  } catch (error) {
+    console.error('[customersService] getCustomerById ERROR:', error);
+    throw error;
+  }
+};
+
 // -----------------------------------------
 // ➕ Crear cliente
 // -----------------------------------------

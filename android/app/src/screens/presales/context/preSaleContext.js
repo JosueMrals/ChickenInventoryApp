@@ -170,7 +170,7 @@ export function PreSaleProvider({ children }) {
     setEditingPreSale(null);
   };
   
-  const submitPreSale = async () => {
+  const submitPreSale = async (options = {}) => {
     setLoading(true);
     try {
       const cartToSubmit = editingPreSale ? editCart : cart;
@@ -178,9 +178,11 @@ export function PreSaleProvider({ children }) {
       const subtotal = soldItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const totalDiscount = soldItems.reduce((sum, item) => sum + (item.discount || 0), 0);
       const total = subtotal - totalDiscount;
+      const paymentMethod = options.paymentMethod || editingPreSale?.paymentMethod || 'cash';
 
       const preSalePayload = {
         customer, cart: cartToSubmit, subtotal, totalDiscount, total,
+        paymentMethod,
         route: editingPreSale?.route || selectedRoute || null,
         routeId: editingPreSale?.routeId || selectedRoute?.id || null
       };

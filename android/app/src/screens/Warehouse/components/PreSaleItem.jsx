@@ -5,8 +5,11 @@ import { warehouseStyles as styles } from '../styles/warehouseStyles';
 
 const STATUS_LABELS = {
   pending: 'Pendiente',
+  credit_pending: 'Pendiente (Crédito)',
   preparing: 'En Preparación',
+  credit_preparing: 'En Preparación (Crédito)',
   ready_for_delivery: 'Lista para Entrega',
+  credit_ready_for_delivery: 'Lista para Entrega (Crédito)',
   dispatched: 'En Reparto',
   paid: 'Pagada'
 };
@@ -14,8 +17,11 @@ const STATUS_LABELS = {
 const getStatusColor = (status) => {
     switch(status) {
         case 'pending': return '#F2C94C';
+        case 'credit_pending': return '#F2C94C';
         case 'preparing': return '#007AFF';
+        case 'credit_preparing': return '#007AFF';
         case 'ready_for_delivery': return '#34C759';
+        case 'credit_ready_for_delivery': return '#34C759';
         default: return '#8E8E93';
     }
 };

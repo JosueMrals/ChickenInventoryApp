@@ -11,10 +11,29 @@ import { resolveCustomerName } from '../../../utils/customerUtils';
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
+const getStatusBadge = (status) => {
+    switch (status) {
+        case 'pending':
+        case 'credit_pending':
+            return { label: STATUS_LABELS[status] || status, color: '#F2C94C', textColor: '#3E2F00' };
+        case 'preparing':
+        case 'credit_preparing':
+            return { label: STATUS_LABELS[status] || status, color: '#DCE9FF', textColor: '#0F3D91' };
+        case 'ready_for_delivery':
+        case 'credit_ready_for_delivery':
+            return { label: STATUS_LABELS[status] || status, color: '#DFF5E6', textColor: '#1E6B34' };
+        default:
+            return { label: STATUS_LABELS[status] || status, color: '#EEE', textColor: '#555' };
+    }
+};
+
 const STATUS_LABELS = {
   pending: 'Pendiente',
+  credit_pending: 'Pendiente (Crédito)',
   preparing: 'En Preparación',
+  credit_preparing: 'En Preparación (Crédito)',
   ready_for_delivery: 'Lista para Entrega',
+  credit_ready_for_delivery: 'Lista para Entrega (Crédito)',
   dispatched: 'En Reparto',
   paid: 'Pagada',
   delivered: 'Entregada' // Agregando delivered por si acaso
@@ -26,29 +45,44 @@ const SectionTitle = React.memo(({ title, color }) => (
     </View>
 ));
 
-const InfoRow = React.memo(({ label, value, icon }) => (
+const InfoRow = React.memo(({ label, value, icon, badgeText, badgeColor, badgeTextColor }) => (
     <View style={styles.infoRow}>
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
-            {icon && <Icon name={icon} size={20} color="#555" style={{marginRight: 10}}/>}
+            {icon && <Icon name={icon} size={18} color="#555" style={{marginRight: 8}}/>}
             <Text style={styles.label}>{label}</Text>
         </View>
-        <Text style={styles.value}>{value}</Text>
-    </View>
-));
-
-const ItemCard = React.memo(({ item, isBonus = false }) => (
-    <View style={[styles.itemCard, isBonus && styles.bonusItemCard]}>
-        <View style={styles.itemInfo}>
-            <Text style={styles.itemName}>{item.productName || item.name}</Text>
-            <Text style={styles.itemDetails}>
-                {isBonus ? `${item.quantity} x GRATIS` : `${item.quantity} x ${formatCurrency(item.unitPrice)}`}
-            </Text>
-        </View>
-        {isBonus && (
-            <View style={styles.bonusTag}><Text style={styles.bonusTagText}>REGALO</Text></View>
+        {badgeText ? (
+            <View style={[styles.statusBadge, { backgroundColor: badgeColor }]}>
+                <Text style={[styles.statusBadgeText, { color: badgeTextColor }]}>{badgeText}</Text>
+            </View>
+        ) : (
+            <Text style={styles.value}>{value}</Text>
         )}
     </View>
 ));
+
+const ItemCard = React.memo(({ item, isBonus = false }) => {
+    const qty = Number(item.quantity) || 0;
+    const unit = Number(item.unitPrice) || 0;
+    const lineTotal = isBonus ? null : formatCurrency(item.total ?? (qty * unit));
+
+    return (
+        <View style={[styles.itemCard, isBonus && styles.bonusItemCard]}>
+            <View style={styles.itemInfo}>
+                <Text style={styles.itemName}>{item.productName || item.name}</Text>
+                <Text style={styles.itemDetails}>
+                    {isBonus ? `${qty} x GRATIS` : `${qty} x ${formatCurrency(unit)}`}
+                </Text>
+            </View>
+            <View style={styles.itemRight}>
+                {!isBonus && <Text style={styles.itemTotal}>{lineTotal}</Text>}
+                {isBonus && (
+                    <View style={styles.bonusTag}><Text style={styles.bonusTagText}>REGALO</Text></View>
+                )}
+            </View>
+        </View>
+    );
+});
 
 export default function WarehouseOrderDetailScreen({ route, navigation }) {
     const { presale: initialPresale } = route.params;
@@ -100,7 +134,7 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
 
             // If ready for delivery, we don't automatically show picker anymore to prefer Bulk Handover,
             // but we can still show a success message.
-            if(newStatus === 'ready_for_delivery'){
+            if(newStatus === 'ready_for_delivery' || newStatus === 'credit_ready_for_delivery'){
                 Alert.alert("Orden Lista", "La orden está lista para entrega. Puedes asignarla individualmente o usar la entrega masiva en el panel.");
             }
         } catch (error) {
@@ -159,26 +193,28 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
     const listData = useMemo(() => {
         const data = [];
         const customerName = resolveCustomerName(presale, customersById);
-
-        const statusLabel = STATUS_LABELS[presale.status] || presale.status;
-
-        data.push({ type: 'section_title', key: 'title_customer', title: 'Cliente' });
-        data.push({ type: 'info_row', key: 'customer_name', icon: 'person-outline', label: 'Nombre', value: customerName });
-        data.push({ type: 'info_row', key: 'date', icon: 'calendar-outline', label: 'Fecha', value: presale.createdAt?.toDate ? presale.createdAt.toDate().toLocaleDateString('es-ES') : 'N/A' });
-
-        // Use translated status
-        data.push({ type: 'info_row', key: 'status', icon: 'information-circle-outline',
-			label: 'Estado', value: statusLabel });
+        const statusBadge = getStatusBadge(presale.status);
 
         data.push({ type: 'section_title', key: 'title_products', title: 'Productos' });
         (presale.items || []).forEach((item, index) => data.push({ type: 'item_card',
-			key: `item-${index}`, ...item }));
+            key: `item-${index}`, ...item }));
 
         if (presale.bonuses?.length > 0) {
-            data.push({ type: 'section_title', key: 'title_bonuses', title: 'Bonificaciones',
-				color: '#007AFF' });
+            data.push({ type: 'section_title', key: 'title_bonuses', title: 'Bonificaciones', color: '#007AFF' });
             presale.bonuses.forEach((bonus, index) => data.push({ type: 'item_card', key: `bonus-${index}`, ...bonus, isBonus: true }));
         }
+
+        data.unshift({
+            type: 'info_row',
+            key: 'status',
+            icon: 'information-circle-outline',
+            label: 'Estado',
+            badgeText: statusBadge.label,
+            badgeColor: statusBadge.color,
+            badgeTextColor: statusBadge.textColor
+        });
+        data.unshift({ type: 'info_row', key: 'date', icon: 'calendar-outline', label: 'Fecha', value: presale.createdAt?.toDate ? presale.createdAt.toDate().toLocaleDateString('es-ES') : 'N/A' });
+        data.unshift({ type: 'info_row', key: 'customer_name', icon: 'person-outline', label: 'Cliente', value: customerName });
 
         return data;
     }, [presale, customersById]);
@@ -207,25 +243,60 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
                     keyExtractor={item => item.key}
                     contentContainerStyle={styles.listContainer}
                     showsVerticalScrollIndicator={false}
+                    ListHeaderComponent={() => {
+                        const customerName = resolveCustomerName(presale, customersById);
+                        const statusBadge = getStatusBadge(presale.status);
+                        const totalItems = [...(presale.items || []), ...(presale.bonuses || [])].reduce((acc, curr) => acc + (Number(curr.quantity) || 0), 0);
+                        const isCredit = presale.paymentMethod === 'credit';
+
+                        return (
+                            <View style={styles.summaryCard}>
+                                <View style={styles.summaryRow}>
+                                    <Text style={styles.summaryName}>{customerName}</Text>
+                                    <View style={[styles.statusBadge, { backgroundColor: statusBadge.color }]}>
+                                        <Text style={[styles.statusBadgeText, { color: statusBadge.textColor }]}>{statusBadge.label}</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.summaryMetaRow}>
+                                    <Text style={styles.summaryMeta}>Fecha: {presale.createdAt?.toDate ? presale.createdAt.toDate().toLocaleDateString('es-ES') : 'N/A'}</Text>
+                                    <Text style={styles.summaryMeta}>Items: {totalItems}</Text>
+                                </View>
+                                <View style={styles.summaryRow}>
+                                    <Text style={styles.summaryTotal}>{formatCurrency(presale.total)}</Text>
+                                    {isCredit && (
+                                        <View style={styles.creditBadge}>
+                                            <Text style={styles.creditBadgeText}>Crédito</Text>
+                                        </View>
+                                    )}
+                                </View>
+                            </View>
+                        );
+                    }}
                 />
             </View>
 
             <View style={styles.footer}>
                 {loading ? <ActivityIndicator size="large" color="#5856D6" /> : (
                     <>
-                        {presale.status === 'pending' && (
-                            <TouchableOpacity style={styles.actionButton} onPress={() => updateStatus('preparing')}>
+                        {(presale.status === 'pending' || presale.status === 'credit_pending') && (
+                            <TouchableOpacity
+                                style={styles.actionButton}
+                                onPress={() => updateStatus(presale.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing')}
+                            >
                                 <Icon name="hammer-outline" size={20} color="white" style={{marginRight: 8}} />
                                 <Text style={styles.buttonText}>Empezar Preparación</Text>
                             </TouchableOpacity>
                         )}
-                        {presale.status === 'preparing' && (
-                            <TouchableOpacity style={[styles.actionButton, {backgroundColor: '#34C759'}]} onPress={() => updateStatus('ready_for_delivery')}>
+                        {(presale.status === 'preparing' || presale.status === 'credit_preparing') && (
+                            <TouchableOpacity
+                                style={[styles.actionButton, {backgroundColor: '#34C759'}]}
+                                onPress={() => updateStatus(presale.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery')}
+                            >
                                 <Icon name="checkmark-circle-outline" size={20} color="white" style={{marginRight: 8}} />
                                 <Text style={styles.buttonText}>Marcar Lista para Entrega</Text>
                             </TouchableOpacity>
                         )}
-                        {presale.status === 'ready_for_delivery' && (
+                        {(presale.status === 'ready_for_delivery' || presale.status === 'credit_ready_for_delivery') && (
                             <TouchableOpacity style={[styles.actionButton, {backgroundColor: '#FF9500'}]} onPress={() => setShowEntregadorPicker(true)}>
                                 <Icon name="bicycle-outline" size={20} color="white" style={{marginRight: 8}} />
                                 <Text style={styles.buttonText}>Asignar Individualmente</Text>

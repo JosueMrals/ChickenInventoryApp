@@ -10,16 +10,30 @@ import AddProductModal from "./components/AddProductModal";
 
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 
+const formatPreSaleError = (error) => {
+  const message = error?.message || '';
+  if (message.startsWith('Stock insuficiente')) {
+    return `${message}. Ajusta cantidades o elimina el producto.`;
+  }
+  if (message.startsWith('Producto no encontrado')) {
+    return 'No se pudo validar el stock de un producto. Intenta nuevamente.';
+  }
+  return `No se pudo guardar la pre-venta. ${message}`.trim();
+};
+
 export default function PreSaleEditCartScreen({ navigation }) {
   const { 
     customer, setCustomer, 
     submitPreSale, resetPreSale, loading,
-    editCart, updateEditCart, removeFromEditCart, addItemToEditCart
+    editCart, updateEditCart, removeFromEditCart, addItemToEditCart,
+    editingPreSale
   } = useContext(PreSaleContext);
   
   const allowExitRef = useRef(false);
   const [discountModal, setDiscountModal] = useState({ visible: false, product: null });
   const [addProductModalVisible, setAddProductModalVisible] = useState(false);
+  const [isCredit, setIsCredit] = useState(false);
+  const creditWarningShownRef = useRef(false);
 
   const displayData = useMemo(() => {
     const normalItems = editCart.filter(i => !i.isBonus);
@@ -52,18 +66,90 @@ export default function PreSaleEditCartScreen({ navigation }) {
     [soldItems]
   );
   const total = subtotal - totalDiscount;
+  const showSummaryBreakdown = totalDiscount > 0;
+  const customerCreditLimit = Number(customer?.creditLimit) || 0;
+  const canUseCredit = customerCreditLimit > 0;
+  const creditExceeded = canUseCredit && total > customerCreditLimit;
+  const creditAvailable = canUseCredit ? Math.max(customerCreditLimit - total, 0) : 0;
+  const hasValidTotal = Number.isFinite(total) && total > 0;
+  const preSaleIsCredit = editingPreSale?.paymentMethod === 'credit' || editingPreSale?.status === 'credit_pending';
+
+  useEffect(() => {
+    if (preSaleIsCredit && hasValidTotal && canUseCredit && !creditExceeded) {
+      setIsCredit(true);
+      return;
+    }
+
+    if (!preSaleIsCredit) {
+      setIsCredit(false);
+    }
+  }, [preSaleIsCredit, hasValidTotal, canUseCredit, creditExceeded]);
+
+  useEffect(() => {
+    if (!hasValidTotal || !canUseCredit || creditExceeded) {
+      if (isCredit && !creditWarningShownRef.current) {
+        Alert.alert(
+          'Crédito desactivado',
+          'El crédito no está disponible o el total supera el límite. Se guardará como contado.'
+        );
+        creditWarningShownRef.current = true;
+      }
+      setIsCredit(false);
+      return;
+    }
+
+    creditWarningShownRef.current = false;
+  }, [hasValidTotal, canUseCredit, creditExceeded, isCredit]);
 
   const handleSubmit = async () => {
     if (editCart.length === 0) return Alert.alert("Carrito vacío", "Agrega productos antes de continuar.");
+    if (!hasValidTotal) return Alert.alert('Total inválido', 'El total debe ser mayor que 0.');
     if (!customer) {
       return Alert.alert("Cliente no asignado", "Por favor, asigna un cliente a esta pre-venta.", [
         { text: "Cancelar", style: "cancel" },
         { text: "Asignar", onPress: () => navigation.navigate('AssignCustomer') }
       ]);
     }
-    
+
+    const mustForceCash = preSaleIsCredit && (!hasValidTotal || !canUseCredit || creditExceeded);
+    if (mustForceCash) {
+      Alert.alert(
+        'Crédito desactivado',
+        'El total supera el límite o el crédito no está disponible. Se guardará como contado.'
+      );
+    }
+
+    if (preSaleIsCredit && !isCredit && !mustForceCash) {
+      const confirm = await new Promise((resolve) => {
+        Alert.alert(
+          'Cambiar a contado',
+          'El crédito está desactivado. ¿Deseas guardar esta pre-venta como contado?',
+          [
+            { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Guardar', onPress: () => resolve(true) },
+          ]
+        );
+      });
+
+      if (!confirm) return;
+    }
+
+    if (isCredit) {
+      if (!canUseCredit) {
+        return Alert.alert("Crédito no disponible", "Este cliente no tiene crédito habilitado.");
+      }
+      if (total > customerCreditLimit) {
+        return Alert.alert(
+          "Crédito insuficiente",
+          `El crédito permitido es C$${customerCreditLimit.toFixed(2)} y el total es C$${total.toFixed(2)}.`
+        );
+      }
+    }
+
+    const paymentMethod = mustForceCash ? 'cash' : (isCredit ? 'credit' : 'cash');
+
     try {
-      await submitPreSale();
+      await submitPreSale({ paymentMethod });
       Alert.alert("Pre-Venta Actualizada", "Los cambios han sido guardados.", [
         { text: "OK", onPress: () => {
             allowExitRef.current = true;
@@ -72,7 +158,7 @@ export default function PreSaleEditCartScreen({ navigation }) {
         }}
       ]);
     } catch (error) {
-      Alert.alert("Error", `No se pudo guardar la pre-venta. ${error.message}`);
+      Alert.alert("Error", formatPreSaleError(error));
     }
   };
 
@@ -173,9 +259,44 @@ export default function PreSaleEditCartScreen({ navigation }) {
           />
 
           <View style={styles.summary}>
-            <View style={styles.row}><Text style={styles.label}>Subtotal</Text><Text style={styles.value}>{formatCurrency(subtotal)}</Text></View>
-            <View style={styles.row}><Text style={styles.label}>Descuentos</Text><Text style={styles.value}>-{formatCurrency(totalDiscount)}</Text></View>
+            {showSummaryBreakdown && (
+              <>
+                <View style={styles.row}><Text style={styles.label}>Subtotal</Text><Text style={styles.value}>{formatCurrency(subtotal)}</Text></View>
+                <View style={styles.row}><Text style={styles.label}>Descuentos</Text><Text style={styles.value}>-{formatCurrency(totalDiscount)}</Text></View>
+              </>
+            )}
             <View style={styles.rowTotal}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>{formatCurrency(total)}</Text></View>
+
+            {canUseCredit && (
+              <View style={localStyles.paymentRow}>
+                <View style={localStyles.creditInfo}>
+                  <Text style={localStyles.paymentLabel}>Crédito</Text>
+                  <Text style={localStyles.creditHint}>
+                    Límite: {formatCurrency(customerCreditLimit)} · Disponible: {formatCurrency(creditAvailable)}
+                  </Text>
+                  {!hasValidTotal && (
+                    <Text style={localStyles.creditWarning}>El total debe ser mayor que 0.</Text>
+                  )}
+                  {creditExceeded && (
+                    <Text style={localStyles.creditWarning}>El total supera el límite permitido.</Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={[
+                    localStyles.creditChip,
+                    isCredit && localStyles.creditChipActive,
+                    (!hasValidTotal || creditExceeded) && localStyles.creditChipDisabled,
+                  ]}
+                  onPress={() => setIsCredit((prev) => !prev)}
+                  disabled={!hasValidTotal || creditExceeded}
+                >
+                  <Icon name={isCredit ? "checkmark-circle" : "ellipse-outline"} size={14} color={isCredit ? "#fff" : "#666"} />
+                  <Text style={[localStyles.creditChipText, isCredit && localStyles.creditChipTextActive]}>
+                    {isCredit ? 'Activado' : 'Activar'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
             
             <View style={localStyles.footerButtons}>
               <TouchableOpacity style={[styles.checkoutBtn, {flex: 1, marginRight: 5, backgroundColor: '#007AFF'}]} onPress={() => setAddProductModalVisible(true)}>
@@ -206,5 +327,58 @@ export default function PreSaleEditCartScreen({ navigation }) {
 }
 
 const localStyles = StyleSheet.create({
-    footerButtons: { flexDirection: 'row', marginTop: 10 }
+    footerButtons: { flexDirection: 'row', marginTop: 10 },
+    paymentRow: {
+      marginTop: 8,
+      marginBottom: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    creditInfo: {
+      flex: 1,
+      marginRight: 8,
+    },
+    creditHint: {
+      fontSize: 11,
+      color: '#6B7280',
+      marginTop: 2,
+    },
+    creditWarning: {
+      fontSize: 11,
+      color: '#C0392B',
+      marginTop: 2,
+      fontWeight: '600',
+    },
+    paymentLabel: {
+      fontSize: 12,
+      color: '#666',
+      fontWeight: '600',
+    },
+    creditChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: '#E0E0E0',
+      backgroundColor: '#F5F6FA',
+      gap: 6,
+    },
+    creditChipActive: {
+      backgroundColor: '#007AFF',
+      borderColor: '#007AFF',
+    },
+    creditChipDisabled: {
+      opacity: 0.5,
+    },
+    creditChipText: {
+      color: '#333',
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    creditChipTextActive: {
+      color: '#fff',
+    },
 });

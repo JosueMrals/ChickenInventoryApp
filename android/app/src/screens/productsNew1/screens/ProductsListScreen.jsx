@@ -109,6 +109,12 @@ export default function ProductsListScreen({ navigation, route }) {
               />
           </View>
           <TouchableOpacity
+            onPress={() => navigation.navigate('ProductsAggregates')}
+            style={styles.summaryBtn}
+          >
+              <Icon name="stats-chart" size={22} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={() => navigation.navigate('BarcodeScanner', { onScanned: handleScan })}
             style={styles.scanBtn}
           >
@@ -237,6 +243,23 @@ const styles = StyleSheet.create({
     refreshBtnHeader: {
         padding: 8,
         marginRight: -8
+    },
+    summaryBtn: {
+        backgroundColor: '#fff',
+        padding: 10,
+        borderRadius: 12,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        shadowOffset: { width: 0, height: 2 },
+        marginTop: 10,
+        marginBottom: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: 48,
+        width: 48,
+        marginRight: 10,
     },
     scanBtn: {
         backgroundColor: '#fff',

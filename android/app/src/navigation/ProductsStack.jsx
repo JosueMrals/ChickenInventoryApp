@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // Ajusta rutas según tu proyecto
 import ProductsListScreen from '../screens/productsNew1/screens/ProductsListScreen';
+import ProductsAggregatesScreen from '../screens/productsNew1/screens/ProductsAggregatesScreen';
 import AddProductScreen from '../screens/productsNew1/screens/AddProductScreen'; // Nueva Pantalla Unificada
 import EditProductScreen from '../screens/productsNew1/screens/EditProductScreen';
 import AddStockScreen from '../screens/productsNew1/screens/AddStockScreen';
@@ -28,6 +29,14 @@ export default function ProductsStack({route}) {
         name="ProductsList"
         component={ProductsListScreen}
         initialParams={{ role }}
+      />
+
+      <Stack.Screen
+        name="ProductsAggregates"
+        component={ProductsAggregatesScreen}
+        options={{
+          title: 'Resumen de stock',
+        }}
       />
 
       {/* Pantalla Unificada de Creación */}

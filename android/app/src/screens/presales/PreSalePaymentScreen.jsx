@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, TextInput, Alert, ScrollView, ActivityInd
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "../quicksalesNew/styles/quickPaymentStyles"; // Reusing styles
 import { convertPreSaleToSale } from "../../services/preSaleService";
+import { createCreditFromPreSale } from "../credits/services/creditsService";
 
 export default function PreSalePaymentScreen({ navigation, route }) {
   const { presale } = route.params;
@@ -18,6 +19,20 @@ export default function PreSalePaymentScreen({ navigation, route }) {
   }, [amountPaid, total]);
 
   const handlePay = async () => {
+    if (paymentMethod === 'credit') {
+      setLoading(true);
+      try {
+        await createCreditFromPreSale(presale, presale?.createdBy);
+        navigation.replace("PreSaleDone", { saleId: presale.id, isCredit: true });
+      } catch (error) {
+        console.error("Failed to create credit pre-sale:", error);
+        Alert.alert("Error", "No se pudo generar el credito. Intentalo de nuevo.");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     const paid = parseFloat(amountPaid || 0);
     if (isNaN(paid) || paid <= 0 || paid < total) {
       return Alert.alert("Monto Inválido", "El monto recibido debe ser mayor o igual al total.");
@@ -33,7 +48,6 @@ export default function PreSalePaymentScreen({ navigation, route }) {
       
       const newSaleId = await convertPreSaleToSale(presale, paymentDetails);
       
-      // --- FIX: Navigate to the new PreSaleDone screen ---
       navigation.replace("PreSaleDone", { saleId: newSaleId });
 
     } catch (error) {
@@ -60,30 +74,32 @@ export default function PreSalePaymentScreen({ navigation, route }) {
         </View>
 
         <View style={styles.methodsGrid}>
-          {["cash", "card"].map((m) => (
+          {["cash", "card", "credit"].map((m) => (
             <TouchableOpacity
               key={m}
               style={[styles.methodBox, paymentMethod === m && styles.methodBoxActive]}
               onPress={() => setPaymentMethod(m)}
             >
-              <Icon name={m === 'cash' ? 'cash-outline' : 'card-outline'} size={26} color={paymentMethod === m ? "#007AFF" : "#333"} />
+              <Icon name={m === 'cash' ? 'cash-outline' : m === 'card' ? 'card-outline' : 'cash-outline'} size={26} color={paymentMethod === m ? "#007AFF" : "#333"} />
               <Text style={[styles.methodText, paymentMethod === m && styles.methodTextActive]}>
-                {m === 'cash' ? 'Efectivo' : 'Tarjeta'}
+                {m === 'cash' ? 'Efectivo' : m === 'card' ? 'Tarjeta' : 'Crédito'}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        <View style={styles.payInputBox}>
-          <Text style={styles.payInputLabel}>Monto recibido</Text>
-          <TextInput
-            style={styles.payInput}
-            keyboardType="numeric"
-            placeholder="0.00"
-            value={amountPaid}
-            onChangeText={setAmountPaid}
-          />
-        </View>
+        {paymentMethod !== 'credit' && (
+          <View style={styles.payInputBox}>
+            <Text style={styles.payInputLabel}>Monto recibido</Text>
+            <TextInput
+              style={styles.payInput}
+              keyboardType="numeric"
+              placeholder="0.00"
+              value={amountPaid}
+              onChangeText={setAmountPaid}
+            />
+          </View>
+        )}
 
         {change > 0 && (
           <View style={styles.changeBox}>

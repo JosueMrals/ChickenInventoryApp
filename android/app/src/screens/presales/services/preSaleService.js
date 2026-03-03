@@ -3,17 +3,13 @@ import auth from "@react-native-firebase/auth";
 import { buildCustomerName } from "../../../utils/customerUtils";
 
 async function getNextPreSaleNumber() {
-  const ref = firestore().collection("counters").doc("presales");
+  const ref = firestore().collection("counters").doc("preSaleCounter");
 
   return await firestore().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
 
-    let next = 1;
-    if (snap.exists && snap.data()?.lastNumber) {
-      next = snap.data().lastNumber + 1;
-    }
-
-    tx.set(ref, { lastNumber: next }, { merge: true });
+    const next = (snap.data()?.currentNumber || 0) + 1;
+    tx.set(ref, { currentNumber: next }, { merge: true });
 
     return String(next).padStart(6, "0");
   });

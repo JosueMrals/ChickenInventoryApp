@@ -3,10 +3,10 @@ import { StyleSheet } from "react-native";
 export default StyleSheet.create({
   card: {
     flexDirection: "row",
-    padding: 14,
+    padding: 10,
     backgroundColor: "#fff",
     borderRadius: 12,
-    marginBottom: 10,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#EAECEE',
     elevation: 1,
@@ -42,61 +42,74 @@ export default StyleSheet.create({
   },
 
   title: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "bold",
     color: "#2C3E50",
+    flexShrink: 1,
+    marginRight: 8,
+  },
+
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
   },
 
   subtitle: {
-    fontSize: 14,
+    fontSize: 12,
     color: "#7F8C8D",
-    marginTop: 4,
+    marginTop: 0,
   },
 
   discountText: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#E74C3C',
     fontStyle: 'italic',
     marginTop: 4,
   },
 
   totalText: {
-    fontSize: 18,
-    fontWeight: "bold",
+    fontSize: 14,
+    fontWeight: "800",
     color: "#2980B9",
-    marginTop: 8,
   },
 
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 10,
+    marginLeft: 6,
   },
   
   quantityDisplay: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#34495E',
-    minWidth: 40,
+    minWidth: 34,
     textAlign: 'center',
-    paddingVertical: 5,
+    paddingVertical: 4,
   },
 
   quantityInput: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#34495E',
-    minWidth: 40,
+    minWidth: 34,
     textAlign: 'center',
     borderBottomWidth: 2,
     borderColor: '#007AFF',
-    paddingVertical: 5,
-    marginHorizontal: 5,
+    paddingVertical: 4,
+    marginHorizontal: 4,
   },
 
   btn: {
-    padding: 8,
-    borderRadius: 20,
+    padding: 6,
+    borderRadius: 18,
     marginHorizontal: 2,
   },
 });

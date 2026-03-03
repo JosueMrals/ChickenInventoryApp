@@ -8,6 +8,7 @@ import { resolveCustomerName } from '../../../utils/customerUtils';
 export default function DeliveryPaymentScreen({ navigation, route }) {
   const { delivery } = route.params;
   const total = delivery.total || 0;
+  const isCredit = delivery.paymentMethod === 'credit' || String(delivery.status || '').startsWith('credit_');
 
   const [amountPaid, setAmountPaid] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,27 +45,42 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
     return Math.max(paid - total, 0);
   }, [amountPaid, total]);
 
+  const remaining = useMemo(() => {
+    const paid = parseFloat(amountPaid || 0);
+    const diff = Math.max(total - paid, 0);
+    return isCredit ? diff : 0;
+  }, [amountPaid, total, isCredit]);
+
+  const totalItems = useMemo(() => {
+    const items = delivery.items || [];
+    const bonuses = delivery.bonuses || [];
+    return [...items, ...bonuses].reduce((acc, curr) => acc + (Number(curr.quantity) || 0), 0);
+  }, [delivery.items, delivery.bonuses]);
+
   const handleConfirmPayment = async () => {
     const paid = parseFloat(amountPaid || 0);
 
-    if (isNaN(paid) || paid <= 0) {
-      return Alert.alert("Monto inválido", "Ingresa un monto válido.");
-    }
-
-    if (paid < total) {
-      return Alert.alert("Pago incompleto", `El monto es menor que el total ($${total.toFixed(2)}).`);
+    if (!isCredit) {
+      if (isNaN(paid) || paid <= 0) {
+        return Alert.alert("Monto inválido", "Ingresa un monto válido.");
+      }
+      if (paid < total) {
+        return Alert.alert("Pago incompleto", `El monto es menor que el total ($${total.toFixed(2)}).`);
+      }
+    } else if (!isNaN(paid) && paid < 0) {
+      return Alert.alert("Monto inválido", "El monto no puede ser negativo.");
     }
 
     setLoading(true);
     try {
-        await completePreSalePayment(delivery.id);
+        await completePreSalePayment(delivery.id, isNaN(paid) ? 0 : paid);
 
         // Pass data to Done screen for ticket generation
         const completedSale = {
             ...delivery,
-            amountPaid: paid,
+            amountPaid: isNaN(paid) ? 0 : paid,
             change: change,
-            fechaPago: new Date(), // Local approx until refetch
+            fechaPago: isCredit && paid < total ? null : new Date(), // Local approx until refetch
         };
 
         navigation.replace('DeliveryDone', { sale: completedSale });
@@ -81,22 +97,60 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.title}> cobrar Entrega</Text>
+        <Text style={styles.title}>Cobrar entrega</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
 
         <View style={styles.summaryCard}>
-            <Text style={styles.customerName}>{customerName}</Text>
+            <View style={styles.summaryHeader}>
+              <View style={{flex: 1}}>
+                <Text style={styles.customerName}>{customerName}</Text>
+                <Text style={styles.metaText}>#{delivery.id?.substring(0, 6).toUpperCase()} · {totalItems} items</Text>
+              </View>
+              {isCredit && (
+                <View style={styles.creditBadge}>
+                  <Text style={styles.creditBadgeText}>Crédito</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.address}>{delivery.address || 'Sin dirección'}</Text>
+            {!!delivery.phone && <Text style={styles.phoneText}>Tel: {delivery.phone}</Text>}
             <View style={styles.divider} />
             <View style={styles.row}>
                 <Text style={styles.label}>Total a Cobrar:</Text>
                 <Text style={styles.totalValue}>${total.toFixed(2)}</Text>
             </View>
+            {isCredit && (
+              <View style={styles.rowSubtle}>
+                <Text style={styles.subLabel}>Pendiente:</Text>
+                <Text style={styles.subValue}>${remaining.toFixed(2)}</Text>
+              </View>
+            )}
         </View>
 
-        <Text style={styles.sectionTitle}>Método de Pago: Efectivo</Text>
+        <Text style={styles.sectionTitle}>Detalle de productos</Text>
+        <View style={styles.itemsCard}>
+          {(delivery.items || []).map((item, index) => (
+            <View key={`item-${index}`} style={styles.itemRow}>
+              <Text style={styles.itemName}>{item.productName || item.name}</Text>
+              <Text style={styles.itemQty}>{item.quantity}x</Text>
+              <Text style={styles.itemTotal}>${(item.total || (item.unitPrice * item.quantity)).toFixed(2)}</Text>
+            </View>
+          ))}
+          {(delivery.bonuses || []).map((item, index) => (
+            <View key={`bonus-${index}`} style={styles.itemRow}>
+              <Text style={styles.itemName}>{item.productName || item.name}</Text>
+              <Text style={styles.itemQty}>{item.quantity}x</Text>
+              <Text style={styles.itemBonus}>Regalo</Text>
+            </View>
+          ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>Pago</Text>
+        <Text style={styles.paymentHint}>
+          {isCredit ? 'Pago opcional. Puedes registrar un abono parcial.' : 'Pago requerido antes de entregar.'}
+        </Text>
 
         <View style={styles.inputContainer}>
             <Text style={styles.currencySymbol}>$</Text>
@@ -111,7 +165,7 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
         </View>
 
         <View style={styles.changeContainer}>
-            <Text style={styles.changeLabel}>Cambio a devolver:</Text>
+            <Text style={styles.changeLabel}>{isCredit ? 'Cambio / Abono:' : 'Cambio a devolver:'}</Text>
             <Text style={[styles.changeValue, { color: change > 0 ? '#E65100' : '#888' }]}>
                 ${change.toFixed(2)}
             </Text>
@@ -165,86 +219,134 @@ const styles = StyleSheet.create({
   summaryCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 20,
-    elevation: 3,
-    marginBottom: 30,
+    padding: 16,
+    elevation: 2,
+    marginBottom: 14,
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
   },
   customerName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 5,
+    color: '#111827',
+    marginBottom: 2,
+  },
+  metaText: {
+    fontSize: 11,
+    color: '#6B7280',
+  },
+  creditBadge: {
+    backgroundColor: '#111827',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  creditBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   address: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 15,
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  phoneText: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 10,
   },
   divider: {
     height: 1,
     backgroundColor: '#eee',
-    marginBottom: 15,
+    marginBottom: 12,
   },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  rowSubtle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+  },
   label: {
-    fontSize: 16,
+    fontSize: 13,
     color: '#555',
   },
+  subLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  subValue: {
+    fontSize: 12,
+    color: '#111827',
+    fontWeight: '600',
+  },
   totalValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#2DCE89',
   },
   sectionTitle: {
-      fontSize: 16,
-      fontWeight: '600',
+      fontSize: 14,
+      fontWeight: '700',
       color: '#333',
-      marginBottom: 10,
+      marginBottom: 6,
+      marginTop: 6,
   },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  paymentHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  itemsCard: {
     backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    marginBottom: 20,
-    height: 60,
+    borderColor: '#F1F2F6',
   },
-  currencySymbol: {
-    fontSize: 24,
-    color: '#333',
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    fontSize: 24,
-    color: '#333',
-    padding: 0,
-  },
-  changeContainer: {
+  itemRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#FFF3E0',
-    padding: 15,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#FFE0B2',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F2F6',
   },
-  changeLabel: {
-    fontSize: 16,
-    color: '#E65100',
-    fontWeight: '500',
+  itemName: {
+    flex: 1,
+    fontSize: 12,
+    color: '#111827',
+    marginRight: 8,
   },
-  changeValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  itemQty: {
+    fontSize: 12,
+    color: '#6B7280',
+    width: 36,
+    textAlign: 'right',
+  },
+  itemTotal: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#111827',
+    width: 80,
+    textAlign: 'right',
+  },
+  itemBonus: {
+    fontSize: 11,
+    color: '#0F766E',
+    fontWeight: '600',
+    width: 80,
+    textAlign: 'right',
   },
   footer: {
     padding: 20,
@@ -255,18 +357,59 @@ const styles = StyleSheet.create({
   payButton: {
     backgroundColor: '#2DCE89',
     borderRadius: 12,
-    height: 56,
+    height: 52,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
+    elevation: 2,
   },
   disabledButton: {
       opacity: 0.7,
   },
   payButtonText: {
     color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    height: 52,
+  },
+  currencySymbol: {
     fontSize: 18,
+    color: '#333',
+    marginRight: 8,
+  },
+  input: {
+    flex: 1,
+    fontSize: 18,
+    color: '#333',
+    padding: 0,
+  },
+  changeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#FFF3E0',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFE0B2',
+  },
+  changeLabel: {
+    fontSize: 13,
+    color: '#E65100',
+    fontWeight: '500',
+  },
+  changeValue: {
+    fontSize: 16,
     fontWeight: 'bold',
   },
 });

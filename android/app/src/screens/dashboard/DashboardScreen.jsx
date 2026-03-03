@@ -59,10 +59,10 @@ export default function DashboardScreen({ user, role }) {
   const getModulesConfig = () => {
     const allModules = [
       { key: 'products-new',label: 'Inventario', icon: 'cube-outline', color: '#007AFF', screen: 'ProductsStack', roles: ['admin', 'vendedor', 'bodeguero'] },
-      { key: 'quick-sale', label: 'Venta Rápida', icon: 'flash-outline', color: '#FF9500', screen: 'QuickSales', roles: ['admin', 'vendedor'] },
+      { key: 'quick-sale', label: 'Venta Rápida', icon: 'flash-outline', color: '#FF9500', screen: 'QuickSales', roles: ['admin'] },
       { key: 'pre-sale', label: 'Pre-Venta', icon: 'cart-outline', color: '#4CAF50', screen: 'PreSales', roles: ['admin', 'vendedor'] },
       { key: 'customers', label: 'Clientes', icon: 'person-sharp', color: '#FF9500', screen: 'Customer', roles: ['admin', 'vendedor'] },
-      { key: 'credits', label: 'Créditos', icon: 'card-outline', color: '#FF3B30', screen: 'Credits', roles: ['admin', 'vendedor'] },
+      { key: 'credits', label: 'Créditos', icon: 'card-outline', color: '#FF3B30', screen: 'Credits', roles: ['admin', 'vendedor','entregador'] },
       { key: 'reports', label: 'Reportes', icon: 'bar-chart-outline', color: '#5856D6', screen: 'Reports', roles: ['admin'] },
       { key: 'users', label: 'Usuarios', icon: 'people-outline', color: '#34C759', screen: 'Register', roles: ['admin'] },
       { key: 'settings', label: 'Configuración', icon: 'settings-outline', color: '#8E8E93', screen: 'Settings', roles: ['admin','entregador'] },
@@ -96,7 +96,8 @@ export default function DashboardScreen({ user, role }) {
         break;
       case 'entregador':
         layout = [
-            [{ key: 'my-deliveries', size: 1 }, { key: 'settings', size: 1 }],
+            [{ key: 'my-deliveries', size: 1 } ],
+			[{ key: 'credits', size: 1 }, { key: 'settings', size: 1 } ],
         ];
         break;
       default:

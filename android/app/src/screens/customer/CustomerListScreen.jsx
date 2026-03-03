@@ -1,22 +1,24 @@
 // screen/customer/CustomerListScreen.jsx
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, SafeAreaView, TouchableOpacity } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import Icon from "react-native-vector-icons/Ionicons";
 import CustomerCard from './components/CustomerCard';
 import CustomerFab from './components/CustomerFab';
-import CustomerFormModal from './CustomerFormModal';
 import { useCustomers } from './hooks/useCustomers';
 import styles from './styles/styles';
+import SearchBar from '../../components/SearchBar';
+import globalStyles from '../../styles/globalStyles';
 
 export default function CustomerListScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  const role = route?.params?.role ?? 'user';
+  const role = route?.params?.role ?? 'vendedor';
 
   const { customers, loading, create, update, remove } = useCustomers();
   const [search, setSearch] = useState('');
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState(null);
+  // const [modalVisible, setModalVisible] = useState(false);
+  // const [editingCustomer, setEditingCustomer] = useState(null);
 
   // Debug: imprimir customers cada vez que cambian
   useEffect(() => {
@@ -36,6 +38,10 @@ export default function CustomerListScreen() {
       });
     };
 
+    const goToCustomerForm = (customerToEdit) => {
+      navigation.navigate('CustomerForm', { customer: customerToEdit, role });
+    };
+
 
   if (loading) {
     return (
@@ -47,10 +53,21 @@ export default function CustomerListScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>Clientes</Text>
+    <SafeAreaView style={globalStyles.container}>
 
-      <TextInput style={styles.search} placeholder="Buscar cliente..." value={search} onChangeText={setSearch} />
+      <View style={globalStyles.header}>
+	  	<TouchableOpacity onPress={() => navigation.goBack()}>
+		  <Icon name="chevron-back" size={26} color="#fff" />
+		</TouchableOpacity>
+        <Text style={globalStyles.title}>Clientes</Text>
+      </View>
+
+      <SearchBar
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Buscar cliente..."
+        onClear={() => setSearch('')}
+      />
 
       {(!customers || customers.length === 0) ? (
         <View style={{ padding: 20, alignItems: 'center' }}>
@@ -69,34 +86,25 @@ export default function CustomerListScreen() {
             <CustomerCard
               customer={item}
               role={role}
-              onEdit={(c) => {
-                setEditingCustomer(c);
-                setModalVisible(true);
-              }}
+              onEdit={(c) => goToCustomerForm(c)}
               onViewHistory={(c) =>
                 navigation.navigate('CustomerDetail', { customerId: c.id, role })
               }
               onCreateSale={goToSaleRegister}
             />
           )}
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={12}
+          windowSize={10}
+          removeClippedSubviews={true}
         />
       )}
 
       <CustomerFab
-        visible={role === 'admin' || role === 'user'}
-        onPress={() => {
-          setEditingCustomer(null);
-          setModalVisible(true);
-        }}
+        visible={role === 'admin' || role === 'vendedor'}
+        onPress={() => goToCustomerForm(null)}
       />
-
-      <CustomerFormModal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        customer={editingCustomer}
-        role={role}
-      />
-    </View>
+    </SafeAreaView>
   );
 }
