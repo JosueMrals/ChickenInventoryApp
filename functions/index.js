@@ -166,44 +166,6 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
             throw new functions.https.HttpsError('failed-precondition', 'Pago incompleto');
         }
 
-        const items = Array.isArray(pData.items) ? pData.items : [];
-
-        // --- Lecturas previas (antes de escribir) ---
-        const productRefs = items.map(item => db.collection('products').doc(item.productId));
-        const productDocs = await Promise.all(productRefs.map(ref => t.get(ref)));
-        const productById = new Map(productDocs.map(docSnap => [docSnap.id, docSnap]));
-
-        const bonusesToApply = {};
-        items.forEach(item => {
-            const prodSnap = productById.get(item.productId);
-            if (!prodSnap || !prodSnap.exists) return;
-            const prodData = prodSnap.data();
-            const bonuses = prodData.bonuses || (prodData.bonus ? [prodData.bonus] : []);
-            if (!Array.isArray(bonuses) || bonuses.length === 0) return;
-
-            for (const b of bonuses) {
-                if (!b || !b.enabled) continue;
-                const threshold = Number(b.threshold) || 0;
-                const giveQty = Number(b.bonusQuantity) || 0;
-                if (threshold <= 0 || giveQty <= 0) continue;
-
-                const times = Math.floor(Number(item.quantity) / threshold);
-                if (times <= 0) continue;
-
-                const totalAward = times * giveQty;
-                const bonusProdId = b.bonusProductId;
-                if (!bonusProdId) continue;
-
-                if (!bonusesToApply[bonusProdId]) bonusesToApply[bonusProdId] = 0;
-                bonusesToApply[bonusProdId] += totalAward;
-            }
-        });
-
-        const bonusProductIds = Object.keys(bonusesToApply);
-        const bonusRefs = bonusProductIds.map(id => db.collection('products').doc(id));
-        const bonusDocs = await Promise.all(bonusRefs.map(ref => t.get(ref)));
-        const bonusById = new Map(bonusDocs.map(docSnap => [docSnap.id, docSnap]));
-
         let nextStatus = 'paid';
         let creditId = pData.creditId || null;
         let creditRef = null;
@@ -225,7 +187,6 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
             }
         }
 
-        // --- Escrituras ---
         if (isCredit) {
             const applyAmount = Math.min(paidAmount, total);
 
@@ -284,6 +245,10 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             amountPaid: paidAmount,
             change: Math.max(paidAmount - total, 0),
+            // El inventario se descuenta al crear/editar la pre-venta, no al entregar.
+            inventoryDeducted: true,
+            inventoryDeductedAt: pData.inventoryDeductedAt || admin.firestore.FieldValue.serverTimestamp(),
+            inventoryDeductedBy: pData.inventoryDeductedBy || (pData.createdBy || userEmail),
         };
 
         if (nextStatus === 'paid') {
@@ -291,36 +256,6 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
         }
 
         t.update(preSaleRef, preSaleUpdate);
-
-        const shouldDeductInventory = !pData.inventoryDeducted;
-
-        if (shouldDeductInventory) {
-            // Decrementar stock por cada item vendido
-            items.forEach(item => {
-                const pRef = db.collection('products').doc(item.productId);
-                t.update(pRef, { stock: admin.firestore.FieldValue.increment(-item.quantity) });
-            });
-        }
-
-        const awarded = [];
-        for (const bonusProdId of bonusProductIds) {
-            const intendedQty = bonusesToApply[bonusProdId];
-            const bSnap = bonusById.get(bonusProdId);
-            const currentStock = bSnap && bSnap.exists ? Number(bSnap.data().stock || 0) : 0;
-            const givenQty = Math.min(currentStock, intendedQty);
-
-            if (shouldDeductInventory && givenQty > 0) {
-                const newStock = currentStock - givenQty;
-                const bRef = db.collection('products').doc(bonusProdId);
-                t.update(bRef, { stock: newStock, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
-            }
-
-            awarded.push({ productId: bonusProdId, quantity: givenQty });
-        }
-
-        if (awarded.length > 0) {
-            t.update(preSaleRef, { bonusesAwarded: awarded });
-        }
     });
     return { success: true };
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  Modal,
 } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
@@ -20,6 +21,17 @@ import globalStyles from '../../../styles/globalStyles';
 import productsService from '../services/productsService';
 import { createProductOperation } from '../../../services/operations/productOperations';
 import BonusSetup from '../components/BonusSetup';
+import { normalizeCategory } from '../constants/productCategories';
+import { useProductCategories } from '../hooks/useProductCategories';
+import { buildCreateChanges } from '../utils/operationChanges';
+
+const PLACEHOLDER_COLOR = '#9CA3AF';
+
+function isPermissionDeniedError(err) {
+  const code = String(err?.code || '').toLowerCase();
+  const message = String(err?.message || '').toLowerCase();
+  return code.includes('permission-denied') || message.includes('permission-denied');
+}
 
 export default function AddProductScreen() {
   const navigation = useNavigation();
@@ -32,6 +44,7 @@ export default function AddProductScreen() {
   const [values, setValues] = useState({
     name: '',
     barcode: '',
+    category: '',
     description: '',
     purchasePrice: '',
     profitMargin: '',
@@ -49,6 +62,19 @@ export default function AddProductScreen() {
   const scrollRef = useRef(null);
   const inputsRef = useRef({});
   const assignRef = (field) => (r) => { inputsRef.current[field] = r; };
+
+  const { categoryRows, categories, addCategory, removeCategory, loading: categoriesLoading } = useProductCategories();
+
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [categoryBusy, setCategoryBusy] = useState(false);
+
+  const categoryOptions = useMemo(() => {
+    const merged = new Set(categories);
+    const current = normalizeCategory(values.category);
+    if (current) merged.add(current);
+    return Array.from(merged).sort((a, b) => a.localeCompare(b));
+  }, [categories, values.category]);
 
   useEffect(() => {
     if (scannedCode) {
@@ -202,6 +228,7 @@ export default function AddProductScreen() {
       const payload = {
         name: values.name,
         barcode: values.barcode,
+        category: normalizeCategory(values.category),
         description: values.description || '',
         purchasePrice: values.purchasePrice ? Number(values.purchasePrice) : 0,
         profitMargin: values.profitMargin ? Number(values.profitMargin) : 0,
@@ -219,13 +246,18 @@ export default function AddProductScreen() {
       }
 
       const newProductId = await productsService.createProduct(payload);
-      
+
+      const createChanges = buildCreateChanges(payload);
       await createProductOperation({
         productId: newProductId,
         productName: values.name,
         operationType: 'create',
         userEmail: currentUser.email,
-        details: { description: `Producto creado con stock inicial de ${initialStock}.`, initialStock: initialStock, ...payload }
+        category: normalizeCategory(values.category),
+        details: {
+          description: `Producto creado correctamente.`,
+          changes: createChanges,
+        },
       });
 
       initialRef.current = JSON.stringify(values);
@@ -266,6 +298,55 @@ export default function AddProductScreen() {
     setValues(prev => ({ ...prev, bonuses: newBonusesArray }));
   };
 
+  async function handleAddCategory() {
+    const categoryName = normalizeCategory(newCategoryName);
+    if (!categoryName) {
+      Alert.alert('Validacion', 'Ingresa un nombre de categoria.');
+      return;
+    }
+
+    setCategoryBusy(true);
+    try {
+      await addCategory(categoryName);
+      setField('category', categoryName);
+      setNewCategoryName('');
+    } catch (err) {
+      console.error('handleAddCategory error:', err);
+      if (isPermissionDeniedError(err)) {
+        Alert.alert('Permisos', 'Tu usuario no tiene permisos para agregar categorias.');
+      } else {
+        Alert.alert('Error', 'No se pudo agregar la categoria.');
+      }
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
+  async function handleDeleteCategory(row) {
+    if (!row?.id) return;
+    Alert.alert('Eliminar categoria', `Se eliminara "${row.name}" de la lista.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setCategoryBusy(true);
+            await removeCategory(row.id);
+            if (normalizeCategory(values.category) === normalizeCategory(row.name)) {
+              setField('category', '');
+            }
+          } catch (err) {
+            console.error('handleDeleteCategory error:', err);
+            Alert.alert('Error', 'No se pudo eliminar la categoria.');
+          } finally {
+            setCategoryBusy(false);
+          }
+        },
+      },
+    ]);
+  }
+
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
         <View style={globalStyles.header}>
@@ -273,16 +354,46 @@ export default function AddProductScreen() {
 			<Text style={globalStyles.title}>Nuevo Producto</Text>
             <View style={{width: 26}} />
 		</View>
-      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 10 }} keyboardShouldPersistTaps="handled">
           <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Información Básica</Text>
+              <Text style={styles.sectionTitle}>Informacion Basica</Text>
               <Text style={styles.label}>Nombre del producto *</Text>
-              <TextInput ref={assignRef('name')} style={styles.input} value={values.name} onChangeText={t => setField('name', t)} placeholder="Ej. Pechuga de Pollo" />
+              <TextInput ref={assignRef('name')} style={styles.input} value={values.name} onChangeText={t => setField('name', t)} placeholder="Ej. Pechuga de Pollo" placeholderTextColor={PLACEHOLDER_COLOR} />
+
+              <View style={styles.categoryHeaderRow}>
+                <Text style={styles.label}>Categoria</Text>
+                <TouchableOpacity onPress={() => setCategoryModalVisible(true)}>
+                  <Text style={styles.manageCategoryLink}>Gestionar</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.categoryWrap}>
+                {categoryOptions.map((categoryOption) => {
+                  const active = values.category === categoryOption;
+                  return (
+                    <TouchableOpacity
+                      key={categoryOption}
+                      style={[styles.categoryChip, active && styles.categoryChipActive]}
+                      onPress={() => setField('category', categoryOption)}
+                    >
+                      <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>{categoryOption}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <TextInput
+                ref={assignRef('category')}
+                style={styles.input}
+                value={values.category}
+                onChangeText={t => setField('category', t)}
+                placeholder="Ej. Pollo"
+                placeholderTextColor={PLACEHOLDER_COLOR}
+              />
+
               <View style={styles.rowInputs}>
                   <View style={{ flex: 1, marginRight: 8 }}>
                       <Text style={styles.label}>Código de barras</Text>
                       <View style={styles.inputWithIconContainer}>
-                          <TextInput ref={assignRef('barcode')} style={[styles.inputNoBorder, {flex: 1}]} value={values.barcode} onChangeText={t => setField('barcode', t)} placeholder="Escanea o escribe" />
+                          <TextInput ref={assignRef('barcode')} style={[styles.inputNoBorder, {flex: 1}]} value={values.barcode} onChangeText={t => setField('barcode', t)} placeholder="Escanea o escribe" placeholderTextColor={PLACEHOLDER_COLOR} />
                           <TouchableOpacity onPress={() => navigation.navigate('BarcodeScanner', { onScanned: (code) => setField('barcode', code) })} style={styles.iconButton}>
                              <Icon name="scan" size={20} color="#666" />
                           </TouchableOpacity>
@@ -301,26 +412,26 @@ export default function AddProductScreen() {
                   </View>
               </View>
               <Text style={styles.label}>Stock Inicial</Text>
-              <TextInput ref={assignRef('initialStock')} style={styles.input} keyboardType="numeric" value={values.initialStock} onChangeText={t => setField('initialStock', t)} placeholder="Cantidad inicial (opcional)" />
+              <TextInput ref={assignRef('initialStock')} style={styles.input} keyboardType="numeric" value={values.initialStock} onChangeText={t => setField('initialStock', t)} placeholder="Cantidad inicial (opcional)" placeholderTextColor={PLACEHOLDER_COLOR} />
               <Text style={styles.label}>Descripción</Text>
-              <TextInput ref={assignRef('description')} style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={values.description} onChangeText={t => setField('description', t)} placeholder="Opcional" />
+              <TextInput ref={assignRef('description')} style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={values.description} onChangeText={t => setField('description', t)} placeholder="Opcional" placeholderTextColor={PLACEHOLDER_COLOR} />
           </View>
           
           <View style={styles.section}>
              <Text style={styles.sectionTitle}>Precios y Costos</Text>
              <Text style={styles.label}>Costo de Compra ($)</Text>
-             <TextInput ref={assignRef('purchasePrice')} style={styles.input} keyboardType="numeric" value={values.purchasePrice} onChangeText={t => handlePriceChange('purchasePrice', t)} placeholder="0.00" />
+             <TextInput ref={assignRef('purchasePrice')} style={styles.input} keyboardType="numeric" value={values.purchasePrice} onChangeText={t => handlePriceChange('purchasePrice', t)} placeholder="0.00" placeholderTextColor={PLACEHOLDER_COLOR} />
              <View style={styles.rowInputs}>
                  <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={styles.label}>Margen (%)</Text>
                     <View style={styles.percentInputContainer}>
-                        <TextInput ref={assignRef('profitMargin')} style={styles.percentInput} keyboardType="numeric" value={values.profitMargin} onChangeText={t => handlePriceChange('profitMargin', t)} placeholder="0" />
+                        <TextInput ref={assignRef('profitMargin')} style={styles.percentInput} keyboardType="numeric" value={values.profitMargin} onChangeText={t => handlePriceChange('profitMargin', t)} placeholder="0" placeholderTextColor={PLACEHOLDER_COLOR} />
                         <Text style={styles.percentSymbol}>%</Text>
                     </View>
                  </View>
                  <View style={{ flex: 1, marginLeft: 8 }}>
                     <Text style={styles.label}>Precio Venta ($)</Text>
-                    <TextInput ref={assignRef('salePrice')} style={[styles.input, { fontWeight: 'bold', color: '#007AFF' }]} keyboardType="numeric" value={values.salePrice} onChangeText={t => handlePriceChange('salePrice', t)} placeholder="0.00" />
+                    <TextInput ref={assignRef('salePrice')} style={[styles.input, { fontWeight: 'bold', color: '#007AFF' }]} keyboardType="numeric" value={values.salePrice} onChangeText={t => handlePriceChange('salePrice', t)} placeholder="0.00" placeholderTextColor={PLACEHOLDER_COLOR} />
                  </View>
              </View>
           </View>
@@ -340,9 +451,9 @@ export default function AddProductScreen() {
             {values.wholesalePrices.map((wp, index) => (
               <View key={index} style={styles.wholesaleRow}>
                 <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
-                    <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.subLabel}>Cant. Mín.</Text><TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="10" value={String(wp.quantity)} onChangeText={t => updateWholesalePrice(index, 'quantity', t)} /></View>
-                    <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.subLabel}>Margen %</Text><TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="%" value={String(wp.margin)} onChangeText={t => updateWholesalePrice(index, 'margin', t)} /></View>
-                    <View style={{ flex: 1, marginRight: 4 }}><Text style={styles.subLabel}>Precio $</Text><TextInput style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]} keyboardType="numeric" placeholder="$" value={String(wp.price)} onChangeText={t => updateWholesalePrice(index, 'price', t)} /></View>
+                    <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.subLabel}>Cant. Mín.</Text><TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="10" placeholderTextColor={PLACEHOLDER_COLOR} value={String(wp.quantity)} onChangeText={t => updateWholesalePrice(index, 'quantity', t)} /></View>
+                    <View style={{ flex: 1, marginRight: 8 }}><Text style={styles.subLabel}>Margen %</Text><TextInput style={styles.inputSmall} keyboardType="numeric" placeholder="%" placeholderTextColor={PLACEHOLDER_COLOR} value={String(wp.margin)} onChangeText={t => updateWholesalePrice(index, 'margin', t)} /></View>
+                    <View style={{ flex: 1, marginRight: 4 }}><Text style={styles.subLabel}>Precio $</Text><TextInput style={[styles.inputSmall, { color: '#007AFF', fontWeight: '700' }]} keyboardType="numeric" placeholder="$" placeholderTextColor={PLACEHOLDER_COLOR} value={String(wp.price)} onChangeText={t => updateWholesalePrice(index, 'price', t)} /></View>
                     <TouchableOpacity onPress={() => removeWholesalePrice(index)} style={styles.deleteButton}><Icon name="trash-outline" size={20} color="#FF3B30" /></TouchableOpacity>
                 </View>
               </View>
@@ -350,6 +461,50 @@ export default function AddProductScreen() {
             {values.wholesalePrices.length === 0 && (<Text style={styles.emptyText}>Sin precios por volumen.</Text>)}
           </View>
       </ScrollView>
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={categoryModalVisible}
+        onRequestClose={() => setCategoryModalVisible(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCategoryModalVisible(false)}>
+          <TouchableOpacity style={styles.categoryModal} activeOpacity={1} onPress={() => {}}>
+            <Text style={styles.categoryModalTitle}>Categorias</Text>
+
+            <View style={styles.categoryAddRow}>
+              <TextInput
+                style={styles.categoryAddInput}
+                value={newCategoryName}
+                onChangeText={setNewCategoryName}
+                placeholder="Ej. Congelados"
+                placeholderTextColor={PLACEHOLDER_COLOR}
+              />
+              <TouchableOpacity style={styles.categoryAddBtn} onPress={handleAddCategory} disabled={categoryBusy}>
+                {categoryBusy ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="add" size={18} color="#fff" />}
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 280 }} keyboardShouldPersistTaps="handled">
+              {categoriesLoading ? (
+                <ActivityIndicator style={{ marginTop: 12 }} />
+              ) : (
+                categoryRows.map((row) => (
+                  <View key={row.id} style={styles.categoryListItem}>
+                    <TouchableOpacity style={{ flex: 1 }} onPress={() => { setField('category', row.name); setCategoryModalVisible(false); }}>
+                      <Text style={styles.categoryListText}>{row.name}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDeleteCategory(row)} style={styles.categoryDeleteBtn}>
+                      <Icon name="trash-outline" size={18} color="#FF3B30" />
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <View style={styles.bottomContainer}>
           <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={handleSave} disabled={saving}>
               {saving ? (<ActivityIndicator color="#fff" />) : (<><Icon name="save-outline" size={22} color="#fff" style={{marginRight: 8}} /><Text style={styles.saveBtnText}>Guardar Producto</Text></>)}
@@ -378,6 +533,18 @@ const styles = StyleSheet.create({
   toggleBtnActive: { backgroundColor: '#fff', elevation: 2 },
   toggleText: { fontSize: 13, color: '#888', fontWeight: '600' },
   toggleTextActive: { color: '#007AFF', fontWeight: '700' },
+  categoryWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10, marginTop: 2 },
+  categoryChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#F1F4F8',
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  categoryChipActive: { backgroundColor: '#007AFF' },
+  categoryChipText: { color: '#51606F', fontWeight: '600', fontSize: 12 },
+  categoryChipTextActive: { color: '#fff' },
   addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#007AFF', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
   addBtnText: { color: '#fff', fontSize: 12, fontWeight: '700', marginLeft: 4 },
   wholesaleRow: { marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
@@ -386,5 +553,16 @@ const styles = StyleSheet.create({
   bottomContainer: { padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#eee', paddingBottom: Platform.OS === 'ios' ? 30 : 16 },
   saveBtn: { backgroundColor: '#007AFF', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 4, shadowColor: '#007AFF', shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 3 } },
   saveBtnDisabled: { backgroundColor: '#A0A0A0', elevation: 0 },
-  saveBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' }
+  saveBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  categoryHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  manageCategoryLink: { color: '#007AFF', fontWeight: '700', marginBottom: 8 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
+  categoryModal: { backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 16, maxHeight: '70%' },
+  categoryModalTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 12 },
+  categoryAddRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  categoryAddInput: { flex: 1, backgroundColor: '#F5F6FA', borderRadius: 10, borderWidth: 1, borderColor: '#E8E8E8', paddingHorizontal: 12, paddingVertical: 10, marginRight: 8 },
+  categoryAddBtn: { width: 42, height: 42, borderRadius: 10, backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center' },
+  categoryListItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  categoryListText: { fontSize: 14, color: '#263238', fontWeight: '600' },
+  categoryDeleteBtn: { padding: 6 },
 });

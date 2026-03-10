@@ -10,6 +10,7 @@ export default function CreditPaymentModal({
   onChangeAmount,
   onConfirm,
   onCancel,
+  submitting = false,
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade">
@@ -20,7 +21,7 @@ export default function CreditPaymentModal({
           <Animated.View style={[styles.modalContent, { transform: [{ scale: animValue }] }]}>
             <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 10 }}>Registrar Abono</Text>
             <Text style={{ color: '#007AFF', marginBottom: 8 }}>
-              Pendiente: C${selectedCredit?.pending?.toFixed(2)}
+              Pendiente: C${Number(selectedCredit?.pending || 0).toFixed(2)}
             </Text>
 
             <TextInput
@@ -28,14 +29,23 @@ export default function CreditPaymentModal({
               keyboardType="numeric"
               value={paymentAmount}
               onChangeText={onChangeAmount}
+              editable={!submitting}
               style={styles.input}
             />
 
             <View style={styles.rowButtons}>
-              <TouchableOpacity onPress={onConfirm} style={[styles.btn, styles.btnPrimary]}>
-                <Text style={styles.btnText}>Confirmar</Text>
+              <TouchableOpacity
+                onPress={onConfirm}
+                style={[styles.btn, styles.btnPrimary, submitting && { opacity: 0.7 }]}
+                disabled={submitting}
+              >
+                {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Confirmar</Text>}
               </TouchableOpacity>
-              <TouchableOpacity onPress={onCancel} style={[styles.btn, styles.btnDanger]}>
+              <TouchableOpacity
+                onPress={onCancel}
+                style={[styles.btn, styles.btnDanger, submitting && { opacity: 0.5 }]}
+                disabled={submitting}
+              >
                 <Text style={styles.btnText}>Cancelar</Text>
               </TouchableOpacity>
             </View>
@@ -45,4 +55,3 @@ export default function CreditPaymentModal({
     </Modal>
   );
 }
-

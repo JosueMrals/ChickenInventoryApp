@@ -41,6 +41,7 @@ export default function CreditsScreen({ route }) {
     animValue,
     handleAbono,
     handleDelete,
+    submittingPayment,
   } = useCredits(user, role, initialFilter || 'pending');
 
   const handleEditPreSale = async (credit) => {
@@ -137,6 +138,7 @@ export default function CreditsScreen({ route }) {
         onChangeAmount={setPaymentAmount}
         onConfirm={handleAbono}
         onCancel={closeModal}
+        submitting={submittingPayment}
       />
     </View>
   );

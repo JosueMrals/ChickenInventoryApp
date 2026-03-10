@@ -1,72 +1,55 @@
-import firestore from "@react-native-firebase/firestore";
-import auth from "@react-native-firebase/auth";
+import { savePreSaleToFirestore } from "../../../services/preSaleService";
 import { buildCustomerName } from "../../../utils/customerUtils";
-
-async function getNextPreSaleNumber() {
-  const ref = firestore().collection("counters").doc("preSaleCounter");
-
-  return await firestore().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-
-    const next = (snap.data()?.currentNumber || 0) + 1;
-    tx.set(ref, { currentNumber: next }, { merge: true });
-
-    return String(next).padStart(6, "0");
-  });
-}
 
 export async function registerPreSale({
   cart = [],
   subtotal = 0,
   total = 0,
-  tip = 0,
   paymentMethod,
-  amountPaid,
-  change,
   customer = null,
+  route = null,
 }) {
   if (!cart.length) throw new Error("El carrito está vacío.");
 
-  const user = auth().currentUser;
-  const receiptNumber = await getNextPreSaleNumber();
-
-  // 🔹 Preparamos los items
-  const items = cart.map((item) => ({
-    id: item.id,
-    name: item.product.name,
-    quantity: item.quantity,
-    unitPrice: item.unitPrice,
-    discount: item.discount,
-    total: item.total,
+  // Normalizar el carrito
+  const normalizedCart = cart.map((item) => ({
+    ...item,
+    id: item.id || item.product?.id,
+    product: item.product || {
+      id: item.id,
+      name: item.name || "Producto",
+    },
+    quantity: Number(item.quantity) || 0,
+    unitPrice: Number(item.unitPrice) || 0,
+    discount: Number(item.discount) || 0,
+    total: Number(item.total) || ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)),
+    isBonus: !!item.isBonus,
   }));
 
-  const preSaleData = {
-    receiptNumber,
-    subtotal,
-    total,
-    tip,
-    amountPaid,
-    change,
-    paymentMethod,
-    items,
-    createdAt: new Date(),
-    status: 'pending', // Add a status for the pre-sale
+  const computedSubtotal = subtotal || normalizedCart
+    .filter((item) => !item.isBonus)
+    .reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0);
 
-    soldBy: user?.email || "",
-    soldById: user?.uid || "",
+  const totalDiscount = normalizedCart
+    .filter((item) => !item.isBonus)
+    .reduce((sum, item) => sum + (Number(item.discount) || 0), 0);
 
-    customerId: customer?.id ?? null,
-    customerName: buildCustomerName(customer, "Preventa"),
-    customerPhone: customer?.phone ?? "",
-  };
+  const computedTotal = total || (computedSubtotal - totalDiscount);
 
-  try {
-    // Guardar preventa
-    const preSaleRef = await firestore().collection("presales").add(preSaleData);
+  const result = await savePreSaleToFirestore({
+    cart: normalizedCart,
+    subtotal: computedSubtotal,
+    totalDiscount,
+    total: computedTotal,
+    paymentMethod: paymentMethod || 'cash',
+    customer: customer
+      ? {
+          ...customer,
+          displayName: customer.displayName || buildCustomerName(customer, "Preventa"),
+        }
+      : null,
+    route,
+  });
 
-    return preSaleRef.id;
-  } catch (e) {
-    console.log("🔥 Error guardando preventa:", e);
-    throw e;
-  }
+  return result.id;
 }

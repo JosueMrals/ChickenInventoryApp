@@ -1,6 +1,24 @@
 import { useState, useEffect } from 'react';
 import { db } from '../../../services/firebase';
 
+function normalizeCategory(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim();
+}
+
+function extractCategory(data = {}) {
+  const direct = normalizeCategory(data?.category);
+  if (direct) return direct;
+
+  const detailsCategory = normalizeCategory(data?.details?.category);
+  if (detailsCategory) return detailsCategory;
+
+  const changedCategory = normalizeCategory(data?.details?.changes?.category?.to);
+  if (changedCategory) return changedCategory;
+
+  return '';
+}
+
 export const useProductOperations = (dateFrom, dateTo) => {
   const [operations, setOperations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,7 +36,12 @@ export const useProductOperations = (dateFrom, dateTo) => {
       (snapshot) => {
         const ops = [];
         snapshot.forEach((doc) => {
-          ops.push({ id: doc.id, ...doc.data() });
+          const data = doc.data() || {};
+          ops.push({
+            id: doc.id,
+            ...data,
+            category: extractCategory(data),
+          });
         });
         setOperations(ops);
         setLoading(false);

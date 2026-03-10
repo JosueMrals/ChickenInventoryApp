@@ -1,32 +1,56 @@
 import React from 'react';
-import { View, TextInput, StyleSheet, TouchableOpacity } from "react-native";
-import Icon from "react-native-vector-icons/Ionicons";
+import { View, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 export default function SearchBar({
   value,
   placeholder,
+  placeholderTextColor = '#999',
   onChangeText,
-  onClear, // Prop opcional para limpiar el campo
-  style // Prop opcional para sobreescribir estilos del contenedor externo
+  onClear,
+  style,
+  inputStyle,
+  autoFocus = false,
+  returnKeyType = 'search',
+  onSubmitEditing,
+  editable = true,
+  ...inputProps
 }) {
+  const showClear = Boolean(value);
+
+  const handleClear = () => {
+    if (typeof onClear === 'function') {
+      onClear();
+      return;
+    }
+    if (typeof onChangeText === 'function') {
+      onChangeText('');
+    }
+  };
+
   return (
     <View style={[styles.container, style]}>
-      <View style={styles.inputContainer}>
+      <View style={[styles.inputContainer, !editable && styles.inputContainerDisabled]}>
         <Icon name="search" size={20} color="#999" style={styles.icon} />
+
         <TextInput
-          style={styles.input}
-          placeholder={placeholder || "Buscar..."}
-          placeholderTextColor="#999"
+          style={[styles.input, inputStyle]}
+          placeholder={placeholder || 'Buscar...'}
+          placeholderTextColor={placeholderTextColor}
           value={value}
           onChangeText={onChangeText}
           autoCapitalize="none"
           autoCorrect={false}
+          autoFocus={autoFocus}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
+          editable={editable}
+          clearButtonMode="never"
+          {...inputProps}
         />
-        {value ? (
-          <TouchableOpacity onPress={() => {
-              if (onClear) onClear();
-              else onChangeText(''); // Fallback por defecto
-          }}>
+
+        {showClear ? (
+          <TouchableOpacity onPress={handleClear} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
             <Icon name="close-circle" size={20} color="#999" style={styles.clearIcon} />
           </TouchableOpacity>
         ) : null}
@@ -39,7 +63,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     marginBottom: 10,
-    marginTop: 10, // Un poco de margen superior por defecto
+    marginTop: 10,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -48,22 +72,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     alignItems: 'center',
     height: 48,
-    // Sombras y elevación para un look consistente
     elevation: 4,
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 }
+    shadowOffset: { width: 0, height: 2 },
+  },
+  inputContainerDisabled: {
+    opacity: 0.7,
   },
   icon: {
-    marginRight: 8
+    marginRight: 8,
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: '#333'
+    color: '#333',
   },
   clearIcon: {
-      marginLeft: 8
-  }
+    marginLeft: 8,
+  },
 });

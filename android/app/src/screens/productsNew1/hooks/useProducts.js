@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { db } from '../../../services/firebase'; // ajusta ruta si es necesario
-import firestore from '@react-native-firebase/firestore';
+import { db } from '../../../services/firebase';
+import { DEFAULT_CATEGORY_LABEL, normalizeCategory } from '../constants/productCategories';
 
 /**
  * useProducts
@@ -9,28 +9,30 @@ import firestore from '@react-native-firebase/firestore';
  * - getProductByBarcode busca 1 producto exacto por barcode y devuelve el objeto o null
  */
 export function useProducts({ pageSize = 200 } = {}) {
-  const [rawProducts, setRawProducts] = useState([]); // todos los productos tal como vienen de Firestore
+  const [rawProducts, setRawProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [query, setQueryState] = useState('');
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const mountedRef = useRef(true);
 
-  // debounce impl (sin depender de lodash)
-  const debounceRef = useRef({ timer: null });
-  function setQuery(q) {
-    if (debounceRef.current.timer) clearTimeout(debounceRef.current.timer);
-    const qStr = typeof q === 'string' ? q : String(q || '');
-    debounceRef.current.timer = setTimeout(() => {
-      if (mountedRef.current) setQueryState(qStr);
-    }, 250);
-  }
+  // Debounce solo para el filtrado: el input se actualiza al instante.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (mountedRef.current) setDebouncedQuery(query);
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [query]);
 
-  function clearQuery() {
-    if (debounceRef.current.timer) {
-      clearTimeout(debounceRef.current.timer);
-      debounceRef.current.timer = null;
-    }
-    setQueryState('');
-  }
+  const clearQuery = useCallback(() => {
+    setQuery('');
+    setDebouncedQuery('');
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    clearQuery();
+    setCategoryFilter('all');
+  }, [clearQuery]);
 
   // suscripción en tiempo real
   useEffect(() => {
@@ -54,24 +56,47 @@ export function useProducts({ pageSize = 200 } = {}) {
     return () => {
       mountedRef.current = false;
       if (unsubscribe) unsubscribe();
-      if (debounceRef.current.timer) clearTimeout(debounceRef.current.timer);
     };
   }, [pageSize]);
 
-  // filtered products (client-side): by name partial (case-insensitive) or barcode contains
-  const products = useMemo(() => {
-    if (!query || query.trim() === '') return rawProducts;
-    const q = query.trim().toLowerCase();
-    // try to match barcode exactly first (barcode often numeric / exact)
-    const exactBarcodeMatches = rawProducts.filter(p => (p.barcode || '').toString() === q);
-    if (exactBarcodeMatches.length > 0) return exactBarcodeMatches;
-    // otherwise partial name or barcode contains
-    return rawProducts.filter(p => {
-      const name = (p.name || '').toString().toLowerCase();
-      const barcode = (p.barcode || '').toString().toLowerCase();
-      return name.includes(q) || barcode.includes(q);
+  const indexedProducts = useMemo(() => {
+    return rawProducts.map((p) => {
+      const name = (p?.name || '').toString();
+      const barcode = (p?.barcode || '').toString();
+      const category = normalizeCategory(p?.category) || DEFAULT_CATEGORY_LABEL;
+      return {
+        ...p,
+        _nameLower: name.toLowerCase(),
+        _barcodeLower: barcode.toLowerCase(),
+        _categoryNorm: category,
+      };
     });
-  }, [rawProducts, query]);
+  }, [rawProducts]);
+
+  const categories = useMemo(() => {
+    const uniques = new Set();
+    indexedProducts.forEach((p) => {
+      if (p._categoryNorm && p._categoryNorm !== DEFAULT_CATEGORY_LABEL) {
+        uniques.add(p._categoryNorm);
+      }
+    });
+    return Array.from(uniques).sort((a, b) => a.localeCompare(b));
+  }, [indexedProducts]);
+
+  // filtered products (client-side)
+  const products = useMemo(() => {
+    const baseList = categoryFilter === 'all'
+      ? indexedProducts
+      : indexedProducts.filter((p) => p._categoryNorm === categoryFilter);
+
+    if (!debouncedQuery || debouncedQuery.trim() === '') return baseList;
+
+    const q = debouncedQuery.trim().toLowerCase();
+    const exactBarcodeMatches = baseList.filter((p) => p._barcodeLower === q);
+    if (exactBarcodeMatches.length > 0) return exactBarcodeMatches;
+
+    return baseList.filter((p) => p._nameLower.includes(q) || p._barcodeLower.includes(q));
+  }, [indexedProducts, debouncedQuery, categoryFilter]);
 
   // get single product by barcode (returns object or null)
   const getProductByBarcode = useCallback(async (term) => {
@@ -106,8 +131,12 @@ export function useProducts({ pageSize = 200 } = {}) {
     loading,
     setQuery,
     clearQuery,
+    query,
+    categories,
+    categoryFilter,
+    setCategoryFilter,
+    clearFilters,
     getProductByBarcode, // devuelve single product o null
     refresh,
-    _internal: { query } // expone el query por si necesitas debug
   };
 }

@@ -76,16 +76,34 @@ export default function PreSaleProductsScreen({ navigation }) {
     const rawStock = item.stock ?? item.availableStock ?? item.inventory;
     const hasStock = rawStock !== undefined && rawStock !== null;
     const stockValue = hasStock ? Number(rawStock) : null;
-    const isLowStock = stockValue !== null && stockValue <= 5;
+    const isOutOfStock = hasStock && Number.isFinite(stockValue) && stockValue <= 0;
+    const isLowStock = !isOutOfStock && stockValue !== null && stockValue <= 5;
 
     return (
-      <TouchableOpacity style={styles.card} onPress={() => openQuantity(item)}>
+      <TouchableOpacity
+        style={[styles.card, isOutOfStock && localStyles.disabledCard]}
+        onPress={() => !isOutOfStock && openQuantity(item)}
+        disabled={isOutOfStock}
+        activeOpacity={isOutOfStock ? 1 : 0.85}
+      >
         <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
         <View style={localStyles.priceRow}>
           <Text style={styles.cardPrice}>{formatCurrency(priceToUse)}</Text>
-          <View style={[localStyles.stockBadge, isLowStock && localStyles.stockBadgeLow]}>
-            <Text style={[localStyles.stockText, isLowStock && localStyles.stockTextLow]}>
-              Stock: {hasStock ? stockValue : "--"}
+          <View
+            style={[
+              localStyles.stockBadge,
+              isLowStock && localStyles.stockBadgeLow,
+              isOutOfStock && localStyles.stockBadgeOut,
+            ]}
+          >
+            <Text
+              style={[
+                localStyles.stockText,
+                isLowStock && localStyles.stockTextLow,
+                isOutOfStock && localStyles.stockTextOut,
+              ]}
+            >
+              {isOutOfStock ? 'Agotado' : `Stock: ${hasStock ? stockValue : '--'}`}
             </Text>
           </View>
         </View>
@@ -187,6 +205,10 @@ const localStyles = StyleSheet.create({
     backgroundColor: '#FFF1F0',
     borderColor: '#FFD6D6',
   },
+  stockBadgeOut: {
+    backgroundColor: '#FDECEC',
+    borderColor: '#F7B5B5',
+  },
   stockText: {
     fontSize: 10,
     fontWeight: '700',
@@ -194,6 +216,14 @@ const localStyles = StyleSheet.create({
   },
   stockTextLow: {
     color: '#C0392B',
+  },
+  stockTextOut: {
+    color: '#B71C1C',
+  },
+  disabledCard: {
+    opacity: 0.55,
+    borderWidth: 1.5,
+    borderColor: '#D32F2F',
   },
   tagContainer: {
     flexDirection: 'row',

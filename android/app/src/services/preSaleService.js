@@ -7,6 +7,17 @@ const salesCollection = firestore().collection('sales');
 const countersCollection = firestore().collection('counters');
 const productsCollection = firestore().collection('products');
 
+const BLOCKING_DELETE_ORDER_STATUSES = new Set([
+  'preparing',
+  'ready_for_delivery',
+  'credit_preparing',
+  'credit_ready_for_delivery',
+  'dispatched',
+  'delivered',
+]);
+
+const BLOCKING_DELETE_ITEM_STATUSES = new Set(['preparing', 'ready', 'dispatched', 'delivered']);
+
 const mapItemsToPayload = (items = []) => items.map(({ product, ...rest }) => ({
   ...rest,
   productId: product.id,
@@ -50,6 +61,22 @@ const applyStockDeltas = (tx, deltas = {}) => {
       updatedAt: firestore.FieldValue.serverTimestamp(),
     });
   });
+};
+
+const restoreStockFromMap = (tx, qtyMap = {}) => {
+  Object.keys(qtyMap).forEach((productId) => {
+    const quantity = Number(qtyMap[productId]) || 0;
+    if (!quantity) return;
+    tx.update(productsCollection.doc(productId), {
+      stock: firestore.FieldValue.increment(quantity),
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+    });
+  });
+};
+
+const hasItemsInWarehousePreparation = (items = [], bonuses = []) => {
+  const allItems = [...(items || []), ...(bonuses || [])];
+  return allItems.some((item) => BLOCKING_DELETE_ITEM_STATUSES.has(item?.status || 'pending'));
 };
 
 const validateStockAvailability = async (tx, deltas = {}) => {
@@ -321,4 +348,65 @@ export const updateAggregateProductStatus = async (productName, newStatus, fromS
     await batch.commit();
   }
   return updateCount;
+};
+
+export const deletePreSaleInFirestore = async ({ preSaleId, reason }) => {
+  const user = auth().currentUser;
+  const normalizedReason = (reason || '').trim();
+  if (!normalizedReason) {
+    throw new Error('Debe ingresar una descripción de la eliminación.');
+  }
+
+  const preSaleRef = presalesCollection.doc(preSaleId);
+
+  await firestore().runTransaction(async (tx) => {
+    const preSaleSnap = await tx.get(preSaleRef);
+    if (!preSaleSnap.exists) {
+      throw new Error('La pre-venta no existe o ya fue eliminada.');
+    }
+
+    const preSaleData = preSaleSnap.data() || {};
+
+    if (preSaleData.status === 'cancelled') {
+      throw new Error('La pre-venta ya está cancelada.');
+    }
+
+    if (BLOCKING_DELETE_ORDER_STATUSES.has(preSaleData.status)) {
+      throw new Error('No se puede eliminar: la pre-venta ya está en preparación o en un estado posterior.');
+    }
+
+    if (hasItemsInWarehousePreparation(preSaleData.items, preSaleData.bonuses)) {
+      throw new Error('No se puede eliminar: hay productos que ya fueron trabajados por bodega.');
+    }
+
+    const inventoryWasDeducted = !!preSaleData.inventoryDeducted;
+    const inventoryAlreadyRestored = !!preSaleData.inventoryRestored;
+
+    if (inventoryWasDeducted && !inventoryAlreadyRestored) {
+      const qtyMap = mergeQtyMaps(preSaleData.items || [], preSaleData.bonuses || []);
+      restoreStockFromMap(tx, qtyMap);
+    }
+
+    tx.update(preSaleRef, {
+      status: 'cancelled',
+      cancelledAt: firestore.FieldValue.serverTimestamp(),
+      cancelledBy: user?.email || 'N/A',
+      cancellationReason: normalizedReason,
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+      updatedBy: user?.email || 'N/A',
+      inventoryRestored: inventoryWasDeducted,
+      inventoryRestoredAt: inventoryWasDeducted ? firestore.FieldValue.serverTimestamp() : null,
+      inventoryRestoredBy: inventoryWasDeducted ? (user?.email || 'N/A') : null,
+    });
+
+    const historyRef = preSaleRef.collection('history').doc();
+    tx.set(historyRef, {
+      timestamp: firestore.FieldValue.serverTimestamp(),
+      user: user?.email || 'N/A',
+      action: 'DELETE',
+      details: `Pre-venta cancelada. Motivo: ${normalizedReason}`,
+    });
+  });
+
+  return true;
 };

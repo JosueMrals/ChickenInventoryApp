@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, TextInput, Button, Text, Alert, ActivityIndicator, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
-import { db } from '../../../services/firebase'; 
-import firestore, { serverTimestamp, increment } from '@react-native-firebase/firestore';
+import auth from '@react-native-firebase/auth';
+import { db } from '../../../services/firebase';
+import firestore, { serverTimestamp } from '@react-native-firebase/firestore';
 import globalStyles from '../../../styles/globalStyles';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { createProductOperation } from '../../../services/operations/productOperations';
 
 export default function AddStockScreen({ route, navigation }) {
   const { productId } = route.params;
@@ -78,16 +80,69 @@ export default function AddStockScreen({ route, navigation }) {
             setSaving(true);
             try {
               const docRef = db.doc(`products/${productId}`);
-              const incrementValue = isAdding ? qty : -qty;
-              
-              await docRef.update({
-                stock: increment(incrementValue),
-                updatedAt: serverTimestamp()
+              const currentUser = auth().currentUser;
+              const movementReason = isAdding ? 'Ingreso manual de stock' : 'Salida manual de stock';
+
+              // Usa transaccion para capturar stock real y evitar inconsistencias de concurrencia.
+              const txResult = await firestore().runTransaction(async (transaction) => {
+                const freshSnap = await transaction.get(docRef);
+                if (!freshSnap.exists) {
+                  throw new Error('PRODUCT_NOT_FOUND');
+                }
+
+                const freshData = freshSnap.data() || {};
+                const previousStock = Number(freshData.stock || 0);
+                if (!isAdding && qty > previousStock) {
+                  throw new Error('STOCK_INSUFFICIENT');
+                }
+
+                const newStock = isAdding ? previousStock + qty : previousStock - qty;
+
+                transaction.update(docRef, {
+                  stock: newStock,
+                  updatedAt: serverTimestamp(),
+                });
+
+                return {
+                  previousStock,
+                  newStock,
+                  category: typeof freshData.category === 'string' ? freshData.category.trim() : '',
+                  productName: freshData.name || product?.name || 'Producto',
+                };
               });
+
+              await createProductOperation({
+                productId,
+                productName: txResult.productName,
+                operationType: 'stock_change',
+                userEmail: currentUser?.email || 'sistema',
+                category: txResult.category,
+                details: {
+                  description: `${movementReason}: ${qty}`,
+                  quantity: qty,
+                  reason: movementReason,
+                  resultingStock: txResult.newStock,
+                  movementType: isAdding ? 'add' : 'remove',
+                  changes: {
+                    stock: {
+                      from: txResult.previousStock,
+                      to: txResult.newStock,
+                      action: 'updated',
+                    },
+                  },
+                },
+              });
+
               navigation.goBack();
             } catch (err) {
               console.error('Error actualizando stock:', err);
-              Alert.alert('Error', 'No se pudo actualizar el stock. Intenta nuevamente.');
+              if (err?.message === 'STOCK_INSUFFICIENT') {
+                Alert.alert('Stock insuficiente', 'No hay stock suficiente para completar la salida.');
+              } else if (err?.message === 'PRODUCT_NOT_FOUND') {
+                Alert.alert('No encontrado', 'El producto ya no existe.');
+              } else {
+                Alert.alert('Error', 'No se pudo actualizar el stock. Intenta nuevamente.');
+              }
             } finally {
               setSaving(false);
             }

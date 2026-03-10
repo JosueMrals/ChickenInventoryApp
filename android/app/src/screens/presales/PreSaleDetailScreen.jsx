@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, SafeAreaView, Modal, TextInput, Alert } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import globalStyles from '../../styles/globalStyles';
 import { PreSaleContext } from './context/preSaleContext';
@@ -66,12 +66,15 @@ const FinancialSummary = React.memo(({ presale }) => (
 
 export default function PreSaleDetailScreen({ route, navigation }) {
     const { presale } = route.params;
-    const { loadPreSaleForEditing, customersById } = useContext(PreSaleContext);
+    const { loadPreSaleForEditing, customersById, deletePreSale } = useContext(PreSaleContext);
     const [history, setHistory] = useState([]);
     const [loadingHistory, setLoadingHistory] = useState(true);
     const [isEditing, setIsEditing] = useState(false);
     const [historyModalVisible, setHistoryModalVisible] = useState(false);
     const [selectedHistoryItem, setSelectedHistoryItem] = useState(null);
+    const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+    const [deleteReason, setDeleteReason] = useState('');
+    const [isDeleting, setIsDeleting] = useState(false);
 
     // Obtener rol del contexto de ruta o de los params de navegación
     // Asumimos que podemos obtener el rol de alguna manera global o pasarlo
@@ -118,6 +121,36 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         setSelectedHistoryItem(item);
         setHistoryModalVisible(true);
     }, []);
+
+    const openDeleteModal = useCallback(() => {
+        setDeleteReason('');
+        setDeleteModalVisible(true);
+    }, []);
+
+    const closeDeleteModal = useCallback(() => {
+        if (isDeleting) return;
+        setDeleteModalVisible(false);
+    }, [isDeleting]);
+
+    const handleDelete = useCallback(async () => {
+        const reason = deleteReason.trim();
+        if (!reason) {
+            Alert.alert('Descripción requerida', 'Debe ingresar una descripción para eliminar la pre-venta.');
+            return;
+        }
+
+        setIsDeleting(true);
+        try {
+            await deletePreSale({ preSaleId: presale.id, reason });
+            setDeleteModalVisible(false);
+            Alert.alert('Pre-venta eliminada', 'La pre-venta fue eliminada y el inventario fue restaurado.');
+            navigation.goBack();
+        } catch (error) {
+            Alert.alert('No se pudo eliminar', error?.message || 'Ocurrió un error al eliminar la pre-venta.');
+        } finally {
+            setIsDeleting(false);
+        }
+    }, [deleteReason, deletePreSale, navigation, presale.id]);
 
     const listData = useMemo(() => {
         const data = [];
@@ -193,6 +226,7 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 
     // Vamos a asumir que el rol se pasa o se obtiene. Si no, ocultamos.
     const showPayButton = presale.status === 'pending' && (userRole === 'admin' || userRole === 'entregador');
+    const canDelete = presale.status === 'pending' || presale.status === 'credit_pending';
 
     return (
         <SafeAreaView style={globalStyles.container}>
@@ -228,6 +262,13 @@ export default function PreSaleDetailScreen({ route, navigation }) {
                             )}
 						</TouchableOpacity>
 
+                        {canDelete && (
+                            <TouchableOpacity style={styles.deleteButton} onPress={openDeleteModal}>
+                                <Icon name="trash-outline" size={20} color="#D92D20" style={{ marginRight: 6 }} />
+                                <Text style={styles.deleteButtonText}>Eliminar</Text>
+                            </TouchableOpacity>
+                        )}
+
                         {showPayButton && (
                             <TouchableOpacity style={styles.payButton} onPress={() => navigation.navigate('PreSalePayment', { presale })}>
                                 <Icon name="cash-outline" size={22} color="#fff" style={{marginRight: 10}}/>
@@ -237,6 +278,47 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 					</View>
 				)}
             </View>
+
+            <Modal
+                visible={deleteModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={closeDeleteModal}
+            >
+                <View style={styles.modalBackdrop}>
+                    <View style={styles.modalCard}>
+                        <Text style={styles.modalTitle}>Confirmar eliminación</Text>
+                        <Text style={styles.modalText}>
+                            Esta acción cancelará la pre-venta y devolverá su inventario al stock principal.
+                        </Text>
+
+                        <Text style={styles.modalLabel}>Descripción obligatoria</Text>
+                        <TextInput
+                            value={deleteReason}
+                            onChangeText={setDeleteReason}
+                            placeholder="Ejemplo: Cliente canceló el pedido"
+                            placeholderTextColor="#9CA3AF"
+                            style={styles.reasonInput}
+                            multiline
+                            numberOfLines={3}
+                            editable={!isDeleting}
+                        />
+
+                        <View style={styles.modalActions}>
+                            <TouchableOpacity style={styles.modalCancelButton} onPress={closeDeleteModal} disabled={isDeleting}>
+                                <Text style={styles.modalCancelText}>Volver</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.modalDeleteButton} onPress={handleDelete} disabled={isDeleting}>
+                                {isDeleting ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <Text style={styles.modalDeleteText}>Confirmar</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -261,10 +343,23 @@ const styles = StyleSheet.create({
     totalValue: { fontSize: 20, fontWeight: 'bold', color: '#007AFF' },
     footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#EEE', backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', gap: 10 },
     editButton: { borderWidth: 1, borderColor: '#007AFF', borderRadius: 12, padding: 14, justifyContent: 'center', alignItems: 'center' },
+    deleteButton: { borderWidth: 1, borderColor: '#FCA5A5', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+    deleteButtonText: { color: '#D92D20', fontSize: 15, fontWeight: '700' },
     payButton: { backgroundColor: '#28A745', flexDirection: 'row', flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16, borderRadius: 12, elevation: 3 },
     payButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
     historyItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F5F5F5', backgroundColor: 'white', paddingHorizontal: 16, borderRadius: 8, marginBottom: 5 },
     historyIcon: { marginRight: 15 },
     historyDetails: { fontSize: 14, color: '#333', flexShrink: 1 },
     historyMeta: { fontSize: 12, color: '#999', marginTop: 4 },
+    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', paddingHorizontal: 20 },
+    modalCard: { backgroundColor: '#fff', borderRadius: 14, padding: 16 },
+    modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
+    modalText: { marginTop: 8, color: '#4B5563', fontSize: 14, lineHeight: 20 },
+    modalLabel: { marginTop: 14, marginBottom: 6, fontSize: 13, fontWeight: '700', color: '#374151' },
+    reasonInput: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: '#111827', minHeight: 84, textAlignVertical: 'top' },
+    modalActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 14, gap: 10 },
+    modalCancelButton: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#D1D5DB' },
+    modalCancelText: { color: '#374151', fontWeight: '600' },
+    modalDeleteButton: { backgroundColor: '#D92D20', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, minWidth: 96, alignItems: 'center' },
+    modalDeleteText: { color: '#fff', fontWeight: '700' },
 });

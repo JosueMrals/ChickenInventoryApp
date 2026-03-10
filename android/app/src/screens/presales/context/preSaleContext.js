@@ -4,6 +4,7 @@ import {
   savePreSaleToFirestore, 
   getPreSalesFromFirestore,
   updatePreSaleInFirestore,
+  deletePreSaleInFirestore,
 } from "../../../services/preSaleService";
 import { getProducts } from "../../productsNew1/services/productsService";
 import { useRoute } from "../../../context/RouteContext";
@@ -225,6 +226,16 @@ export function PreSaleProvider({ children }) {
     }
   };
 
+  const deletePreSale = async ({ preSaleId, reason }) => {
+    setLoading(true);
+    try {
+      await deletePreSaleInFirestore({ preSaleId, reason });
+      await loadPreSales();
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     let customersUnsub = null;
     const authUnsub = auth().onAuthStateChanged((user) => {
@@ -276,7 +287,8 @@ export function PreSaleProvider({ children }) {
         preSales, loading, loadPreSales, submitPreSale,
         editingPreSale, loadPreSaleForEditing,
         editCart, addItemToEditCart, updateEditCart, removeFromEditCart,
-        customersById
+        customersById,
+        deletePreSale,
       }}
     >
       {children}

@@ -6,12 +6,40 @@ import ProductCard from '../components/ProductCard';
 import Icon from 'react-native-vector-icons/Ionicons';
 import CreateAddButton from '../../../components/CreateAddButton';
 import globalStyles from '../../../styles/globalStyles';
+import { DEFAULT_CATEGORY_LABEL, getCategoryLabel, normalizeCategory } from '../constants/productCategories';
+import { useProductCategories } from '../hooks/useProductCategories';
 
 export default function ProductsListScreen({ navigation, route }) {
-  const { products, loading, setQuery, clearQuery, query, refresh } = useProducts();
+  const {
+    products,
+    loading,
+    setQuery,
+    clearQuery,
+    query,
+    refresh,
+    categories,
+    categoryFilter,
+    setCategoryFilter,
+    clearFilters,
+  } = useProducts();
+  const { categories: managedCategories } = useProductCategories();
   const { role } = route.params ?? {};
 
+  const filterCategories = React.useMemo(() => {
+    const merged = new Set();
+    managedCategories.forEach((item) => {
+      const category = normalizeCategory(item);
+      if (category) merged.add(category);
+    });
+    categories.forEach((item) => {
+      const category = normalizeCategory(item);
+      if (category) merged.add(category);
+    });
+    return Array.from(merged).sort((a, b) => a.localeCompare(b));
+  }, [managedCategories, categories]);
+
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
 
   const openProductDetail = (prod) => {
     setSelectedProduct(prod);
@@ -26,9 +54,11 @@ export default function ProductsListScreen({ navigation, route }) {
   };
 
   const handleRefresh = () => {
-      clearQuery();
+      clearFilters();
       refresh();
   };
+
+  const hasActiveFilters = !!query || categoryFilter !== 'all';
 
   const renderProductItem = ({ item }) => {
     if (role === 'admin') {
@@ -36,7 +66,7 @@ export default function ProductsListScreen({ navigation, route }) {
         <ProductCard
           product={item}
           onPress={() => openProductDetail(item)}
-          onEdit={() => navigation.navigate('EditProduct', { product: item })} // FIX: Pass the whole product object
+          onEdit={() => navigation.navigate('EditProduct', { product: item })}
           onAddStock={() => navigation.navigate('AddStock', { productId: item.id })}
           hideActions={false}
         />
@@ -56,24 +86,24 @@ export default function ProductsListScreen({ navigation, route }) {
       if (loading) {
           return <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 40 }} />;
       }
-      if (query) {
+      if (hasActiveFilters) {
           return (
               <View style={styles.emptyContainer}>
                   <Icon name="search-outline" size={60} color="#ccc" />
-                  <Text style={styles.emptyText}>No se encontró: "{query}"</Text>
-                  {role === 'admin' ? (
+                  <Text style={styles.emptyText}>No se encontraron productos con esos filtros.</Text>
+                  {!!query && <Text style={styles.emptySubText}>Busqueda: "{query}"</Text>}
+                  {categoryFilter !== 'all' && <Text style={styles.emptySubText}>Categoria: {categoryFilter}</Text>}
+                  {role === 'admin' && !!query ? (
                       <TouchableOpacity
                         style={styles.createBtn}
                         onPress={() => navigation.navigate('AddProduct', { scannedCode: query })}
                       >
                           <Icon name="add-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-                          <Text style={styles.createBtnText}>Crear producto con este código</Text>
+                          <Text style={styles.createBtnText}>Crear producto con este codigo</Text>
                       </TouchableOpacity>
-                  ) : (
-                      <Text style={styles.emptySubText}>Intenta con otro término de búsqueda.</Text>
-                  )}
-                  <TouchableOpacity style={styles.clearBtn} onPress={clearQuery}>
-                      <Text style={styles.clearBtnText}>Volver a la lista completa</Text>
+                  ) : null}
+                  <TouchableOpacity style={styles.clearBtn} onPress={clearFilters}>
+                      <Text style={styles.clearBtnText}>Limpiar filtros</Text>
                   </TouchableOpacity>
               </View>
           );
@@ -98,29 +128,51 @@ export default function ProductsListScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
-      <View style={{flexDirection: 'row', alignItems: 'center', paddingRight: 16}}>
-          <View style={{flex: 1}}>
-              <SearchBar
-                value={query}
-                onChangeText={setQuery}
-                onClear={clearQuery}
-                placeholder="Buscar por nombre o código"
-                placeholderTextColor="#999"
-              />
-          </View>
+      <View style={styles.searchSection}>
+        <SearchBar
+          value={query}
+          onChangeText={setQuery}
+          onClear={clearQuery}
+          placeholder="Buscar por nombre o codigo"
+          placeholderTextColor="#999"
+          style={styles.fullSearchBar}
+        />
+
+        <View style={styles.actionsRow}>
+          <TouchableOpacity
+            onPress={() => setFilterModalVisible(true)}
+            style={[styles.summaryBtn, categoryFilter !== 'all' && styles.activeFilterBtn]}
+          >
+            <Icon name="options-outline" size={20} color={categoryFilter !== 'all' ? '#fff' : '#007AFF'} />
+            <Text style={[styles.actionText, categoryFilter !== 'all' && styles.actionTextActive]}>Filtros</Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             onPress={() => navigation.navigate('ProductsAggregates')}
             style={styles.summaryBtn}
           >
-              <Icon name="stats-chart" size={22} color="#007AFF" />
+            <Icon name="stats-chart" size={20} color="#007AFF" />
+            <Text style={styles.actionText}>Resumen</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             onPress={() => navigation.navigate('BarcodeScanner', { onScanned: handleScan })}
             style={styles.scanBtn}
           >
-              <Icon name="scan" size={24} color="#007AFF" />
+            <Icon name="scan" size={20} color="#007AFF" />
+            <Text style={styles.actionText}>Escanear</Text>
           </TouchableOpacity>
+        </View>
       </View>
+
+      {categoryFilter !== 'all' && (
+        <View style={styles.activeFilterRow}>
+          <Text style={styles.activeFilterText}>Filtrando por: {categoryFilter}</Text>
+          <TouchableOpacity onPress={() => setCategoryFilter('all')}>
+            <Text style={styles.clearFilterText}>Quitar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <FlatList
         data={products}
@@ -137,6 +189,60 @@ export default function ProductsListScreen({ navigation, route }) {
         visibleFor={['admin']}
         userType={role}
       />
+
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={filterModalVisible}
+        onRequestClose={() => setFilterModalVisible(false)}
+      >
+        <TouchableOpacity style={styles.filterOverlay} activeOpacity={1} onPress={() => setFilterModalVisible(false)}>
+          <TouchableOpacity style={styles.filterModal} activeOpacity={1} onPress={() => {}}>
+            <Text style={styles.filterTitle}>Filtrar por categoria</Text>
+
+            <TouchableOpacity
+              onPress={() => {
+                setCategoryFilter('all');
+                setFilterModalVisible(false);
+              }}
+              style={[styles.filterOption, categoryFilter === 'all' && styles.filterOptionActive]}
+            >
+              <Text style={[styles.filterOptionText, categoryFilter === 'all' && styles.filterOptionTextActive]}>
+                Todas
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                setCategoryFilter(DEFAULT_CATEGORY_LABEL);
+                setFilterModalVisible(false);
+              }}
+              style={[styles.filterOption, categoryFilter === DEFAULT_CATEGORY_LABEL && styles.filterOptionActive]}
+            >
+              <Text style={[styles.filterOptionText, categoryFilter === DEFAULT_CATEGORY_LABEL && styles.filterOptionTextActive]}>
+                {DEFAULT_CATEGORY_LABEL}
+              </Text>
+            </TouchableOpacity>
+
+            {filterCategories.map((cat) => (
+              <TouchableOpacity
+                key={cat}
+                onPress={() => {
+                  setCategoryFilter(cat);
+                  setFilterModalVisible(false);
+                }}
+                style={[styles.filterOption, categoryFilter === cat && styles.filterOptionActive]}
+              >
+                <Text style={[styles.filterOptionText, categoryFilter === cat && styles.filterOptionTextActive]}>{cat}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity style={styles.clearFilterBtn} onPress={() => { clearFilters(); setFilterModalVisible(false); }}>
+              <Text style={styles.clearFilterBtnText}>Limpiar filtros</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       <Modal
         animationType="slide"
@@ -172,7 +278,12 @@ export default function ProductsListScreen({ navigation, route }) {
                             <View style={styles.divider} />
 
                             <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Código de Barras</Text>
+                                <Text style={styles.detailLabel}>Categoria</Text>
+                                <Text style={styles.detailValue}>{getCategoryLabel(selectedProduct)}</Text>
+                            </View>
+
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Codigo de Barras</Text>
                                 <Text style={styles.detailValue}>{selectedProduct.barcode || '---'}</Text>
                             </View>
 
@@ -192,7 +303,7 @@ export default function ProductsListScreen({ navigation, route }) {
 
                             {selectedProduct.description ? (
                                 <View style={styles.descriptionBox}>
-                                    <Text style={styles.detailLabel}>Descripción</Text>
+                                    <Text style={styles.detailLabel}>Descripcion</Text>
                                     <Text style={styles.descriptionText}>{selectedProduct.description}</Text>
                                 </View>
                             ) : null}
@@ -205,7 +316,7 @@ export default function ProductsListScreen({ navigation, route }) {
                                     </View>
                                     {selectedProduct.wholesalePrices.map((wp, idx) => (
                                         <View key={idx} style={styles.wholesaleRow}>
-                                            <Text style={styles.wholesaleQty}>Más de {wp.quantity} u.</Text>
+                                            <Text style={styles.wholesaleQty}>Mas de {wp.quantity} u.</Text>
                                             <Text style={styles.wholesalePrice}>${wp.price}</Text>
                                         </View>
                                     ))}
@@ -221,7 +332,7 @@ export default function ProductsListScreen({ navigation, route }) {
                             style={styles.editModalBtn}
                             onPress={() => {
                                 closeProductDetail();
-                                navigation.navigate('EditProduct', { product: selectedProduct }); // FIX: Pass the whole product object
+                                navigation.navigate('EditProduct', { product: selectedProduct });
                             }}
                         >
                             <Text style={styles.editModalBtnText}>Editar Producto</Text>
@@ -244,44 +355,127 @@ const styles = StyleSheet.create({
         padding: 8,
         marginRight: -8
     },
+    searchSection: {
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 4,
+        backgroundColor: '#F7F9FC',
+    },
+    fullSearchBar: {
+        paddingHorizontal: 0,
+        marginTop: 0,
+        marginBottom: 8,
+    },
+    actionsRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 8,
+    },
     summaryBtn: {
+        flex: 1,
         backgroundColor: '#fff',
-        padding: 10,
+        paddingHorizontal: 10,
         borderRadius: 12,
         elevation: 2,
         shadowColor: '#000',
         shadowOpacity: 0.1,
         shadowRadius: 2,
         shadowOffset: { width: 0, height: 2 },
-        marginTop: 10,
-        marginBottom: 10,
         justifyContent: 'center',
         alignItems: 'center',
-        height: 48,
-        width: 48,
-        marginRight: 10,
+        flexDirection: 'row',
+        height: 42,
+        marginTop: 0,
+        marginBottom: 6,
+        marginRight: 0,
+    },
+    activeFilterBtn: {
+        backgroundColor: '#007AFF',
     },
     scanBtn: {
+        flex: 1,
         backgroundColor: '#fff',
-        padding: 10,
+        paddingHorizontal: 10,
         borderRadius: 12,
         elevation: 2,
         shadowColor: '#000',
         shadowOpacity: 0.1,
         shadowRadius: 2,
         shadowOffset: { width: 0, height: 2 },
-        marginTop: 10,
-        marginBottom: 10,
         justifyContent: 'center',
         alignItems: 'center',
-        height: 48,
-        width: 48
+        flexDirection: 'row',
+        height: 42,
+        marginTop: 0,
+        marginBottom: 6,
+        marginRight: 0,
     },
-    clearIconBtn: {
-        padding: 10,
-        justifyContent: 'center',
+    activeFilterRow: {
+        marginHorizontal: 16,
+        marginBottom: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 10,
+        backgroundColor: '#EAF3FF',
+        flexDirection: 'row',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        marginRight: 4
+    },
+    activeFilterText: {
+        color: '#005FCC',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    clearFilterText: {
+        color: '#007AFF',
+        fontWeight: '700',
+    },
+    filterOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    filterModal: {
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        padding: 16,
+        maxHeight: '75%',
+    },
+    filterTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        color: '#111',
+        marginBottom: 12,
+    },
+    filterOption: {
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+        borderRadius: 10,
+        marginBottom: 8,
+        backgroundColor: '#F4F6F8',
+    },
+    filterOptionActive: {
+        backgroundColor: '#007AFF',
+    },
+    filterOptionText: {
+        color: '#333',
+        fontWeight: '600',
+    },
+    filterOptionTextActive: {
+        color: '#fff',
+    },
+    clearFilterBtn: {
+        marginTop: 8,
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: 'center',
+        backgroundColor: '#EEF3F8',
+    },
+    clearFilterBtnText: {
+        color: '#007AFF',
+        fontWeight: '700',
     },
     // Estilos para Empty State
     emptyContainer: {
@@ -302,7 +496,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#888',
         textAlign: 'center',
-        marginBottom: 20
+        marginBottom: 4
     },
     createBtn: {
         flexDirection: 'row',
@@ -327,7 +521,6 @@ const styles = StyleSheet.create({
         color: '#007AFF',
         fontSize: 15
     },
-    // Estilos del Modal (se mantienen igual)
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.6)',
@@ -469,5 +662,17 @@ const styles = StyleSheet.create({
         color: '#333',
         fontSize: 16,
         fontWeight: '600'
-    }
+    },
+    actionText: {
+        marginLeft: 6,
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#007AFF',
+    },
+    actionTextActive: {
+        color: '#fff',
+    },
 });
+
+
+

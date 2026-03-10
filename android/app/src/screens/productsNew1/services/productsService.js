@@ -1,5 +1,6 @@
 import { db } from '../../../services/firebase';
 import firestore, { serverTimestamp, increment } from '@react-native-firebase/firestore';
+import { normalizeCategory } from '../constants/productCategories';
 
 const COLLECTION = 'products';
 
@@ -12,6 +13,7 @@ export async function createProduct(payload) {
   const docRef = db.collection(COLLECTION).doc(); // new doc with generated id
   const data = {
     ...payload,
+    category: normalizeCategory(payload?.category),
     // helpful derived fields:
     name_lower: payload.name ? payload.name.toString().toLowerCase() : '',
     createdAt: serverTimestamp(),
@@ -29,6 +31,9 @@ export async function updateProduct(productId, updates) {
   const docRef = db.collection(COLLECTION).doc(productId);
   const data = {
     ...updates,
+    ...(Object.prototype.hasOwnProperty.call(updates, 'category')
+      ? { category: normalizeCategory(updates?.category) }
+      : {}),
     ...(updates.name ? { name_lower: updates.name.toString().toLowerCase() } : {}),
     updatedAt: serverTimestamp(),
   };

@@ -4,9 +4,11 @@ service cloud.firestore {
 
     // =====================================================
     //  🔐 REGLA GLOBAL – Exigir autenticación
+    //  Escritura por colección explícita (principio de mínimo privilegio).
     // =====================================================
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null;
+      allow write: if false;
     }
 
     // =====================================================
@@ -15,8 +17,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null;
 
-      // Cualquier usuario autenticado puede crear su perfil
-      allow create: if request.auth != null;
+      // Permite auto-registro del propio perfil o creación por admin.
+      allow create: if request.auth != null && (request.auth.uid == userId || isAdmin());
 
       // Solo admin puede editar/eliminar perfiles
       allow update, delete: if isAdmin();
@@ -26,22 +28,20 @@ service cloud.firestore {
     //  👥 CUSTOMERS — con tipo, descuento, crédito
     // =====================================================
     match /customers/{customerId} {
-      allow read: if request.auth != null;
+      allow read: if isAdmin() || isVendedor() || isEntregador() || isBodeguero();
 
       // Crear / actualizar clientes:
-      // admin o user
-      allow create, update: if isAdmin() || isUser();
+      // admin o vendedor
+      allow create, update: if isAdmin() || isVendedor();
 
       // Pero solo ADMIN puede modificar campos sensibles:
       allow update: if isAdmin() ||
         (
-          isUser() &&
-          !(
-            // campos restringidos a admin
-            'creditLimit' in request.resource.data.diff() ||
-            'discount'    in request.resource.data.diff() ||
-            'type'        in request.resource.data.diff()
-          )
+          isVendedor() &&
+          !request.resource.data
+            .diff(resource.data)
+            .affectedKeys()
+            .hasAny(['creditLimit', 'discount', 'type'])
         );
 
       // Solo admin puede eliminar
@@ -52,7 +52,7 @@ service cloud.firestore {
     //  📦 PRODUCTS — precio, stock, mayoreo
     // =====================================================
     match /products/{productId} {
-      allow read: if request.auth != null;
+      allow read: if isAdmin() || isVendedor() || isEntregador() || isBodeguero();
 
       // Crear y eliminar SOLO admin
       allow create, delete: if isAdmin();
@@ -60,13 +60,22 @@ service cloud.firestore {
       // update:
       allow update: if isAdmin() ||
         (
-          isUser() &&
-          // Solo se permite actualizar stock y lastSaleUpdate
-          (
-            request.resource.data.keys().hasOnly(['stock', 'lastSaleUpdate']) &&
-            request.resource.data.stock is number
-          )
+          (isVendedor() || isBodeguero()) &&
+          request.resource.data.stock is number &&
+          request.resource.data
+            .diff(resource.data)
+            .affectedKeys()
+            .hasOnly(['stock', 'lastSaleUpdate', 'updatedAt'])
         );
+    }
+
+    // =====================================================
+    // 🏷 PRODUCT CATEGORIES — catalogo de categorias
+    // =====================================================
+    match /productCategories/{categoryId} {
+      allow read: if isOperativo();
+      allow create, update: if isAdmin() || isVendedor();
+      allow delete: if isAdmin();
     }
 
     // =====================================================
@@ -74,10 +83,10 @@ service cloud.firestore {
     // =====================================================
     match /product_movements/{movementId} {
       // Cualquiera autenticado puede leer el historial
-      allow read: if request.auth != null;
+      allow read: if isOperativo();
 
-      // Crear registros de operación: admin o user
-      allow create: if isAdmin() || isUser();
+      // Crear registros de operación: admin o vendedor
+      allow create: if isAdmin() || isVendedor() || isBodeguero();
 
       // Los registros no se pueden modificar ni eliminar
       allow update, delete: if false;
@@ -87,8 +96,8 @@ service cloud.firestore {
     //  📦 INVENTORY MOVEMENTS — log de movimientos de stock
     // =====================================================
     match /inventoryMovements/{movementId} {
-      allow read: if request.auth != null;
-      allow create: if isAdmin() || isUser();
+      allow read: if isOperativo();
+      allow create: if isAdmin() || isVendedor() || isBodeguero();
       allow update, delete: if false;
     }
 
@@ -96,13 +105,17 @@ service cloud.firestore {
     //  🧾 SALES — multi-producto, carrito
     // =====================================================
     match /sales/{saleId} {
-      allow read: if request.auth != null;
+      allow read: if isOperativo();
 
-      // Crear: admin o user
-      allow create: if isAdmin() || isUser();
+      // Crear: admin o vendedor
+      allow create: if isAdmin() || isVendedor();
 
       // Permitir actualización solo para receiptImageUrl
-      allow update: if request.resource.data.keys().hasOnly(['receiptImageUrl']);
+      allow update: if (isAdmin() || isVendedor() || isEntregador())
+        && request.resource.data
+          .diff(resource.data)
+          .affectedKeys()
+          .hasOnly(['receiptImageUrl']);
 
       // Ventas NO pueden borrarse
       allow delete: if false;
@@ -112,8 +125,8 @@ service cloud.firestore {
     //  🧾 SALES OPERATIONS — log de ventas para reportes
     // =====================================================
     match /sales_operations/{operationId} {
-      allow read: if request.auth != null;
-      allow create: if isAdmin() || isUser();
+      allow read: if isOperativo();
+      allow create: if isAdmin() || isVendedor();
       allow update, delete: if false;
     }
 
@@ -121,8 +134,8 @@ service cloud.firestore {
     //  FINANCIALS — ingresos y egresos
     // =====================================================
     match /financials/{financialId} {
-      allow read: if request.auth != null;
-      allow create: if isAdmin() || isUser();
+      allow read: if isAdmin() || isVendedor();
+      allow create: if isAdmin() || isVendedor();
       allow update, delete: if false;
     }
 
@@ -130,37 +143,112 @@ service cloud.firestore {
     //  💰 CREDITS — historial de créditos, abonos
     // =====================================================
     match /credits/{creditId} {
-      allow read: if request.auth != null;
+      allow read: if isAdmin() || isVendedor() || isEntregador();
 
-      // Crear créditos desde venta
-      allow create: if isAdmin() || isUser();
+      // Crear créditos desde pre-venta
+      allow create: if (isAdmin() || isVendedor()) && isValidCreditState(request.resource.data);
 
-      // Actualizar créditos (abonos) permitido a admin y user
-      allow update: if isAdmin() || isUser();
+      // Actualizar créditos (abonos) con validaciones de consistencia
+      // Compatible con créditos legacy (saleId/clientId/clientName y otros campos inmutables).
+      allow update: if (isAdmin() || isVendedor() || isEntregador())
+        && request.resource.data
+            .diff(resource.data)
+            .affectedKeys()
+            .hasOnly(['paid', 'pending', 'status', 'updatedAt', 'payments'])
+        && request.resource.data.paid >= resource.data.paid
+        && request.resource.data.pending <= resource.data.pending
+        && isValidCreditState(request.resource.data)
+        && (
+          (request.resource.data.status == 'paid' && request.resource.data.pending == 0) ||
+          (request.resource.data.status == 'pending' && request.resource.data.pending > 0)
+        )
+        && request.resource.data.payments is list
+        && request.resource.data.payments.size() >= getPaymentsSize(resource.data);
 
       // Solo admin puede eliminar créditos
       allow delete: if isAdmin();
     }
 
     // =====================================================
-    //  🔢 COUNTERS — control de correlativos
+    //  📄 PRESALES — preventas y su historial
     // =====================================================
-    match /counters/{docId} {
-      allow read: if request.auth != null;
+    match /presales/{preSaleId} {
+      allow read: if isOperativo();
+      allow create: if isAdmin() || isVendedor();
+      allow update: if isOperativo();
+      allow delete: if isAdmin() || isVendedor();
 
-      // Crear o incrementar contadores: admin/user
-      allow update, create: if isAdmin() || isUser();
+      match /history/{historyId} {
+        allow read: if isOperativo();
+        allow create: if isAdmin() || isVendedor() || isBodeguero() || isEntregador();
+        allow update, delete: if false;
+      }
+    }
+
+    // =====================================================
+    //  🔢 COUNTERS — consecutivos (ventas, preventas, etc.)
+    // =====================================================
+    match /counters/{counterId} {
+      allow read: if isOperativo();
+
+      // Permitir crear/actualizar contadores numéricos por admin o vendedor.
+      // Necesario para transacciones como counters/preSaleCounter.currentNumber.
+      allow create, update: if (isAdmin() || isVendedor())
+        && isValidCounterPayload(request.resource.data);
+
+      allow delete: if isAdmin();
     }
 
     // =====================================================
     // ⚙ FUNCIONES COMUNES
     // =====================================================
-    function isAdmin() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    function hasRole(role) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
     }
 
-    function isUser() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "user";
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    function isVendedor() {
+      return hasRole('vendedor');
+    }
+
+    function isEntregador() {
+      return hasRole('entregador');
+    }
+
+    function isBodeguero() {
+      return hasRole('bodeguero');
+    }
+
+    function isOperativo() {
+      return isAdmin() || isVendedor() || isEntregador() || isBodeguero();
+    }
+
+    function isValidCreditState(data) {
+      return data.total is number
+        && data.paid is number
+        && data.pending is number
+        && data.total >= 0
+        && data.paid >= 0
+        && data.pending >= 0
+        && (data.total - (data.paid + data.pending)) <= 0.01
+        && (data.total - (data.paid + data.pending)) >= -0.01
+        && (data.status == 'pending' || data.status == 'paid');
+    }
+
+    function getPaymentsSize(data) {
+      return ('payments' in data && data.payments is list) ? data.payments.size() : 0;
+    }
+
+    function isValidCounterPayload(data) {
+      return (
+        (!('currentNumber' in data) || (data.currentNumber is number && data.currentNumber >= 0))
+        && (!('lastNumber' in data) || (data.lastNumber is number && data.lastNumber >= 0))
+      );
     }
   }
 }

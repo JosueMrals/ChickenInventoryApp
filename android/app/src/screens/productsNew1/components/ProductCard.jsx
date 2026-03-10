@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { getCategoryLabel } from '../constants/productCategories';
 
 export default function ProductCard({ product, onEdit, onAddStock, onPress, hideActions = false }) {
   const isLowStock = (product?.stock ?? 0) < 5;
@@ -19,7 +20,7 @@ export default function ProductCard({ product, onEdit, onAddStock, onPress, hide
       {/* Información Central */}
       <View style={styles.infoContainer}>
         <Text style={styles.name} numberOfLines={1}>{product?.name}</Text>
-        <Text style={styles.code}>Cod: {product?.barcode ?? '---'}</Text>
+        <Text style={styles.code} numberOfLines={1}>Cat: {getCategoryLabel(product)} | Cod: {product?.barcode ?? '---'}</Text>
         <View style={styles.rowInfo}>
             <Text style={styles.price}>${product?.salePrice ?? '0.00'}</Text>
             <View style={[styles.badge, isLowStock ? styles.badgeLow : styles.badgeNormal]}>
@@ -37,9 +38,9 @@ export default function ProductCard({ product, onEdit, onAddStock, onPress, hide
              <Icon name="layers-outline" size={20} color="#fff" />
           </TouchableOpacity>
           
-          <TouchableOpacity onPress={() => onEdit && onEdit(product)} style={[styles.actionBtn, styles.editBtn]}>
-             <Icon name="create-outline" size={20} color="#fff" />
-          </TouchableOpacity>
+{/*           <TouchableOpacity onPress={() => onEdit && onEdit(product)} style={[styles.actionBtn, styles.editBtn]}> */}
+{/*              <Icon name="create-outline" size={20} color="#fff" /> */}
+{/*           </TouchableOpacity> */}
         </View>
       )}
 

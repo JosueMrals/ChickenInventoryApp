@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated } from 'react-native';
 import { fetchCredits, abonarCredito, eliminarCredito } from '../services/creditsService';
 
+const parseAmount = (value) => {
+  const normalized = (value || '').toString().replace(',', '.').trim();
+  const num = Number(normalized);
+  return Number.isFinite(num) ? num : NaN;
+};
+
 export const useCredits = (user, role, initialFilter = 'all') => {
   const [credits, setCredits] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9,6 +15,7 @@ export const useCredits = (user, role, initialFilter = 'all') => {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [filter, setFilter] = useState(initialFilter);
+  const [submittingPayment, setSubmittingPayment] = useState(false);
   const animValue = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -48,38 +55,38 @@ export const useCredits = (user, role, initialFilter = 'all') => {
     Animated.timing(animValue, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
       setModalVisible(false);
       setSelectedCredit(null);
+      setPaymentAmount('');
     });
   };
 
   const handleAbono = async () => {
+    if (submittingPayment) return;
+
     if (!selectedCredit) {
       Alert.alert('Error', 'No hay crédito seleccionado.');
       return;
     }
 
-    const amount = parseFloat(paymentAmount);
-    const pending = parseFloat(selectedCredit.pending || 0);
+    const amount = parseAmount(paymentAmount);
+    const pending = Number(selectedCredit.pending || 0);
 
     if (!amount || amount <= 0) {
       Alert.alert('Monto inválido', 'Ingresa un monto válido para abonar.');
       return;
     }
-    if (amount > pending) {
+
+    // Validación rápida en cliente; la validación final ocurre en transacción del servicio.
+    if (pending > 0 && amount - pending > 0.0001) {
       Alert.alert(
         'Monto excedido',
-        `El abono no puede ser mayor al saldo pendiente ($${pending.toFixed(2)}).`
+        `El abono no puede ser mayor al saldo pendiente (C$${pending.toFixed(2)}).`
       );
       return;
     }
 
     try {
-      const res = await abonarCredito(
-        selectedCredit.id,
-        selectedCredit.paid,
-        selectedCredit.pending,
-        amount,
-        user.email
-      );
+      setSubmittingPayment(true);
+      const res = await abonarCredito(selectedCredit.id, amount, user?.email);
 
       setCredits((prev) =>
         prev.map((c) =>
@@ -95,16 +102,18 @@ export const useCredits = (user, role, initialFilter = 'all') => {
       );
 
       Alert.alert(
-        '✅ Abono registrado',
+        'Abono registrado',
         res.estado === 'paid'
-          ? 'Crédito saldado completamente.'
-          : 'Pago parcial aplicado.'
+          ? 'Credito saldado completamente.'
+          : 'Pago parcial aplicado correctamente.'
       );
 
       closeModal();
     } catch (e) {
-      console.log('🔥 Error al registrar abono:', e);
-      Alert.alert('Error', e.message);
+      console.log('Error al registrar abono:', e);
+      Alert.alert('Error', e?.message || 'No se pudo registrar el abono.');
+    } finally {
+      setSubmittingPayment(false);
     }
   };
 
@@ -132,5 +141,6 @@ export const useCredits = (user, role, initialFilter = 'all') => {
     animValue,
     handleAbono,
     handleDelete,
+    submittingPayment,
   };
 };
