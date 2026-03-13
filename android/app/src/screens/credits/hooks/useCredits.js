@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated } from 'react-native';
 import { fetchCredits, abonarCredito, eliminarCredito } from '../services/creditsService';
+import { auth } from '../../../services/firebaseConfig';
 
 const parseAmount = (value) => {
   const normalized = (value || '').toString().replace(',', '.').trim();
   const num = Number(normalized);
   return Number.isFinite(num) ? num : NaN;
+};
+
+const resolvePaymentActor = (user) => {
+  const email = typeof user?.email === 'string' ? user.email.trim() : '';
+  if (email) return email;
+
+  const username = typeof user?.user === 'string' ? user.user.trim() : '';
+  if (username) return username;
+
+  const current = auth()?.currentUser;
+  return current?.email || current?.displayName || null;
 };
 
 export const useCredits = (user, role, initialFilter = 'all') => {
@@ -86,7 +98,8 @@ export const useCredits = (user, role, initialFilter = 'all') => {
 
     try {
       setSubmittingPayment(true);
-      const res = await abonarCredito(selectedCredit.id, amount, user?.email);
+      const paymentActor = resolvePaymentActor(user);
+      const res = await abonarCredito(selectedCredit.id, amount, paymentActor);
 
       setCredits((prev) =>
         prev.map((c) =>

@@ -11,6 +11,9 @@ export const useDashboardStats = (role, user) => {
     readyForDelivery: 0,
     assignedDeliveries: 0,
     totalToCollect: 0,
+    salesTodayTotal: 0,
+    activeDeliveries: 0,
+    pendingCreditsAmount: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -18,6 +21,9 @@ export const useDashboardStats = (role, user) => {
     const loadingState = {
       products: role === 'admin',
       users: role === 'admin',
+      salesToday: role === 'admin',
+      activeDeliveries: role === 'admin',
+      pendingCredits: role === 'admin',
       deliveries: role === 'entregador',
     };
 
@@ -53,6 +59,66 @@ export const useDashboardStats = (role, user) => {
           markLoaded('users');
         });
       unsubs.push(unsubUsers);
+
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+
+      const unsubSalesToday = firestore()
+        .collection('sales')
+        .where('createdAt', '>=', startOfDay)
+        .onSnapshot(
+          (snap) => {
+            let total = 0;
+            snap.docs.forEach((doc) => {
+              total += Number(doc.data()?.total || 0);
+            });
+            setStats((prev) => ({ ...prev, salesTodayTotal: total }));
+            markLoaded('salesToday');
+          },
+          () => {
+            markLoaded('salesToday');
+          }
+        );
+      unsubs.push(unsubSalesToday);
+
+      const activeStatuses = new Set(['dispatched', 'credit_dispatched', 'ready_for_delivery', 'credit_ready_for_delivery']);
+      const unsubActiveDeliveries = firestore()
+        .collection('presales')
+        .onSnapshot(
+          (snap) => {
+            let active = 0;
+            snap.docs.forEach((doc) => {
+              const status = doc.data()?.status;
+              if (activeStatuses.has(status)) active += 1;
+            });
+            setStats((prev) => ({ ...prev, activeDeliveries: active }));
+            markLoaded('activeDeliveries');
+          },
+          () => {
+            markLoaded('activeDeliveries');
+          }
+        );
+      unsubs.push(unsubActiveDeliveries);
+
+      const unsubCredits = firestore()
+        .collection('credits')
+        .onSnapshot(
+          (snap) => {
+            let pendingTotal = 0;
+            snap.docs.forEach((doc) => {
+              const data = doc.data() || {};
+              if (data.status === 'pending' || data.status === 'credit_pending') {
+                pendingTotal += Number(data.pending || 0);
+              }
+            });
+            setStats((prev) => ({ ...prev, pendingCreditsAmount: pendingTotal }));
+            markLoaded('pendingCredits');
+          },
+          () => {
+            markLoaded('pendingCredits');
+          }
+        );
+      unsubs.push(unsubCredits);
     }
 
     if (role === 'entregador') {

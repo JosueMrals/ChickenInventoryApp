@@ -1,8 +1,48 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, StyleSheet, ScrollView } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 
 const formatCurrency = (val) => `$${(Number(val) || 0).toFixed(2)}`;
+
+function getItemChips(item) {
+  const chips = [];
+  const source = String(item?.pricingSource || '').toLowerCase();
+
+  if (source === 'category') {
+    const minQty = Number(item?.categoryDiscountMinQty || 0);
+    const type = String(item?.categoryDiscountType || '').toLowerCase();
+    const value = Number(item?.categoryDiscountValue || 0);
+    if (minQty > 0 && value > 0 && ['percent', 'amount'].includes(type)) {
+      const valueText = type === 'percent' ? `${value}%` : formatCurrency(value);
+      chips.push({ text: `Cat. ${minQty}+ -> ${valueText}`, tone: 'category' });
+    } else {
+      chips.push({ text: 'Descuento categoria', tone: 'category' });
+    }
+  }
+
+  if (source === 'wholesale') chips.push({ text: 'Mayorista', tone: 'neutral' });
+  if (source === 'customer') chips.push({ text: 'Descuento cliente', tone: 'neutral' });
+  if (Number(item?.discount || 0) > 0) chips.push({ text: 'Descuento manual', tone: 'manual' });
+
+  return chips;
+}
+
+function computeCategoryDiscountTotal(items = []) {
+  const byCategory = items.reduce((acc, item) => {
+    if (String(item?.pricingSource || '').toLowerCase() !== 'category') return acc;
+    const key = String(item?.category || item?.categoryName || item?.productName || 'sin_categoria').toLowerCase();
+    acc[key] = (acc[key] || 0) + Number(item?.autoDiscountTotal || 0);
+    return acc;
+  }, {});
+
+  return Object.values(byCategory).reduce((sum, value) => sum + Number((Number(value) || 0).toFixed(2)), 0);
+}
+
+const Chip = ({ text, tone = 'neutral' }) => (
+  <View style={[styles.chip, tone === 'category' && styles.chipCategory, tone === 'manual' && styles.chipManual]}>
+    <Text style={[styles.chipText, tone === 'category' && styles.chipTextCategory, tone === 'manual' && styles.chipTextManual]}>{text}</Text>
+  </View>
+);
 
 export default function SaleReceipt({ sale, bonuses = [] }) {
   if (!sale) return null;
@@ -13,6 +53,21 @@ export default function SaleReceipt({ sale, bonuses = [] }) {
 
   const formattedDate = saleDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
   const formattedTime = saleDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+  const { subtotal, manualDiscountTotal, total, categoryDiscountTotal } = useMemo(() => {
+    const items = Array.isArray(sale.items) ? sale.items : [];
+    const subtotalCalc = Number(sale?.subtotal || 0) || items.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unitPrice || 0)), 0);
+    const manualDiscountCalc = Number(sale?.totalDiscount || sale?.discount || 0) || items.reduce((sum, item) => sum + Number(item.discount || 0), 0);
+    const categoryDiscountCalc = Number(sale?.categoryDiscountTotal || 0) || computeCategoryDiscountTotal(items);
+    const totalCalc = Number(sale?.total || 0) || (subtotalCalc - manualDiscountCalc);
+
+    return {
+      subtotal: subtotalCalc,
+      manualDiscountTotal: manualDiscountCalc,
+      total: totalCalc,
+      categoryDiscountTotal: categoryDiscountCalc,
+    };
+  }, [sale]);
 
   const getCustomerName = () => {
     if (sale.customer && typeof sale.customer === 'object' && sale.customer.firstName) {
@@ -50,15 +105,25 @@ export default function SaleReceipt({ sale, bonuses = [] }) {
         <View style={styles.separator} />
 
         <Text style={styles.sectionTitle}>Productos Vendidos</Text>
-        {(sale.items || []).map((item, index) => (
-          <View key={`sale-${index}`} style={styles.itemRow}>
-            <View style={styles.itemDetails}>
-              <Text style={styles.itemName}>{item.productName || item.name}</Text>
-              <Text style={styles.itemMeta}>{item.quantity} x {formatCurrency(item.unitPrice)}</Text>
+        {(sale.items || []).map((item, index) => {
+          const chips = getItemChips(item);
+          return (
+            <View key={`sale-${index}`} style={styles.itemRow}>
+              <View style={styles.itemDetails}>
+                <Text style={styles.itemName}>{item.productName || item.name}</Text>
+                <Text style={styles.itemMeta}>{item.quantity} x {formatCurrency(item.unitPrice)}</Text>
+                {chips.length > 0 && (
+                  <View style={styles.chipsRow}>
+                    {chips.map((chip, idx) => (
+                      <Chip key={`${index}_${idx}`} text={chip.text} tone={chip.tone} />
+                    ))}
+                  </View>
+                )}
+              </View>
+              <Text style={styles.itemTotal}>{formatCurrency(item.total)}</Text>
             </View>
-            <Text style={styles.itemTotal}>{formatCurrency(item.total)}</Text>
-          </View>
-        ))}
+          );
+        })}
 
         {bonuses.length > 0 && (
           <>
@@ -83,15 +148,21 @@ export default function SaleReceipt({ sale, bonuses = [] }) {
         <View style={styles.summarySection}>
             <View style={styles.summaryRow}>
                 <Text style={styles.label}>Subtotal</Text>
-                <Text style={styles.value}>{formatCurrency(sale.subtotal)}</Text>
+                <Text style={styles.value}>{formatCurrency(subtotal)}</Text>
             </View>
             <View style={styles.summaryRow}>
-                <Text style={styles.label}>Descuentos</Text>
-                <Text style={styles.discount}>-{formatCurrency(sale.discount)}</Text>
+                <Text style={styles.label}>Descuentos manuales</Text>
+                <Text style={styles.discount}>-{formatCurrency(manualDiscountTotal)}</Text>
             </View>
+            {categoryDiscountTotal > 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={styles.label}>Desc. categoria</Text>
+                <Text style={styles.discount}>-{formatCurrency(categoryDiscountTotal)}</Text>
+              </View>
+            )}
             <View style={styles.summaryRowTotal}>
                 <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>{formatCurrency(sale.total)}</Text>
+                <Text style={styles.totalValue}>{formatCurrency(total)}</Text>
             </View>
             
             {/* --- FIX: Display Amount Paid and Change --- */}
@@ -138,6 +209,13 @@ const styles = StyleSheet.create({
     itemDetails: { flex: 1 },
     itemName: { fontSize: 16, fontWeight: "600", color: "#34495E" },
     itemMeta: { fontSize: 14, color: "#95A5A6", marginTop: 2 },
+    chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 5 },
+    chip: { backgroundColor: '#EEF2F7', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3 },
+    chipCategory: { backgroundColor: '#DBEAFE' },
+    chipManual: { backgroundColor: '#FEE2E2' },
+    chipText: { fontSize: 10, fontWeight: '700', color: '#334155' },
+    chipTextCategory: { color: '#1D4ED8' },
+    chipTextManual: { color: '#B91C1C' },
     itemTotal: { fontSize: 16, fontWeight: "bold", color: "#2C3E50" },
     bonusTag: { backgroundColor: '#2980B9', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
     bonusTagText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },

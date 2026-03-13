@@ -76,6 +76,9 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
         <View style={styles.metaRow}>
           <Text style={styles.subtitle}>{quantity} x {formatCurrency(item.unitPrice)}</Text>
         </View>
+        {item.isCategoryDiscountActive && item.categoryDiscountBadge ? (
+          <Text style={{ fontSize: 11, color: '#1D4ED8', fontWeight: '700' }}>{item.categoryDiscountBadge}</Text>
+        ) : null}
         {(item.discount > 0) && <Text style={styles.discountText}>Descuento: -{formatCurrency(item.discount)}</Text>}
       </View>
       <View style={styles.actions}>

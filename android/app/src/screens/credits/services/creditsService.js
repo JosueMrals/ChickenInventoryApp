@@ -1,4 +1,4 @@
-import { firestore } from '../../../services/firebaseConfig';
+import { firestore, auth } from '../../../services/firebaseConfig';
 
 const toCents = (value) => {
   const num = Number(value);
@@ -20,6 +20,44 @@ function sanitizeDocId(rawId) {
   return parts[parts.length - 1] || null;
 }
 
+const normalizeCustomerName = (raw, fallback = 'Cliente') => {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  return value || fallback;
+};
+
+const buildCustomerNameFromPreSale = (preSale) => {
+  const direct = normalizeCustomerName(preSale?.customerName, '');
+  if (direct) return direct;
+
+  const firstName = typeof preSale?.customer?.firstName === 'string' ? preSale.customer.firstName.trim() : '';
+  const lastName = typeof preSale?.customer?.lastName === 'string' ? preSale.customer.lastName.trim() : '';
+  const joined = [firstName, lastName].filter(Boolean).join(' ').trim();
+  return joined || 'Cliente';
+};
+
+function toFirestoreTimestamp(value) {
+  if (value && typeof value.toDate === 'function') {
+    return value;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return firestore.Timestamp.fromDate(value);
+  }
+
+  if (typeof value?.seconds === 'number') {
+    return firestore.Timestamp.fromDate(new Date(value.seconds * 1000));
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return firestore.Timestamp.fromDate(parsed);
+    }
+  }
+
+  return firestore.Timestamp.fromDate(new Date());
+}
+
 function normalizePaymentEntry(entry, fallbackDate) {
   if (!entry || typeof entry !== 'object') return null;
 
@@ -27,25 +65,12 @@ function normalizePaymentEntry(entry, fallbackDate) {
   const safeAmount = Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
   const by = typeof entry.by === 'string' && entry.by.trim() ? entry.by.trim() : 'N/A';
 
-  const rawDate = entry.date;
-  let safeDate = fallbackDate;
-  if (rawDate && typeof rawDate.toDate === 'function') {
-    safeDate = rawDate;
-  } else if (rawDate instanceof Date && !Number.isNaN(rawDate.getTime())) {
-    safeDate = rawDate;
-  } else if (typeof rawDate?.seconds === 'number') {
-    safeDate = new Date(rawDate.seconds * 1000);
-  } else if (typeof rawDate === 'string' || typeof rawDate === 'number') {
-    const parsed = new Date(rawDate);
-    if (!Number.isNaN(parsed.getTime())) safeDate = parsed;
-  }
-
   const previousPending = Number(entry.previousPending);
   const newPending = Number(entry.newPending);
 
   const normalized = {
     amount: safeAmount,
-    date: safeDate,
+    date: toFirestoreTimestamp(entry.date || fallbackDate),
     by,
   };
 
@@ -63,8 +88,10 @@ export const fetchCredits = (onUpdate) => {
     .onSnapshot(snapshot => {
       const data = snapshot.docs.map(doc => {
         const raw = doc.data() || {};
+        const customerName = normalizeCustomerName(raw.customerName || raw.clientName || '', 'Cliente');
         return {
           ...raw,
+          customerName,
           id: doc.id, // Fuerza siempre el id real del documento
           preSaleId: raw.preSaleId || raw.presaleId || null,
         };
@@ -84,6 +111,9 @@ export const abonarCredito = async (creditId, amount, userEmail) => {
   if (!pagoCents || pagoCents <= 0) throw new Error('Monto inválido');
 
   const now = new Date();
+  const nowTs = firestore.Timestamp.fromDate(now);
+  const fallbackUser = auth()?.currentUser?.email || auth()?.currentUser?.displayName || null;
+  const paymentActor = (typeof userEmail === 'string' && userEmail.trim()) ? userEmail.trim() : (fallbackUser || 'N/A');
   const creditRef = firestore().collection('credits').doc(safeCreditId);
   let result = null;
 
@@ -118,55 +148,53 @@ export const abonarCredito = async (creditId, amount, userEmail) => {
 
     const abono = {
       amount: fromCents(pagoCents),
-      date: now,
-      by: userEmail || 'N/A',
+      date: nowTs,
+      by: paymentActor,
       previousPending: fromCents(pendingCents),
       newPending: fromCents(nuevoPendienteCents),
     };
 
-    // Compatibilidad con documentos legacy donde payments puede no ser lista.
-    const currentPaymentsRaw = Array.isArray(creditData?.payments) ? creditData.payments : [];
-    const currentPayments = currentPaymentsRaw
-      .map((entry) => normalizePaymentEntry(entry, now))
-      .filter(Boolean);
-    const nextPayments = [...currentPayments, abono];
-
     const preSaleRawId = creditData?.preSaleId || creditData?.presaleId || null;
     const preSaleId = sanitizeDocId(preSaleRawId);
-    let linkedPreSaleUpdated = false;
-    let preSaleRef = null;
-
-    // Importante: en transacciones Firestore todas las lecturas van antes de escrituras.
-    if (preSaleId && nuevoEstado === 'paid') {
-      preSaleRef = firestore().collection('presales').doc(preSaleId);
-      const preSaleSnap = await tx.get(preSaleRef);
-      linkedPreSaleUpdated = preSaleSnap.exists;
-    }
 
     tx.update(creditRef, {
       paid: fromCents(nuevoPagadoCents),
       pending: fromCents(nuevoPendienteCents),
       status: nuevoEstado,
-      updatedAt: now,
-      payments: nextPayments,
+      updatedAt: nowTs,
+      payments: firestore.FieldValue.arrayUnion(abono),
     });
 
-    if (linkedPreSaleUpdated && preSaleRef) {
-      tx.update(preSaleRef, {
-        status: 'paid',
-        fechaPago: now,
-        updatedAt: now,
-      });
-    }
+    // Nota: la actualización de preventa se realiza fuera de la transacción para
+    // no bloquear el abono por datos legacy inconsistentes en preSaleId.
 
     result = {
       nuevoPagado: fromCents(nuevoPagadoCents),
       nuevoPendiente: fromCents(nuevoPendienteCents),
       estado: nuevoEstado,
       appliedAmount: fromCents(pagoCents),
-      linkedPreSaleUpdated,
+      linkedPreSaleId: preSaleId || null,
     };
   });
+
+  if (result?.estado === 'paid' && result?.linkedPreSaleId) {
+    try {
+      await firestore().collection('presales').doc(result.linkedPreSaleId).update({
+        status: 'paid',
+        fechaPago: nowTs,
+        updatedAt: nowTs,
+      });
+      result.linkedPreSaleUpdated = true;
+    } catch (linkError) {
+      console.warn('No se pudo actualizar la preventa enlazada al saldar crédito:', {
+        creditId: safeCreditId,
+        preSaleId: result.linkedPreSaleId,
+        message: linkError?.message,
+        code: linkError?.code,
+      });
+      result.linkedPreSaleUpdated = false;
+    }
+  }
 
   return result;
 };
@@ -178,20 +206,25 @@ export const createCreditFromPreSale = async (preSale, createdBy) => {
   const creditRef = firestore().collection('credits').doc();
   const preSaleRef = firestore().collection('presales').doc(preSale.id);
   const total = Number(preSale.total) || 0;
-  const customerName = preSale.customerName || preSale.customer?.firstName || 'Cliente';
+  const customerName = buildCustomerNameFromPreSale(preSale);
   const customerId = preSale.customerId || preSale.customer?.id || null;
+
+  const actor = (typeof createdBy === 'string' && createdBy.trim())
+    ? createdBy.trim()
+    : (auth()?.currentUser?.email || auth()?.currentUser?.displayName || 'N/A');
 
   const batch = firestore().batch();
   batch.set(creditRef, {
     preSaleId: preSale.id,
     customerId,
     customerName,
+    clientName: customerName,
     total,
     paid: 0,
     pending: total,
     status: 'pending',
     createdAt: new Date(),
-    createdBy: createdBy || 'N/A',
+    createdBy: actor,
   });
 
   batch.update(preSaleRef, {

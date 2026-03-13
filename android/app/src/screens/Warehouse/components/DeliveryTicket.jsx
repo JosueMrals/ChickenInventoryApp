@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
 
 const DeliveryTicket = ({ sale, settings }) => {
@@ -24,6 +24,72 @@ const DeliveryTicket = ({ sale, settings }) => {
   const bonuses = sale.bonusesAwarded || sale.bonuses || [];
   const hasBonuses = Array.isArray(bonuses) && bonuses.length > 0;
   const isCredit = sale.paymentMethod === 'credit' || String(sale.status || '').startsWith('credit_');
+
+  const categoryDiscountTotal = useMemo(() => {
+    if (Number(sale?.categoryDiscountTotal || 0) > 0) return Number(sale.categoryDiscountTotal);
+    const items = Array.isArray(sale?.items) ? sale.items : [];
+    const byCategory = items.reduce((acc, item) => {
+      if (String(item?.pricingSource || '').toLowerCase() !== 'category') return acc;
+      const key = String(item?.category || item?.categoryName || item?.productName || 'sin_categoria').toLowerCase();
+      acc[key] = (acc[key] || 0) + Number(item?.autoDiscountTotal || 0);
+      return acc;
+    }, {});
+    return Object.values(byCategory).reduce((sum, value) => sum + Number((Number(value) || 0).toFixed(2)), 0);
+  }, [sale]);
+
+  const summary = useMemo(() => {
+    const items = Array.isArray(sale?.items) ? sale.items : [];
+
+    const subtotalNoDiscounts = items.reduce((sum, item) => {
+      const qty = Number(item?.quantity || 0);
+      const lineBase = Number(item?.lineBaseTotal || 0) || (Number(item?.baseUnitPrice || 0) * qty);
+      return sum + (lineBase || (Number(item?.unitPrice || 0) * qty));
+    }, 0);
+
+    const categoryDiscount = items.reduce((sum, item) => {
+      if (String(item?.pricingSource || '').toLowerCase() !== 'category') return sum;
+      return sum + Number(item?.autoDiscountTotal || 0);
+    }, 0);
+
+    const customerDiscount = items.reduce((sum, item) => {
+      if (String(item?.pricingSource || '').toLowerCase() !== 'customer') return sum;
+      return sum + Number(item?.autoDiscountTotal || 0);
+    }, 0);
+
+    const manualDiscount = items.reduce((sum, item) => sum + Number(item?.discount || 0), 0);
+
+    const discountsTotal = categoryDiscount + customerDiscount + manualDiscount;
+    const totalToPay = Math.max(0, subtotalNoDiscounts - discountsTotal);
+
+    return {
+      subtotalNoDiscounts: Number(subtotalNoDiscounts.toFixed(2)),
+      categoryDiscount: Number(categoryDiscount.toFixed(2)),
+      customerDiscount: Number(customerDiscount.toFixed(2)),
+      manualDiscount: Number(manualDiscount.toFixed(2)),
+      discountsTotal: Number(discountsTotal.toFixed(2)),
+      totalToPay: Number(totalToPay.toFixed(2)),
+    };
+  }, [sale]);
+
+  const getPricingTag = (item) => {
+    const source = String(item?.pricingSource || '').toLowerCase();
+
+    if (source === 'category') {
+      const minQty = Number(item?.categoryDiscountMinQty || 0);
+      const type = String(item?.categoryDiscountType || '').toLowerCase();
+      const value = Number(item?.categoryDiscountValue || 0);
+      if (minQty > 0 && value > 0 && ['percent', 'amount'].includes(type)) {
+        const valueText = type === 'percent' ? `${value}%` : `$${value.toFixed(2)}`;
+        return `Cat ${minQty}+ -> ${valueText}`;
+      }
+      return 'Descuento categoria';
+    }
+
+    if (source === 'wholesale') return 'Mayorista';
+    if (source === 'customer') return 'Descuento cliente';
+    if (Number(item?.discount || 0) > 0) return 'Descuento manual';
+    return null;
+  };
 
   return (
     <ScrollView style={styles.container}>
@@ -59,43 +125,69 @@ const DeliveryTicket = ({ sale, settings }) => {
         <Text style={[styles.headerText, { flex: 1, textAlign: 'right', fontFamily, fontSize: baseFontSize - 2 }]}>Total</Text>
       </View>
 
-      {sale.items && sale.items.map((item, index) => (
-        <View key={index} style={styles.row}>
-          <Text style={[styles.cellText, { flex: 2, fontFamily, fontSize: baseFontSize }]}>{item.productName || item.name}</Text>
-          <Text style={[styles.cellText, { flex: 0.5, fontFamily, fontSize: baseFontSize }]}>{item.quantity}</Text>
-          <Text style={[styles.cellText, { flex: 1, textAlign: 'right', fontFamily, fontSize: baseFontSize }]}>
-            ${(item.total || (item.unitPrice * item.quantity)).toFixed(2)}
-          </Text>
-        </View>
-      ))}
+      {sale.items && sale.items.map((item, index) => {
+        const pricingTag = getPricingTag(item);
+        const hasManualDiscount = Number(item?.discount || 0) > 0;
+
+        return (
+          <View key={index} style={styles.itemBox}>
+            <View style={styles.row}>
+              <Text style={[styles.cellText, { flex: 2, fontFamily, fontSize: baseFontSize }]}>{item.productName || item.name}</Text>
+              <Text style={[styles.cellText, { flex: 0.5, fontFamily, fontSize: baseFontSize }]}>{item.quantity}</Text>
+              <Text style={[styles.cellText, { flex: 1, textAlign: 'right', fontFamily, fontSize: baseFontSize }]}>
+                ${(item.total || (item.unitPrice * item.quantity)).toFixed(2)}
+              </Text>
+            </View>
+            <View style={styles.itemMetaRow}>
+              <Text style={[styles.itemMetaText, { fontFamily, fontSize: baseFontSize - 2 }]}
+              >
+                {item.quantity} x ${(Number(item.unitPrice) || 0).toFixed(2)}
+              </Text>
+              {pricingTag ? <Text style={[styles.itemTag, { fontFamily, fontSize: baseFontSize - 3 }]}>{pricingTag}</Text> : null}
+            </View>
+            {hasManualDiscount ? (
+              <Text style={[styles.manualDiscountText, { fontFamily, fontSize: baseFontSize - 3 }]}>Manual: -${Number(item.discount || 0).toFixed(2)}</Text>
+            ) : null}
+          </View>
+        );
+      })}
 
       <View style={styles.divider} />
 
-      {hasBonuses && (
-         <View>
-             <Text style={[styles.bonusHeader, { fontFamily, fontSize: baseFontSize - 2 }]}>Regalos:</Text>
-             {bonuses.map((b, i) => (
-                 <View key={i} style={styles.bonusRow}>
-                     <Text style={[styles.bonusQty, { fontFamily, fontSize: baseFontSize - 2 }]}>{b.quantity}x</Text>
-                     <View style={styles.bonusInfo}>
-                         <Text style={[styles.bonusName, { fontFamily, fontSize: baseFontSize - 2 }]} numberOfLines={1}>
-                             {b.productName || b.name || 'Producto Bonificado'}
-                         </Text>
-                         {b.linkedToName ? (
-                           <Text style={[styles.bonusRef, { fontFamily, fontSize: baseFontSize - 3 }]} numberOfLines={1}>
-                             por {b.linkedToName}
-                           </Text>
-                         ) : null}
-                     </View>
-                 </View>
-             ))}
-             <View style={styles.divider} />
-         </View>
+      <View style={styles.totalRow}>
+        <Text style={[styles.subTotalLabel, { fontFamily, fontSize: baseFontSize }]}>Subtotal:</Text>
+        <Text style={[styles.subTotalValue, { fontFamily, fontSize: baseFontSize }]}>${summary.subtotalNoDiscounts.toFixed(2)}</Text>
+      </View>
+
+      {summary.manualDiscount > 0 && (
+        <View style={styles.totalRow}>
+          <Text style={[styles.subTotalLabel, { fontFamily, fontSize: baseFontSize }]}>Desc. manual:</Text>
+          <Text style={[styles.subTotalValue, { fontFamily, fontSize: baseFontSize }]}>-${summary.manualDiscount.toFixed(2)}</Text>
+        </View>
+      )}
+
+      {summary.categoryDiscount > 0 && (
+        <View style={styles.totalRow}>
+          <Text style={[styles.subTotalLabel, { fontFamily, fontSize: baseFontSize }]}>Desc. categoria:</Text>
+          <Text style={[styles.subTotalValue, { fontFamily, fontSize: baseFontSize }]}>-${summary.categoryDiscount.toFixed(2)}</Text>
+        </View>
+      )}
+
+      {summary.customerDiscount > 0 && (
+        <View style={styles.totalRow}>
+          <Text style={[styles.subTotalLabel, { fontFamily, fontSize: baseFontSize }]}>Desc. cliente:</Text>
+          <Text style={[styles.subTotalValue, { fontFamily, fontSize: baseFontSize }]}>-${summary.customerDiscount.toFixed(2)}</Text>
+        </View>
       )}
 
       <View style={styles.totalRow}>
+        <Text style={[styles.subTotalLabel, { fontFamily, fontSize: baseFontSize }]}>Descuentos:</Text>
+        <Text style={[styles.subTotalValue, { fontFamily, fontSize: baseFontSize }]}>-${summary.discountsTotal.toFixed(2)}</Text>
+      </View>
+
+      <View style={styles.totalRow}>
         <Text style={[styles.totalLabel, { fontFamily, fontSize: baseFontSize + 4 }]}>TOTAL A PAGAR:</Text>
-        <Text style={[styles.totalValue, { fontFamily, fontSize: baseFontSize + 4 }]}>${sale.total ? sale.total.toFixed(2) : '0.00'}</Text>
+        <Text style={[styles.totalValue, { fontFamily, fontSize: baseFontSize + 4 }]}>${summary.totalToPay.toFixed(2)}</Text>
       </View>
 
        <View style={styles.totalRow}>
@@ -103,7 +195,7 @@ const DeliveryTicket = ({ sale, settings }) => {
           Pagado:
         </Text>
         <Text style={[styles.subTotalValue, { fontFamily, fontSize: baseFontSize }]}>
-          ${sale.amountPaid ? Number(sale.amountPaid).toFixed(2) : (sale.total || 0).toFixed(2)}
+          ${sale.amountPaid ? Number(sale.amountPaid).toFixed(2) : summary.totalToPay.toFixed(2)}
         </Text>
       </View>
 
@@ -164,7 +256,32 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
+    marginBottom: 4,
+  },
+  itemBox: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    paddingBottom: 6,
     marginBottom: 6,
+  },
+  itemMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  itemMetaText: {
+    color: '#6B7280',
+    flex: 1,
+  },
+  itemTag: {
+    color: '#1D4ED8',
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  manualDiscountText: {
+    color: '#B91C1C',
+    marginTop: 2,
+    fontWeight: '700',
   },
   headerText: {
     fontSize: 12,

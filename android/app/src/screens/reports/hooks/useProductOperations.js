@@ -26,7 +26,7 @@ export const useProductOperations = (dateFrom, dateTo) => {
   useEffect(() => {
     setLoading(true);
     
-    let query = db.collection('product_operations').orderBy('timestamp', 'desc');
+    let query = db.collection('product_movements').orderBy('timestamp', 'desc');
 
     if (dateFrom && dateTo) {
       query = query.where('timestamp', '>=', dateFrom).where('timestamp', '<=', dateTo);

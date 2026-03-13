@@ -6,9 +6,16 @@ import DashboardHeader from './components/DashboardHeader';
 import StatCardGrid from './components/StatCardGrid';
 import ModuleCardGrid from './components/ModuleCardGrid';
 import styles from './styles/dashboardStyles';
+import NewDashboardScreen from './newdashboard';
 
-export default function DashboardScreen({ user, role }) {
+export default function DashboardScreen({ user, role, navigation }) {
   const { stats, loading } = useDashboardStats(role, user);
+
+  // El nuevo dashboard premium se activa para administrador.
+  if (role === 'admin') {
+    return <NewDashboardScreen user={user} role={role} navigation={navigation} stats={stats} loading={loading} />;
+  }
+
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {

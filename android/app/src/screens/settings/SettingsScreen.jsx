@@ -1,35 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Alert, ScrollView, ActivityIndicator, SafeAreaView, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import appDistribution from '@react-native-firebase/app-distribution';
 import globalStyles from '../../styles/globalStyles';
 import packageJson from '../../../../../package.json';
+import {
+    checkForUpdateSafe,
+    downloadReleaseSafe,
+    isAppDistributionSupported,
+    isNotSupportedError,
+} from '../../services/appDistributionService';
 
 export default function SettingsScreen({ navigation }) {
     const [checkingUpdate, setCheckingUpdate] = useState(false);
     const [remoteVersion, setRemoteVersion] = useState(null);
+    const [updatesSupported, setUpdatesSupported] = useState(isAppDistributionSupported());
 
     // Verificar versión remota al montar el componente
     useEffect(() => {
         const fetchRemoteVersion = async () => {
             try {
-                // checkForUpdate devuelve una Release si hay una NUEVA versión disponible.
-                // Si devuelve null, significa que estamos en la última versión.
-                const release = await appDistribution().checkForUpdate();
+                const release = await checkForUpdateSafe();
+                setUpdatesSupported(true);
                 if (release) {
                     setRemoteVersion(release.displayVersion);
                 } else {
-                    // Si no hay actualización, la versión remota es igual a la actual (o estamos al día)
                     setRemoteVersion(packageJson.version);
                 }
             } catch (error) {
-                // Suppress specific "not supported" error in console to avoid clutter during dev
-                if (error.message && error.message.includes("not supported")) {
-                    console.log('App Distribution not supported in this environment (Simulator/Dev).');
+                if (isNotSupportedError(error)) {
+                    setUpdatesSupported(false);
                 } else {
                     console.log('Error fetching remote version:', error);
                 }
-                // En caso de error (ej: dev mode), mostramos la local
                 setRemoteVersion(packageJson.version);
             }
         };
@@ -40,18 +42,19 @@ export default function SettingsScreen({ navigation }) {
     const handleCheckUpdate = async () => {
         setCheckingUpdate(true);
         try {
-            const release = await appDistribution().checkForUpdate();
+            const release = await checkForUpdateSafe();
+            setUpdatesSupported(true);
             if (release && release.downloadUrl) {
                 Alert.alert(
-                    'Nueva Actualización Disponible',
-                    `Versión ${release.displayVersion} (${release.versionCode}).\n¿Deseas descargarla e instalarla ahora?`,
+                    'Nueva Actualizacion Disponible',
+                    `Version ${release.displayVersion} (${release.versionCode}).\nDeseas descargarla e instalarla ahora?`,
                     [
                         { text: 'Cancelar', style: 'cancel' },
                         {
                             text: 'Actualizar',
                             onPress: async () => {
                                 try {
-                                    await release.download();
+                                    await downloadReleaseSafe(release);
                                 } catch (err) {
                                     Alert.alert('Error', 'No se pudo iniciar la descarga.');
                                     console.error('Download error:', err);
@@ -61,19 +64,17 @@ export default function SettingsScreen({ navigation }) {
                     ]
                 );
             } else {
-                Alert.alert('Todo al día', 'Ya tienes la última versión instalada.');
-                // Actualizamos la versión remota por si acaso
+                Alert.alert('Sin nueva version', 'No se encontro una release mas nueva en App Distribution para esta build/dispositivo.');
                 setRemoteVersion(packageJson.version);
             }
         } catch (error) {
             console.error('Check update error:', error);
-            let msg = 'No se pudo verificar la actualización.';
-            if (error.message && error.message.includes("not supported")) {
-                msg = 'La verificación de actualizaciones no está soportada en este dispositivo o entorno.';
-            } else if (error.code === 'app-distribution/not-supported') {
-                 msg = 'Esta función no está disponible en simuladores o versiones de desarrollo no distribuidas.';
+            if (isNotSupportedError(error)) {
+                setUpdatesSupported(false);
+                Alert.alert('Aviso', 'La verificacion de actualizaciones no esta disponible en este entorno. Usa una build distribuida por Firebase App Distribution.');
+            } else {
+                Alert.alert('Aviso', 'No se pudo verificar la actualizacion.');
             }
-            Alert.alert('Aviso', msg);
         } finally {
             setCheckingUpdate(false);
         }
@@ -120,7 +121,7 @@ export default function SettingsScreen({ navigation }) {
                 )}
 
                 <Text style={styles.sectionHeader}>Sistema</Text>
-                <TouchableOpacity style={styles.settingItem} onPress={handleCheckUpdate} disabled={checkingUpdate}>
+                <TouchableOpacity style={styles.settingItem} onPress={handleCheckUpdate} disabled={checkingUpdate || !updatesSupported}>
                     <View style={styles.iconContainer}>
                         {checkingUpdate ? (
                             <ActivityIndicator size="small" color="#007AFF" />
@@ -131,22 +132,31 @@ export default function SettingsScreen({ navigation }) {
                     <View style={styles.textContainer}>
                         <Text style={styles.itemTitle}>Buscar Actualizaciones</Text>
                         <Text style={styles.itemDescription}>
-                            {checkingUpdate ? 'Verificando...' : 'Buscar nueva versión en Firebase'}
+                            {checkingUpdate
+                              ? 'Verificando...'
+                              : updatesSupported
+                                ? 'Buscar nueva version en Firebase'
+                                : 'No disponible en este entorno'}
                         </Text>
                     </View>
-                    {!checkingUpdate && <Icon name="chevron-forward" size={20} color="#C7C7CC" />}
+                    {!checkingUpdate && updatesSupported && <Icon name="chevron-forward" size={20} color="#C7C7CC" />}
                 </TouchableOpacity>
 
                 <View style={styles.versionContainer}>
-                    <Text style={styles.versionText}>Versión Instalada: {packageJson.version}</Text>
+                    <Text style={styles.versionText}>Version local (package.json): {packageJson.version}</Text>
                     {remoteVersion && remoteVersion !== packageJson.version && (
                         <Text style={[styles.versionText, { color: '#007AFF', fontWeight: 'bold', marginTop: 4 }]}>
-                            Nueva Versión Disponible: {remoteVersion}
+                            Nueva Version Disponible: {remoteVersion}
                         </Text>
                     )}
-                    {remoteVersion && remoteVersion === packageJson.version && (
+                    {updatesSupported && remoteVersion && remoteVersion === packageJson.version && (
                         <Text style={[styles.versionText, { color: '#34C759', marginTop: 4, fontSize: 12 }]}>
-                            (Sincronizada con App Distribution)
+                            (Sin release mas nueva detectada en App Distribution)
+                        </Text>
+                    )}
+                    {!updatesSupported && (
+                        <Text style={[styles.versionText, { color: '#999', marginTop: 4, fontSize: 12 }]}>
+                            (App Distribution no disponible en este entorno)
                         </Text>
                     )}
                     <Text style={styles.copyrightText}>© 2025 DIALIFGH</Text>

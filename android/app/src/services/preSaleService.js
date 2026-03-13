@@ -18,11 +18,22 @@ const BLOCKING_DELETE_ORDER_STATUSES = new Set([
 
 const BLOCKING_DELETE_ITEM_STATUSES = new Set(['preparing', 'ready', 'dispatched', 'delivered']);
 
-const mapItemsToPayload = (items = []) => items.map(({ product, ...rest }) => ({
-  ...rest,
-  productId: product.id,
-  productName: product.name,
-}));
+const removeUndefinedFields = (obj = {}) => {
+  return Object.entries(obj).reduce((acc, [key, value]) => {
+    if (typeof value === 'undefined') return acc;
+    acc[key] = value;
+    return acc;
+  }, {});
+};
+
+const mapItemsToPayload = (items = []) => items.map(({ product, ...rest }) => (
+  removeUndefinedFields({
+    ...rest,
+    productId: product.id,
+    productName: product.name,
+    productCategory: product?.category || rest?.category || null,
+  })
+));
 
 const buildQtyMap = (items = []) => items.reduce((acc, item) => {
   const productId = item.productId || item.id || item.product?.id;
@@ -138,6 +149,7 @@ export const savePreSaleToFirestore = async (preSaleData) => {
     customerName,
     subtotal: preSaleData.subtotal,
     totalDiscount: preSaleData.totalDiscount,
+    categoryDiscountTotal: Number(preSaleData.categoryDiscountTotal || 0),
     total: preSaleData.total,
     preSaleNumber,
     paymentMethod: paymentMethod || 'cash',
@@ -202,6 +214,7 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
     customerName,
     subtotal: newPreSaleData.subtotal,
     totalDiscount: newPreSaleData.totalDiscount,
+    categoryDiscountTotal: Number(newPreSaleData.categoryDiscountTotal || oldPreSaleData.categoryDiscountTotal || 0),
     total: newPreSaleData.total,
     paymentMethod,
     status: normalizedStatus,

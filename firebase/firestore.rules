@@ -74,8 +74,7 @@ service cloud.firestore {
     // =====================================================
     match /productCategories/{categoryId} {
       allow read: if isOperativo();
-      allow create, update: if isAdmin() || isVendedor();
-      allow delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     // =====================================================

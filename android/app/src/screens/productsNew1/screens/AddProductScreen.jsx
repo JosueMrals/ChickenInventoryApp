@@ -26,6 +26,19 @@ import { useProductCategories } from '../hooks/useProductCategories';
 import { buildCreateChanges } from '../utils/operationChanges';
 
 const PLACEHOLDER_COLOR = '#9CA3AF';
+const PRODUCT_DISCOUNT_TYPES = [
+  { key: 'percent', label: '%', placeholder: '%' },
+  { key: 'amount', label: 'C$', placeholder: 'C$' },
+];
+
+function buildProductCategoryDiscountRule(minQty, source = null) {
+  return {
+    minQty,
+    discountType: source?.discountType || 'percent',
+    discountValue: source?.discountValue ? String(source.discountValue) : '',
+    active: true,
+  };
+}
 
 function isPermissionDeniedError(err) {
   const code = String(err?.code || '').toLowerCase();
@@ -55,6 +68,7 @@ export default function AddProductScreen() {
     initialStock: '',
     // --- Nueva estructura de bonificaciones: array de hasta 5 ---
     bonuses: [],
+    categoryDiscountRules: [],
   });
 
   const initialRef = useRef(JSON.stringify(values));
@@ -75,6 +89,41 @@ export default function AddProductScreen() {
     if (current) merged.add(current);
     return Array.from(merged).sort((a, b) => a.localeCompare(b));
   }, [categories, values.category]);
+
+  const categoryActivationRules = useMemo(() => {
+    const selectedCategory = normalizeCategory(values.category).toLowerCase();
+    if (!selectedCategory) return [];
+
+    const row = categoryRows.find((item) => normalizeCategory(item?.name).toLowerCase() === selectedCategory);
+    const rules = Array.isArray(row?.activationRules) ? row.activationRules : [];
+
+    return rules
+      .map((rule) => Math.max(1, Math.floor(Number(rule?.minQty || 0))))
+      .filter((qty) => qty > 0)
+      .sort((a, b) => a - b);
+  }, [categoryRows, values.category]);
+
+  useEffect(() => {
+    setValues((prev) => {
+      const activationSet = new Set(categoryActivationRules);
+      const currentRules = Array.isArray(prev.categoryDiscountRules) ? prev.categoryDiscountRules : [];
+
+      if (activationSet.size === 0) {
+        if (currentRules.length === 0) return prev;
+        return { ...prev, categoryDiscountRules: [] };
+      }
+
+      const byQty = currentRules.reduce((acc, rule) => {
+        const qty = Math.max(1, Math.floor(Number(rule?.minQty || 0)));
+        if (!qty) return acc;
+        acc[qty] = rule;
+        return acc;
+      }, {});
+
+      const nextRules = categoryActivationRules.map((minQty) => buildProductCategoryDiscountRule(minQty, byQty[minQty]));
+      return { ...prev, categoryDiscountRules: nextRules };
+    });
+  }, [categoryActivationRules]);
 
   useEffect(() => {
     if (scannedCode) {
@@ -157,11 +206,37 @@ export default function AddProductScreen() {
     });
   }
 
+  function updateCategoryDiscountRule(minQty, patch) {
+    setValues((prev) => {
+      const currentRules = Array.isArray(prev.categoryDiscountRules) ? prev.categoryDiscountRules : [];
+      const nextRules = currentRules.map((rule) => {
+        const qty = Math.max(1, Math.floor(Number(rule?.minQty || 0)));
+        if (qty !== minQty) return rule;
+        return { ...rule, ...patch, minQty: qty };
+      });
+      return { ...prev, categoryDiscountRules: nextRules };
+    });
+  }
+
   function validateValues() {
     if (!values.name || values.name.trim() === '') return { ok: false, msg: 'El nombre es obligatorio.' };
     if (values.purchasePrice && (Number.isNaN(Number(values.purchasePrice)) || Number(values.purchasePrice) < 0)) return { ok: false, msg: 'Costo de compra inválido.' };
     if (values.salePrice && (Number.isNaN(Number(values.salePrice)) || Number(values.salePrice) < 0)) return { ok: false, msg: 'Precio de venta inválido.' };
     if (values.initialStock && (Number.isNaN(Number(values.initialStock)) || Number(values.initialStock) < 0)) return { ok: false, msg: 'El stock inicial es inválido.' };
+
+    if (Array.isArray(values.categoryDiscountRules)) {
+      for (const rule of values.categoryDiscountRules) {
+        const discountValue = Number(rule?.discountValue || 0);
+        const discountType = String(rule?.discountType || '').toLowerCase();
+        if (!discountValue) continue;
+        if (!['percent', 'amount'].includes(discountType)) {
+          return { ok: false, msg: 'Tipo de descuento por categoria invalido.' };
+        }
+        if (!Number.isFinite(discountValue) || discountValue <= 0) {
+          return { ok: false, msg: 'El descuento por categoria debe ser mayor a 0.' };
+        }
+      }
+    }
 
     // --- Validación de múltiples bonificaciones ---
     if (values.bonuses && values.bonuses.length > 0) {
@@ -213,6 +288,16 @@ export default function AddProductScreen() {
       }));
       const initialStock = Number(values.initialStock) || 0;
 
+      const productCategoryDiscountRules = (values.categoryDiscountRules || [])
+        .map((rule) => ({
+          minQty: Math.max(1, Math.floor(Number(rule?.minQty || 0))),
+          discountType: String(rule?.discountType || '').toLowerCase(),
+          discountValue: Number(rule?.discountValue || 0),
+          active: rule?.active !== false,
+        }))
+        .filter((rule) => rule.minQty > 0 && ['percent', 'amount'].includes(rule.discountType) && rule.discountValue > 0)
+        .sort((a, b) => a.minQty - b.minQty);
+
       // --- Nuevo payload con la estructura de bonificaciones (array) ---
       // Guardar únicamente las bonificaciones activas y con datos válidos
       const bonusesPayload = (values.bonuses || [])
@@ -237,7 +322,8 @@ export default function AddProductScreen() {
         measureType: values.measureType,
         wholesalePrices: processedWholesale,
         stock: initialStock,
-        bonuses: bonusesPayload,
+        categoryDiscountRules: productCategoryDiscountRules,
+         bonuses: bonusesPayload,
       };
 
       // Enviar legacy `bonus` para compatibilidad si solo hay una bonificación
@@ -436,6 +522,50 @@ export default function AddProductScreen() {
              </View>
           </View>
 
+          {categoryActivationRules.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Descuento por Categoria (Producto)</Text>
+              <Text style={styles.helperText}>La cantidad minima se define en Categorias. Aqui solo defines el valor para este producto.</Text>
+
+              {categoryActivationRules.map((minQty) => {
+                const rule = (values.categoryDiscountRules || []).find(r => Math.max(1, Math.floor(Number(r?.minQty || 0))) === minQty);
+                const discountValue = rule?.discountValue || '';
+                const discountType = rule?.discountType || 'percent';
+
+                return (
+                  <View key={minQty} style={styles.discountRuleRow}>
+                    <Text style={styles.discountRuleLabel}>A partir de {minQty} unid.</Text>
+                    <View style={styles.discountRuleInputs}>
+                      <TextInput
+                        style={styles.discountValueInput}
+                        keyboardType="numeric"
+                        value={String(discountValue)}
+                        onChangeText={text => {
+                          const numValue = Number(text);
+                          if (Number.isNaN(numValue) || numValue < 0) return;
+                          updateCategoryDiscountRule(minQty, { discountValue: numValue });
+                        }}
+                        placeholder="0"
+                        placeholderTextColor={PLACEHOLDER_COLOR}
+                      />
+                      <View style={styles.discountTypeContainer}>
+                        {PRODUCT_DISCOUNT_TYPES.map((type) => (
+                          <TouchableOpacity
+                            key={type.key}
+                            style={[styles.discountTypeButton, discountType === type.key && styles.discountTypeButtonActive]}
+                            onPress={() => updateCategoryDiscountRule(minQty, { discountType: type.key })}
+                          >
+                            <Text style={[styles.discountTypeText, discountType === type.key && styles.discountTypeTextActive]}>{type.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
           {/* --- SECCIÓN DE BONIFICACIONES REFACTORIZADA --- */}
           <BonusSetup bonuses={values.bonuses} onChange={handleBonusesChange} />
 
@@ -565,4 +695,21 @@ const styles = StyleSheet.create({
   categoryListItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   categoryListText: { fontSize: 14, color: '#263238', fontWeight: '600' },
   categoryDeleteBtn: { padding: 6 },
+  discountRuleRow: { marginBottom: 16 },
+  discountRuleLabel: { fontSize: 14, color: '#333', marginBottom: 8 },
+  discountRuleInputs: { flexDirection: 'row', alignItems: 'center' },
+  discountValueInput: { flex: 1, padding: 12, borderRadius: 8, fontSize: 16, color: '#333', backgroundColor: '#F5F6FA', borderWidth: 1, borderColor: '#E0E0E0', marginRight: 8 },
+  discountTypeContainer: { flexDirection: 'row' },
+  discountTypeButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#F0F0F0',
+    borderWidth: 1,
+    borderColor: '#D0D0D0',
+    marginRight: 8,
+  },
+  discountTypeButtonActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  discountTypeText: { fontSize: 14, color: '#333', fontWeight: '600' },
+  discountTypeTextActive: { color: '#fff' },
 });

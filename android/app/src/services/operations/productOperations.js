@@ -1,7 +1,7 @@
 import { db } from '../firebase';
 import { serverTimestamp } from '@react-native-firebase/firestore';
 
-const OPERATIONS_COLLECTION = 'product_operations';
+const OPERATIONS_COLLECTION = 'product_movements';
 
 function normalizeCategory(value) {
   if (typeof value !== 'string') return '';
@@ -9,7 +9,7 @@ function normalizeCategory(value) {
 }
 
 /**
- * Crea un registro en la colección product_operations.
+ * Crea un registro en la colección de actividad de productos.
  * @param {Object} operationData
  * @param {string} operationData.productId - El ID del producto.
  * @param {string} operationData.productName - El nombre del producto.

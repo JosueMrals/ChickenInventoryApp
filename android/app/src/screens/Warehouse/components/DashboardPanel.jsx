@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import firestore from '@react-native-firebase/firestore';
 import { View, Text, ScrollView, TouchableOpacity, LayoutAnimation, Platform, UIManager } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { warehouseStyles as styles } from '../styles/warehouseStyles';
-import { groupItemsByProduct } from '../../../utils/warehouseUtils';
+import { groupItemsByProduct, groupAggregatedProductsByCategory } from '../../../utils/warehouseUtils';
 import { Swipeable } from 'react-native-gesture-handler';
 import { updateAggregateProductStatus } from '../../../services/preSaleService';
 
@@ -12,12 +13,34 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const DashboardPanel = ({ preSales, onHandoverPress }) => {
     const [activeStatusTab, setActiveStatusTab] = useState('pending'); // 'pending', 'preparing', 'ready'
+    const [productCategoryById, setProductCategoryById] = useState({});
+
+    React.useEffect(() => {
+        const unsubscribe = firestore()
+          .collection('products')
+          .onSnapshot(
+            (snapshot) => {
+              const map = {};
+              snapshot.forEach((doc) => {
+                const data = doc.data() || {};
+                if (data.category) {
+                  map[doc.id] = data.category;
+                }
+              });
+              setProductCategoryById(map);
+            },
+            (error) => {
+              console.error('Warehouse product categories snapshot error:', error);
+              setProductCategoryById({});
+            }
+          );
+
+        return () => unsubscribe();
+    }, []);
 
     // Calcular contadores globales de ITEMS para las pestañas
     const statusCounts = React.useMemo(() => {
         const counts = { pending: 0, preparing: 0, ready: 0 };
-        // Hacemos una pasada rápida para contar items por estado
-        const allProducts = groupItemsByProduct(preSales); // Sin filtro cuenta todo, pero necesitamos lógica custom rápida o reusar la function
         // Mejor iteramos preSales nosotros mismos para mayor eficiencia en contadores globales
         preSales.forEach(sale => {
              const items = [...(sale.items || []), ...(sale.bonuses || [])];
@@ -29,9 +52,9 @@ const DashboardPanel = ({ preSales, onHandoverPress }) => {
         return counts;
     }, [preSales]);
 
-    const { aggregatedProducts, totalRegular, totalBonus } = React.useMemo(() => {
-        // Obtenemos solo los productos que tienen items en el estado activo
-        const products = groupItemsByProduct(preSales, activeStatusTab);
+    const { aggregatedProducts, groupedByCategory, totalRegular, totalBonus } = React.useMemo(() => {
+        const products = groupItemsByProduct(preSales, activeStatusTab, productCategoryById);
+        const grouped = groupAggregatedProductsByCategory(products);
 
         let tReg = 0;
         let tBonus = 0;
@@ -43,10 +66,11 @@ const DashboardPanel = ({ preSales, onHandoverPress }) => {
 
         return {
             aggregatedProducts: products,
+            groupedByCategory: grouped,
             totalRegular: tReg,
             totalBonus: tBonus,
         };
-    }, [preSales, activeStatusTab]);
+    }, [preSales, activeStatusTab, productCategoryById]);
 
     const animateTransition = () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -130,6 +154,37 @@ const DashboardPanel = ({ preSales, onHandoverPress }) => {
         );
     };
 
+    const renderProductRow = (item) => (
+      <Swipeable
+        key={`${item.key || item.name}-${activeStatusTab}`}
+        renderRightActions={activeStatusTab !== 'pending' ? renderRightActions : undefined}
+        renderLeftActions={activeStatusTab !== 'ready' ? renderLeftActions : undefined}
+        onSwipeableRightOpen={() => activeStatusTab !== 'pending' && handleSwipeRight(item.name)}
+        onSwipeableLeftOpen={() => activeStatusTab !== 'ready' && handleSwipeLeft(item.name)}
+      >
+        <View style={[styles.dashboardRow, {backgroundColor: '#fff', marginBottom: 1}]}>
+          <View style={styles.rowInfo}>
+            <View style={[styles.bulletPoint, {
+              backgroundColor: activeStatusTab === 'ready' ? '#34C759' : (activeStatusTab === 'preparing' ? '#007AFF' : '#F2C94C')
+            }]} />
+            <View>
+              <Text style={styles.rowName}>{item.name}</Text>
+              {(item.regularQty > 0 || item.bonusQty > 0) && (
+                <View style={{flexDirection: 'row', marginTop: 2}}>
+                  {item.regularQty > 0 && <Text style={{fontSize: 11, color: '#43A047', marginRight: 8}}>Venta: {item.regularQty}</Text>}
+                  {item.bonusQty > 0 && <Text style={{fontSize: 11, color: '#007AFF'}}>Regalo: {item.bonusQty}</Text>}
+                </View>
+              )}
+            </View>
+          </View>
+          <View style={styles.rowValueContainer}>
+            <Text style={styles.rowValue}>{item.totalQty}</Text>
+            <Text style={styles.rowUnit}>und</Text>
+          </View>
+        </View>
+      </Swipeable>
+    );
+
     return (
         <View style={{ flex: 1 }}>
             {/* --- PANEL DE PESTAÑAS (TABS) --- */}
@@ -161,37 +216,29 @@ const DashboardPanel = ({ preSales, onHandoverPress }) => {
                     </View>
                 </View>
 
-                {/* --- LISTA DE PRODUCTOS FILTRADA --- */}
-                {aggregatedProducts.map((item) => (
-                     <Swipeable
-                        key={`${item.name}-${activeStatusTab}`} // Key única para forzar re-render al cambiar tab
-                        renderRightActions={activeStatusTab !== 'pending' ? renderRightActions : undefined}
-                        renderLeftActions={activeStatusTab !== 'ready' ? renderLeftActions : undefined}
-                        onSwipeableRightOpen={() => activeStatusTab !== 'pending' && handleSwipeRight(item.name)}
-                        onSwipeableLeftOpen={() => activeStatusTab !== 'ready' && handleSwipeLeft(item.name)}
-                     >
-                         <View style={[styles.dashboardRow, {backgroundColor: '#fff', marginBottom: 1}]}>
-                            <View style={styles.rowInfo}>
-                                <View style={[styles.bulletPoint, {
-                                    backgroundColor: activeStatusTab === 'ready' ? '#34C759' : (activeStatusTab === 'preparing' ? '#007AFF' : '#F2C94C')
-                                }]} />
-                                <View>
-                                    <Text style={styles.rowName}>{item.name}</Text>
-                                    {/* Desglose simplificado */}
-                                    {(item.regularQty > 0 || item.bonusQty > 0) && (
-                                        <View style={{flexDirection: 'row', marginTop: 2}}>
-                                            {item.regularQty > 0 && <Text style={{fontSize: 11, color: '#43A047', marginRight: 8}}>Venta: {item.regularQty}</Text>}
-                                            {item.bonusQty > 0 && <Text style={{fontSize: 11, color: '#007AFF'}}>Regalo: {item.bonusQty}</Text>}
-                                        </View>
-                                    )}
-                                </View>
-                            </View>
-                            <View style={styles.rowValueContainer}>
-                                <Text style={styles.rowValue}>{item.totalQty}</Text>
-                                <Text style={styles.rowUnit}>und</Text>
-                            </View>
+                {/* --- LISTA DE PRODUCTOS AGRUPADA POR CATEGORIA --- */}
+                {groupedByCategory.map((section) => (
+                    <View key={`${activeStatusTab}-${section.category}`} style={{ marginBottom: 10 }}>
+                        <View style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          paddingHorizontal: 6,
+                          paddingVertical: 6,
+                          backgroundColor: '#F3F4F6',
+                          borderRadius: 8,
+                          marginBottom: 6,
+                        }}>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#374151' }}>
+                            {section.category}
+                          </Text>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#6B7280' }}>
+                            {section.totalQty} und
+                          </Text>
                         </View>
-                     </Swipeable>
+
+                        {section.products.map((item) => renderProductRow(item))}
+                    </View>
                 ))}
 
                 {aggregatedProducts.length === 0 && (

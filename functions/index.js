@@ -4,6 +4,27 @@ admin.initializeApp();
 
 const db = admin.firestore();
 
+const sanitizeDocId = (rawId) => {
+    if (typeof rawId !== 'string') return null;
+    const trimmed = rawId.trim();
+    if (!trimmed) return null;
+    if (!trimmed.includes('/')) return trimmed;
+
+    const parts = trimmed.split('/').filter(Boolean);
+    if (parts.length < 2) return null;
+    return parts[parts.length - 1] || null;
+};
+
+const buildCustomerName = (source = {}) => {
+    const direct = typeof source.customerName === 'string' ? source.customerName.trim() : '';
+    if (direct) return direct;
+
+    const firstName = typeof source?.customer?.firstName === 'string' ? source.customer.firstName.trim() : '';
+    const lastName = typeof source?.customer?.lastName === 'string' ? source.customer.lastName.trim() : '';
+    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+    return fullName || 'Cliente';
+};
+
 // Helper para normalizar el payload 'data'
 const getPayload = (data) => {
     if (data && typeof data === 'object' && data.data) {
@@ -150,7 +171,12 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
     const userDoc = await db.collection('users').doc(uid).get();
     const userEmail = userDoc.exists ? (userDoc.data().email || userDoc.data().displayName || uid) : uid;
 
-    const preSaleRef = db.collection('presales').doc(preSaleId);
+    const safePreSaleId = sanitizeDocId(preSaleId);
+    if (!safePreSaleId) {
+        throw new functions.https.HttpsError('invalid-argument', 'preSaleId inválido');
+    }
+
+    const preSaleRef = db.collection('presales').doc(safePreSaleId);
 
     await db.runTransaction(async (t) => {
         const doc = await t.get(preSaleRef);
@@ -167,7 +193,7 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
         }
 
         let nextStatus = 'paid';
-        let creditId = pData.creditId || null;
+        let creditId = sanitizeDocId(pData.creditId) || null;
         let creditRef = null;
         let creditDoc = null;
 
@@ -177,7 +203,7 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
 
             if (!creditDoc || !creditDoc.exists) {
                 const creditQuery = await t.get(
-                    db.collection('credits').where('preSaleId', '==', preSaleId).limit(1)
+                    db.collection('credits').where('preSaleId', '==', safePreSaleId).limit(1)
                 );
                 if (!creditQuery.empty) {
                     creditDoc = creditQuery.docs[0];
@@ -197,9 +223,10 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
                 const status = pending <= 0 ? 'paid' : 'pending';
                 const nextCreditStatus = status === 'paid' ? 'paid' : 'credit_pending';
                 t.set(creditRef, {
-                    preSaleId,
+                    preSaleId: safePreSaleId,
                     customerId: pData.customerId || pData.customer?.id || null,
-                    customerName: pData.customerName || pData.customer?.firstName || 'Cliente',
+                    customerName: buildCustomerName(pData),
+                    clientName: buildCustomerName(pData),
                     total,
                     paid: applyAmount,
                     pending,
@@ -241,7 +268,7 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
 
         const preSaleUpdate = {
             status: nextStatus,
-            creditId: creditId || pData.creditId || null,
+            creditId: creditId || sanitizeDocId(pData.creditId) || null,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             amountPaid: paidAmount,
             change: Math.max(paidAmount - total, 0),

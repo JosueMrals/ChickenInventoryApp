@@ -23,6 +23,40 @@ import { normalizeCategory } from '../constants/productCategories';
 import { useProductCategories } from '../hooks/useProductCategories';
 import { buildUpdateChanges } from '../utils/operationChanges';
 
+const PRODUCT_DISCOUNT_TYPES = [
+  { key: 'percent', label: '%' },
+  { key: 'amount', label: 'C$' },
+];
+
+function buildProductCategoryDiscountRule(minQty, source = null) {
+  return {
+    minQty,
+    discountType: source?.discountType || 'percent',
+    discountValue: source?.discountValue ? String(source.discountValue) : '',
+    active: true,
+  };
+}
+
+function normalizeRuleForCompare(rule = {}) {
+  return {
+    minQty: Math.max(1, Math.floor(Number(rule?.minQty || 0))),
+    discountType: String(rule?.discountType || 'percent').toLowerCase(),
+    discountValue: String(rule?.discountValue || ''),
+  };
+}
+
+function areRuleSetsEqual(left = [], right = []) {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    const a = normalizeRuleForCompare(left[i]);
+    const b = normalizeRuleForCompare(right[i]);
+    if (a.minQty !== b.minQty || a.discountType !== b.discountType || a.discountValue !== b.discountValue) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function isPermissionDeniedError(err) {
   const code = String(err?.code || '').toLowerCase();
   const message = String(err?.message || '').toLowerCase();
@@ -53,6 +87,47 @@ export default function EditProductScreen() {
     return Array.from(merged).sort((a, b) => a.localeCompare(b));
   }, [categories, values?.category]);
 
+  const categoryActivationRules = useMemo(() => {
+    const selectedCategory = normalizeCategory(values?.category).toLowerCase();
+    if (!selectedCategory) return [];
+
+    const row = categoryRows.find((item) => normalizeCategory(item?.name).toLowerCase() === selectedCategory);
+    const rules = Array.isArray(row?.activationRules) ? row.activationRules : [];
+
+    return rules
+      .map((rule) => Math.max(1, Math.floor(Number(rule?.minQty || 0))))
+      .filter((qty) => qty > 0)
+      .sort((a, b) => a - b);
+  }, [categoryRows, values?.category]);
+
+  useEffect(() => {
+    if (!values) return;
+
+    setValues((prev) => {
+      if (!prev) return prev;
+      const activationSet = new Set(categoryActivationRules);
+      const currentRules = Array.isArray(prev.categoryDiscountRules) ? prev.categoryDiscountRules : [];
+
+      if (activationSet.size === 0) {
+        if (currentRules.length === 0) return prev;
+        return { ...prev, categoryDiscountRules: [] };
+      }
+
+      const byQty = currentRules.reduce((acc, rule) => {
+        const qty = Math.max(1, Math.floor(Number(rule?.minQty || 0)));
+        if (!qty) return acc;
+        acc[qty] = rule;
+        return acc;
+      }, {});
+
+      const nextRules = categoryActivationRules.map((minQty) => buildProductCategoryDiscountRule(minQty, byQty[minQty]));
+      if (areRuleSetsEqual(currentRules, nextRules)) {
+        return prev;
+      }
+      return { ...prev, categoryDiscountRules: nextRules };
+    });
+  }, [categoryActivationRules]);
+
   useEffect(() => {
     // --- Lógica de carga actualizada ---
     const loadedValues = {
@@ -81,6 +156,20 @@ export default function EditProductScreen() {
             bonusQuantity: String(initialProduct.bonus.bonusQuantity || ''),
           }
         ] : []),
+      categoryDiscountRules: (initialProduct.categoryDiscountRules && Array.isArray(initialProduct.categoryDiscountRules))
+        ? initialProduct.categoryDiscountRules.map((rule) => ({
+            ...rule,
+            minQty: String(rule?.minQty || ''),
+            discountValue: String(rule?.discountValue || ''),
+          }))
+        : (initialProduct.categoryDiscountType && Number(initialProduct.categoryDiscountValue || 0) > 0
+          ? [{
+              minQty: '1',
+              discountType: initialProduct.categoryDiscountType,
+              discountValue: String(initialProduct.categoryDiscountValue),
+              active: true,
+            }]
+          : []),
     };
     
     loadedValues.wholesalePrices.forEach(wp => {
@@ -166,6 +255,16 @@ export default function EditProductScreen() {
     if (values.purchasePrice && (Number.isNaN(Number(values.purchasePrice)) || Number(values.purchasePrice) < 0)) return { ok: false, msg: 'Costo de compra inválido.' };
     if (values.salePrice && (Number.isNaN(Number(values.salePrice)) || Number(values.salePrice) < 0)) return { ok: false, msg: 'Precio de venta inválido.' };
 
+    if (Array.isArray(values.categoryDiscountRules)) {
+      for (const rule of values.categoryDiscountRules) {
+        const discountType = String(rule?.discountType || '').toLowerCase();
+        const discountValue = Number(rule?.discountValue || 0);
+        if (!discountValue) continue;
+        if (!['percent', 'amount'].includes(discountType)) return { ok: false, msg: 'Tipo de descuento por categoria invalido.' };
+        if (!Number.isFinite(discountValue) || discountValue <= 0) return { ok: false, msg: 'El descuento por categoria debe ser mayor a 0.' };
+      }
+    }
+
     // --- Nueva validación de bonificaciones ---
     if (values.bonuses && values.bonuses.length > 0) {
       if (values.bonuses.length > 5) return { ok: false, msg: 'Máximo 5 bonificaciones permitidas.' };
@@ -209,18 +308,35 @@ export default function EditProductScreen() {
           bonusQuantity: Number(b.bonusQuantity),
         }));
 
-      const payload = {
-        name: values.name,
-        barcode: values.barcode,
-        category: normalizeCategory(values.category),
-        description: values.description || '',
-        purchasePrice: values.purchasePrice ? Number(values.purchasePrice) : 0,
-        profitMargin: values.profitMargin ? Number(values.profitMargin) : 0,
-        salePrice: values.salePrice ? Number(values.salePrice) : 0,
-        measureType: values.measureType,
-        wholesalePrices: processedWholesale,
-        bonuses: bonusesPayload,
-      };
+      const productCategoryDiscountRules = (values.categoryDiscountRules || [])
+        .map((rule) => ({
+          minQty: Math.max(1, Math.floor(Number(rule?.minQty || 0))),
+          discountType: String(rule?.discountType || '').toLowerCase(),
+          discountValue: Number(rule?.discountValue || 0),
+          active: rule?.active !== false,
+        }))
+        .filter((rule) => rule.minQty > 0 && ['percent', 'amount'].includes(rule.discountType) && rule.discountValue > 0)
+        .sort((a, b) => a.minQty - b.minQty);
+
+       const payload = {
+         name: values.name,
+         barcode: values.barcode,
+         category: normalizeCategory(values.category),
+         description: values.description || '',
+         purchasePrice: values.purchasePrice ? Number(values.purchasePrice) : 0,
+         profitMargin: values.profitMargin ? Number(values.profitMargin) : 0,
+         salePrice: values.salePrice ? Number(values.salePrice) : 0,
+         measureType: values.measureType,
+         wholesalePrices: processedWholesale,
+         categoryDiscountRules: productCategoryDiscountRules,
+         bonuses: bonusesPayload,
+       };
+
+      const firstCategoryDiscountRule = productCategoryDiscountRules[0];
+      if (firstCategoryDiscountRule) {
+        payload.categoryDiscountType = firstCategoryDiscountRule.discountType;
+        payload.categoryDiscountValue = firstCategoryDiscountRule.discountValue;
+      }
 
       // Enviar legacy `bonus` para compatibilidad usando la primera bonificacion activa, o la primera si no hay activas
       const firstActiveBonus = bonusesPayload.find(b => b.enabled);
@@ -275,6 +391,19 @@ export default function EditProductScreen() {
 
   function setField(field, value) {
     setValues(v => ({ ...v, [field]: value }));
+  }
+
+  function updateCategoryDiscountRule(minQty, patch) {
+    setValues((prev) => {
+      if (!prev) return prev;
+      const currentRules = Array.isArray(prev.categoryDiscountRules) ? prev.categoryDiscountRules : [];
+      const nextRules = currentRules.map((rule) => {
+        const qty = Math.max(1, Math.floor(Number(rule?.minQty || 0)));
+        if (qty !== minQty) return rule;
+        return { ...rule, ...patch, minQty: qty };
+      });
+      return { ...prev, categoryDiscountRules: nextRules };
+    });
   }
 
   // --- Handler para cambios en el componente de bonificación ---
@@ -418,6 +547,50 @@ export default function EditProductScreen() {
          </View>
         </View>
 
+        {categoryActivationRules.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Descuento por Categoria (Producto)</Text>
+            <Text style={styles.helperText}>La cantidad minima se define en Categorias. Aqui solo defines el valor para este producto.</Text>
+
+            {categoryActivationRules.map((minQty) => {
+              const rule = (values.categoryDiscountRules || []).find((r) => Math.max(1, Math.floor(Number(r?.minQty || 0))) === minQty);
+              const discountValue = rule?.discountValue || '';
+              const discountType = rule?.discountType || 'percent';
+
+              return (
+                <View key={minQty} style={styles.discountRuleRow}>
+                  <Text style={styles.discountRuleLabel}>A partir de {minQty} unid.</Text>
+                  <View style={styles.discountRuleInputs}>
+                    <TextInput
+                      style={styles.discountValueInput}
+                      keyboardType="numeric"
+                      value={String(discountValue)}
+                      onChangeText={(text) => {
+                        const numValue = Number(text);
+                        if (Number.isNaN(numValue) || numValue < 0) return;
+                        updateCategoryDiscountRule(minQty, { discountValue: numValue });
+                      }}
+                      placeholder="0"
+
+                    />
+                    <View style={styles.discountTypeContainer}>
+                      {PRODUCT_DISCOUNT_TYPES.map((type) => (
+                        <TouchableOpacity
+                          key={type.key}
+                          style={[styles.discountTypeButton, discountType === type.key && styles.discountTypeButtonActive]}
+                          onPress={() => updateCategoryDiscountRule(minQty, { discountType: type.key })}
+                        >
+                          <Text style={[styles.discountTypeText, discountType === type.key && styles.discountTypeTextActive]}>{type.label}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {/* --- SECCIÓN DE BONIFICACIONES REFACTORIZADA --- */}
         <BonusSetup bonuses={values.bonuses} onChange={handleBonusesChange} />
 
@@ -501,6 +674,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 16 },
   label: { fontSize: 13, color: '#666', marginBottom: 6, fontWeight: '600', textTransform: 'uppercase' },
   subLabel: { fontSize: 11, color: '#888', marginBottom: 4, fontWeight: '600' },
+  helperText: { fontSize: 12, color: '#64748B', marginBottom: 10 },
   input: { backgroundColor: '#F5F6FA', padding: 12, borderRadius: 10, fontSize: 16, color: '#333', marginBottom: 16, borderWidth: 1, borderColor: '#F0F0F0' },
   inputWithIconContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F6FA', borderRadius: 10, borderWidth: 1, borderColor: '#F0F0F0', marginBottom: 16, paddingRight: 8 },
   inputNoBorder: { padding: 12, fontSize: 16, color: '#333' },
@@ -547,4 +721,21 @@ const styles = StyleSheet.create({
   categoryListItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   categoryListText: { fontSize: 14, color: '#263238', fontWeight: '600' },
   categoryDeleteBtn: { padding: 6 },
+  discountRuleRow: { marginBottom: 16 },
+  discountRuleLabel: { fontSize: 14, color: '#333', marginBottom: 8 },
+  discountRuleInputs: { flexDirection: 'row', alignItems: 'center' },
+  discountValueInput: { flex: 1, padding: 12, borderRadius: 8, fontSize: 16, color: '#333', backgroundColor: '#F5F6FA', borderWidth: 1, borderColor: '#E0E0E0', marginRight: 8 },
+  discountTypeContainer: { flexDirection: 'row' },
+  discountTypeButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#F0F0F0',
+    borderWidth: 1,
+    borderColor: '#D0D0D0',
+    marginRight: 8,
+  },
+  discountTypeButtonActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  discountTypeText: { fontSize: 14, color: '#333', fontWeight: '600' },
+  discountTypeTextActive: { color: '#fff' },
 });

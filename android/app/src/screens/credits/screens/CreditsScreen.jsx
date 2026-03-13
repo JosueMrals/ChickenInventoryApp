@@ -22,9 +22,11 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-export default function CreditsScreen({ route }) {
+export default function CreditsScreen({ route, user: userProp, role: roleProp }) {
   const navigation = useNavigation();
-  const { user, role, initialFilter } = route.params || {};
+  const { user: routeUser, role: routeRole, initialFilter } = route.params || {};
+  const user = routeUser || userProp || null;
+  const role = routeRole || roleProp || null;
   const [search, setSearch] = useState('');
   const {
     loading,
@@ -119,6 +121,7 @@ export default function CreditsScreen({ route }) {
               onAbonar={openModal}
               onDelete={handleDelete}
               onEditPreSale={handleEditPreSale}
+              onViewDetail={(credit) => navigation.navigate('CreditDetail', { credit, user, role })}
             />
           )}
           contentContainerStyle={styles.listContent}

@@ -2,7 +2,7 @@ import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import styles from '../styles/creditsStyles';
 
-export default function CreditCard({ item, role, onAbonar, onDelete, onEditPreSale }) {
+export default function CreditCard({ item, role, onAbonar, onDelete, onEditPreSale, onViewDetail }) {
   const name = item.customerName || item.clientName || 'Cliente';
   const total = Number(item.total) || 0;
   const paid = Number(item.paid) || 0;
@@ -55,6 +55,12 @@ export default function CreditCard({ item, role, onAbonar, onDelete, onEditPreSa
       )}
 
       <View style={styles.actionsRow}>
+        <TouchableOpacity
+          onPress={() => onViewDetail && onViewDetail(item)}
+          style={[styles.btn, styles.btnSecondaryCompact]}
+        >
+          <Text style={styles.btnText}>Detalle</Text>
+        </TouchableOpacity>
         {canEditPreSale && (
           <TouchableOpacity
             onPress={() => onEditPreSale && onEditPreSale(item)}

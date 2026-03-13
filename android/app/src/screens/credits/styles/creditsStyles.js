@@ -323,4 +323,45 @@ export default StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
+  detailContent: {
+    padding: 12,
+    paddingBottom: 24,
+  },
+  detailCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    elevation: 1,
+  },
+  detailCustomer: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 6,
+  },
+  detailMeta: {
+    fontSize: 12,
+    color: '#475569',
+    marginBottom: 4,
+  },
+  paymentItemCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  paymentItemTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  paymentItemMeta: {
+    fontSize: 12,
+    color: '#475569',
+    marginBottom: 2,
+  },
 });

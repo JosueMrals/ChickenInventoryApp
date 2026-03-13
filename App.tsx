@@ -6,7 +6,6 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import auth from '@react-native-firebase/auth';
 import appCheck from '@react-native-firebase/app-check'; // Importar App Check
-import appDistribution from '@react-native-firebase/app-distribution';
 
 import LoginScreen from './android/app/src/screens/LoginScreen';
 import Sidebar from './android/app/src/components/Sidebar';
@@ -19,6 +18,7 @@ import CustomerFormModal from './android/app/src/screens/customer/CustomerFormMo
 import DashboardScreen from './android/app/src/screens/dashboard/DashboardScreen';
 import CreditsScreen from './android/app/src/screens/credits/screens/CreditsScreen';
 import CreditsHistoryScreen from './android/app/src/screens/credits/screens/CreditsHistoryScreen';
+import CreditDetailScreen from './android/app/src/screens/credits/screens/CreditDetailScreen';
 
 import QuickSaleStack from './android/app/src/navigation/QuickSaleStack';
 import PreSaleStack from './android/app/src/navigation/PreSaleStack';
@@ -50,6 +50,11 @@ import useSessionTimeout from "./android/app/src/hooks/useSessionTimeout";
 import { SessionManager } from './android/app/src/utils/SessionManager';
 import { PreSaleProvider } from './android/app/src/screens/presales/context/preSaleContext';
 import { RouteProvider } from './android/app/src/context/RouteContext';
+import {
+  checkForUpdateSafe,
+  downloadReleaseSafe,
+  isNotSupportedError,
+} from './android/app/src/services/appDistributionService';
 
 export const navigationRef = createNavigationContainerRef();
 
@@ -91,6 +96,13 @@ function AppDrawer({ route }) {
       <Drawer.Screen name="CreditsHistory">
         {(props) => <CreditsHistoryScreen {...props} user={user} role={role} />}
       </Drawer.Screen>
+      <Drawer.Screen
+        name="CreditDetail"
+        component={CreditDetailScreen}
+        options={{
+          drawerItemStyle: { display: 'none' },
+        }}
+      />
       <Drawer.Screen
         name="QuickSales"
         component={QuickSaleStack}
@@ -207,23 +219,22 @@ export default function App() {
   // Como `App` se monta una vez, este useEffect corre al arrancar la app.
   useEffect(() => {
     async function checkUpdates() {
-      // Intentar verificar actualización, ignorando errores de entorno dev
       try {
-        const release = await appDistribution().checkForUpdate();
+        const release = await checkForUpdateSafe();
         if (release && release.downloadUrl) {
           Alert.alert(
-            'Nueva Actualización Disponible',
-            `Versión ${release.displayVersion} (${release.versionCode}).\n¿Deseas descargarla e instalarla ahora?`,
+            'Nueva Actualizacion Disponible',
+            `Version ${release.displayVersion} (${release.versionCode}).\nDeseas descargarla e instalarla ahora?`,
             [
               {
-                text: 'Más tarde',
+                text: 'Mas tarde',
                 style: 'cancel',
               },
               {
                 text: 'Actualizar',
                 onPress: async () => {
                   try {
-                    await release.download();
+                    await downloadReleaseSafe(release);
                   } catch (err) {
                     Alert.alert('Error', 'No se pudo iniciar la descarga.');
                     console.log('Download error:', err);
@@ -235,11 +246,10 @@ export default function App() {
           );
         }
       } catch (error) {
-        // Silenciar error si es entorno no soportado (dev/simulador) para no molestar
-        if (error.message && error.message.includes("not supported")) {
-             console.log("App Distribution check skipped: Not supported in this environment.");
+        if (isNotSupportedError(error)) {
+          console.log('App Distribution check skipped: Not supported in this environment.');
         } else {
-             console.log('App Distribution check error:', error);
+          console.log('App Distribution check error:', error);
         }
       }
     }

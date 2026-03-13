@@ -10,6 +10,21 @@ import { resolveCustomerName } from '../../utils/customerUtils';
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
+function formatCategoryRule(item) {
+    const minQty = Number(item?.categoryDiscountMinQty || 0);
+    const type = String(item?.categoryDiscountType || '').toLowerCase();
+    const value = Number(item?.categoryDiscountValue || 0);
+    if (!minQty || !value || !['percent', 'amount'].includes(type)) return null;
+    const valueText = type === 'percent' ? `${value}%` : formatCurrency(value);
+    return `${minQty}+ -> ${valueText}`;
+}
+
+const CompactChip = React.memo(({ text, tone = 'neutral' }) => (
+    <View style={[styles.compactChip, tone === 'category' && styles.compactChipCategory, tone === 'manual' && styles.compactChipManual]}>
+        <Text style={[styles.compactChipText, tone === 'category' && styles.compactChipTextCategory, tone === 'manual' && styles.compactChipTextManual]}>{text}</Text>
+    </View>
+));
+
 const SectionTitle = React.memo(({ title, color }) => (
     <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, color && { color }]}>{title}</Text>
@@ -26,19 +41,41 @@ const InfoRow = React.memo(({ label, value, icon }) => (
     </View>
 ));
 
-const ItemCard = React.memo(({ item, isBonus = false }) => (
-    <View style={[styles.itemCard, isBonus && styles.bonusItemCard]}>
-        <View style={styles.itemInfo}>
-            <Text style={styles.itemName}>{item.productName}</Text>
-            <Text style={styles.itemDetails}>
-                {isBonus ? `${item.quantity} x GRATIS` : `${item.quantity} x ${formatCurrency(item.unitPrice)}`}
-            </Text>
+const ItemCard = React.memo(({ item, isBonus = false }) => {
+    const categoryRuleText = formatCategoryRule(item);
+    const hasManualDiscount = Number(item?.discount || 0) > 0;
+
+    return (
+        <View style={[styles.itemCard, isBonus && styles.bonusItemCard]}>
+            <View style={styles.itemInfo}>
+                <Text style={styles.itemName}>{item.productName}</Text>
+                <Text style={styles.itemDetails}>
+                    {isBonus ? `${item.quantity} x GRATIS` : `${item.quantity} x ${formatCurrency(item.unitPrice)}`}
+                </Text>
+
+                {!isBonus && (
+                    <View style={styles.compactChipRow}>
+                        {item.pricingSource === 'category' && categoryRuleText ? (
+                            <CompactChip text={`Categoria ${categoryRuleText}`} tone="category" />
+                        ) : null}
+                        {item.pricingSource === 'wholesale' ? (
+                            <CompactChip text="Mayorista" />
+                        ) : null}
+                        {item.pricingSource === 'customer' ? (
+                            <CompactChip text="Descuento cliente" />
+                        ) : null}
+                        {hasManualDiscount ? (
+                            <CompactChip text="Descuento manual" tone="manual" />
+                        ) : null}
+                    </View>
+                )}
+            </View>
+            {isBonus && (
+                <View style={styles.bonusTag}><Text style={styles.bonusTagText}>REGALO</Text></View>
+            )}
         </View>
-        {isBonus && (
-            <View style={styles.bonusTag}><Text style={styles.bonusTagText}>REGALO</Text></View>
-        )}
-    </View>
-));
+    );
+});
 
 const HistoryItem = React.memo(({ item, onPress }) => (
     <TouchableOpacity style={styles.historyItem} onPress={() => onPress(item)}>
@@ -53,10 +90,13 @@ const HistoryItem = React.memo(({ item, onPress }) => (
     </TouchableOpacity>
 ));
 
-const FinancialSummary = React.memo(({ presale }) => (
+const FinancialSummary = React.memo(({ presale, categoryDiscountTotal = 0 }) => (
     <View style={styles.financialSection}>
         <InfoRow label="Subtotal" value={formatCurrency(presale.subtotal)} />
         <InfoRow label="Descuentos" value={`-${formatCurrency(presale.totalDiscount)}`} />
+        {categoryDiscountTotal > 0 ? (
+            <InfoRow label="Desc. categoria" value={`-${formatCurrency(categoryDiscountTotal)}`} />
+        ) : null}
         <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
             <Text style={styles.totalValue}>{formatCurrency(presale.total)}</Text>
@@ -152,12 +192,32 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         }
     }, [deleteReason, deletePreSale, navigation, presale.id]);
 
+    const categoryDiscountTotal = useMemo(() => {
+        if (Number(presale?.categoryDiscountTotal || 0) > 0) {
+            return Number(presale.categoryDiscountTotal);
+        }
+
+        const items = Array.isArray(presale?.items) ? presale.items : [];
+        const byCategory = items.reduce((acc, item) => {
+            if (item?.pricingSource !== 'category') return acc;
+            const key = String(item?.category || item?.categoryName || 'sin_categoria').toLowerCase();
+            acc[key] = (acc[key] || 0) + Number(item?.autoDiscountTotal || 0);
+            return acc;
+        }, {});
+
+        return Object.values(byCategory).reduce((sum, value) => sum + Number((Number(value) || 0).toFixed(2)), 0);
+    }, [presale]);
+
     const listData = useMemo(() => {
         const data = [];
         const customerName = resolveCustomerName(presale, customersById);
+        const totalItems = (presale.items || []).length;
+        const totalBonuses = (presale.bonuses || []).length;
+
         data.push({ type: 'section_title', key: 'title_customer', title: 'Cliente' });
         data.push({ type: 'info_row', key: 'customer_name', icon: 'person-outline', label: 'Nombre', value: customerName });
         data.push({ type: 'info_row', key: 'date', icon: 'calendar-outline', label: 'Fecha', value: presale.createdAt?.toDate ? presale.createdAt.toDate().toLocaleDateString('es-ES') : 'N/A' });
+        data.push({ type: 'info_row', key: 'status', icon: 'flag-outline', label: 'Estado', value: String(presale.status || 'N/A').toUpperCase() });
         data.push({
             type: 'info_row',
             key: 'payment_method',
@@ -169,6 +229,11 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         // Mostrar Ruta si existe
         if (presale.route) {
              data.push({ type: 'info_row', key: 'route_info', icon: 'location-outline', label: 'Ruta', value: presale.route.name });
+        }
+
+        data.push({ type: 'info_row', key: 'items_count', icon: 'list-outline', label: 'Items', value: `${totalItems}` });
+        if (totalBonuses > 0) {
+            data.push({ type: 'info_row', key: 'bonuses_count', icon: 'gift-outline', label: 'Bonificados', value: `${totalBonuses}` });
         }
 
         data.push({ type: 'section_title', key: 'title_products', title: 'Productos' });
@@ -190,19 +255,19 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         }
 
         return data;
-    }, [presale, history, loadingHistory, customersById]);
+    }, [presale, history, loadingHistory, customersById, categoryDiscountTotal]);
 
     const renderItem = useCallback(({ item }) => {
         switch (item.type) {
             case 'section_title': return <SectionTitle title={item.title} color={item.color} />;
             case 'info_row': return <InfoRow label={item.label} value={item.value} icon={item.icon} />;
             case 'item_card': return <ItemCard item={item} isBonus={item.isBonus} />;
-            case 'financial_summary': return <FinancialSummary presale={presale} />;
+            case 'financial_summary': return <FinancialSummary presale={presale} categoryDiscountTotal={categoryDiscountTotal} />;
             case 'history_item': return <HistoryItem item={item} onPress={openHistoryModal} />;
             case 'loader': return <ActivityIndicator style={{ margin: 20 }} />;
             default: return null;
         }
-    }, [openHistoryModal, presale]);
+    }, [openHistoryModal, presale, categoryDiscountTotal]);
 
     const keyExtractor = useCallback((item) => item.key, []);
 
@@ -335,6 +400,13 @@ const styles = StyleSheet.create({
     itemInfo: { flex: 1 },
     itemName: { fontSize: 15, fontWeight: '600', color: '#333' },
     itemDetails: { fontSize: 13, color: '#777', marginTop: 2 },
+    compactChipRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 6 },
+    compactChip: { backgroundColor: '#EEF2F7', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
+    compactChipCategory: { backgroundColor: '#DBEAFE' },
+    compactChipManual: { backgroundColor: '#FEE2E2' },
+    compactChipText: { fontSize: 11, fontWeight: '700', color: '#334155' },
+    compactChipTextCategory: { color: '#1D4ED8' },
+    compactChipTextManual: { color: '#B91C1C' },
     bonusTag: { backgroundColor: '#007AFF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
     bonusTagText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
     financialSection: { backgroundColor: 'white', borderRadius: 12, elevation: 1, marginVertical: 10 },

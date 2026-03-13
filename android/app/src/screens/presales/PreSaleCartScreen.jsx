@@ -9,6 +9,7 @@ import styles from "../quicksalesNew/styles/quickCartStyles";
 import globalStyles from "../../styles/globalStyles";
 
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
+const roundTo2 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
 const formatPreSaleError = (error) => {
   const message = error?.message || '';
@@ -72,6 +73,17 @@ export default function PreSaleCartScreen({ navigation }) {
   const totalDiscount = useMemo(() => 
     soldItems.reduce((sum, item) => sum + (Number(item.discount) || 0), 0), 
     [soldItems]
+  );
+  const categoryAutoDiscount = useMemo(() => {
+    const byCategory = soldItems.reduce((acc, item) => {
+      if (item.pricingSource !== 'category') return acc;
+      const categoryKey = String(item?.product?.category || 'sin_categoria').toLowerCase();
+      acc[categoryKey] = (acc[categoryKey] || 0) + (Number(item.autoDiscountTotal) || 0);
+      return acc;
+    }, {});
+
+    return Object.values(byCategory).reduce((sum, value) => sum + roundTo2(value), 0);
+  }, [soldItems]
   );
   const total = subtotal - totalDiscount;
   const showSummaryBreakdown = totalDiscount > 0;
@@ -246,6 +258,12 @@ export default function PreSaleCartScreen({ navigation }) {
                 <View style={styles.row}><Text style={styles.label}>Subtotal</Text><Text style={styles.value}>{formatCurrency(subtotal)}</Text></View>
                 <View style={styles.row}><Text style={styles.label}>Descuentos</Text><Text style={styles.value}>-{formatCurrency(totalDiscount)}</Text></View>
               </>
+            )}
+            {categoryAutoDiscount > 0 && (
+              <View style={styles.row}>
+                <Text style={styles.label}>Desc. categoria aplicado</Text>
+                <Text style={styles.value}>{formatCurrency(categoryAutoDiscount)}</Text>
+              </View>
             )}
             <View style={styles.rowTotal}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>{formatCurrency(total)}</Text></View>
 
