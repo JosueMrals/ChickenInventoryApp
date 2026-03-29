@@ -132,7 +132,7 @@ export default function CreditDetailScreen({ navigation, route }) {
             <Text style={styles.paymentItemMeta}>Fecha: {formatDate(item?.date)}</Text>
             <Text style={styles.paymentItemMeta}>Registrado por: {item?.by || 'N/A'}</Text>
             <Text style={styles.paymentItemMeta}>
-              Saldo: C${Number(item?.previousPending || 0).toFixed(2)} -> C${Number(item?.newPending || 0).toFixed(2)}
+              Saldo: C${Number(item?.previousPending || 0).toFixed(2)} {'->'} C${Number(item?.newPending || 0).toFixed(2)}
             </Text>
           </View>
         )}

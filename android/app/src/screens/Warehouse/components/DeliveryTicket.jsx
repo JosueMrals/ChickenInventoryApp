@@ -1,6 +1,33 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
 
+function normalizeKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function resolveBonusQty(bonus) {
+  return Number(bonus?.quantity || bonus?.qty || bonus?.bonusQty || 0);
+}
+
+function resolveBonusName(bonus) {
+  return bonus?.productName || bonus?.name || bonus?.product?.name || 'Regalo';
+}
+
+function resolveBonusLinkKeys(bonus) {
+  const keys = [
+    bonus?.linkedTo,
+    bonus?.linkedToId,
+    bonus?.linkedItemId,
+    bonus?.linkedProductId,
+    bonus?.sourceProductId,
+    bonus?.productId,
+  ].map(normalizeKey).filter(Boolean);
+
+  const linkedName = normalizeKey(bonus?.linkedProductName || bonus?.linkedToName || bonus?.sourceProductName);
+  if (linkedName) keys.push(linkedName);
+  return Array.from(new Set(keys));
+}
+
 const DeliveryTicket = ({ sale, settings }) => {
   if (!sale) return null;
 
@@ -24,6 +51,53 @@ const DeliveryTicket = ({ sale, settings }) => {
   const bonuses = sale.bonusesAwarded || sale.bonuses || [];
   const hasBonuses = Array.isArray(bonuses) && bonuses.length > 0;
   const isCredit = sale.paymentMethod === 'credit' || String(sale.status || '').startsWith('credit_');
+
+  const bonusesByLink = useMemo(() => {
+    if (!hasBonuses) return new Map();
+    const grouped = new Map();
+
+    bonuses.forEach((bonus, index) => {
+      const normalized = {
+        ...bonus,
+        __idx: index,
+        __qty: resolveBonusQty(bonus),
+        __name: resolveBonusName(bonus),
+      };
+
+      const keys = resolveBonusLinkKeys(bonus);
+      if (!keys.length) {
+        const list = grouped.get('__unlinked__') || [];
+        list.push(normalized);
+        grouped.set('__unlinked__', list);
+        return;
+      }
+
+      keys.forEach((key) => {
+        const list = grouped.get(key) || [];
+        list.push(normalized);
+        grouped.set(key, list);
+      });
+    });
+
+    return grouped;
+  }, [bonuses, hasBonuses]);
+
+  const bonusKpis = useMemo(() => {
+    if (!hasBonuses) return { skuCount: 0, unitsCount: 0 };
+
+    const skuIds = new Set();
+    let units = 0;
+    bonuses.forEach((bonus, idx) => {
+      const skuKey = normalizeKey(bonus?.productId || bonus?.id || bonus?.productName || bonus?.name || `bonus_${idx}`);
+      if (skuKey) skuIds.add(skuKey);
+      units += resolveBonusQty(bonus);
+    });
+
+    return {
+      skuCount: skuIds.size,
+      unitsCount: Number(units.toFixed(2)),
+    };
+  }, [bonuses, hasBonuses]);
 
   const categoryDiscountTotal = useMemo(() => {
     if (Number(sale?.categoryDiscountTotal || 0) > 0) return Number(sale.categoryDiscountTotal);
@@ -91,6 +165,33 @@ const DeliveryTicket = ({ sale, settings }) => {
     return null;
   };
 
+  const getItemBonuses = (item) => {
+    if (!hasBonuses) return [];
+
+    const keys = [
+      item?.id,
+      item?.productId,
+      item?.product?.id,
+      item?.linkedTo,
+      item?.linkedProductId,
+      item?.productName,
+      item?.name,
+    ].map(normalizeKey).filter(Boolean);
+
+    const bucket = [];
+    const used = new Set();
+    keys.forEach((key) => {
+      const linked = bonusesByLink.get(key) || [];
+      linked.forEach((bonus) => {
+        if (used.has(bonus.__idx)) return;
+        used.add(bonus.__idx);
+        bucket.push(bonus);
+      });
+    });
+
+    return bucket;
+  };
+
   return (
     <ScrollView style={styles.container}>
       {headerUri ? (
@@ -102,7 +203,7 @@ const DeliveryTicket = ({ sale, settings }) => {
       </Text>
       {isCredit && (
         <View style={styles.creditBanner}>
-          <Text style={[styles.creditBannerText, { fontFamily, fontSize: baseFontSize - 1 }]}>PRE-VENTA A CRÉDITO</Text>
+          <Text style={[styles.creditBannerText, { fontFamily, fontSize: baseFontSize - 1 }]}>PRE-VENTA A CREDITO</Text>
         </View>
       )}
 
@@ -115,7 +216,16 @@ const DeliveryTicket = ({ sale, settings }) => {
       <Text style={[styles.value, { fontFamily, fontSize: baseFontSize + 2 }]}>{getFormattedDate(sale.fechaPago)}</Text>
 
       <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Tipo:</Text>
-      <Text style={[styles.value, { fontFamily, fontSize: baseFontSize + 2 }]}>{isCredit ? 'Crédito' : 'Contado'}</Text>
+      <Text style={[styles.value, { fontFamily, fontSize: baseFontSize + 2 }]}>{isCredit ? 'Credito' : 'Contado'}</Text>
+
+      {hasBonuses && (
+        <View style={styles.bonusSummaryCard}>
+          <Text style={[styles.bonusSummaryTitle, { fontFamily, fontSize: baseFontSize - 1 }]}>Bonificaciones aplicadas</Text>
+          <Text style={[styles.bonusSummaryKpi, { fontFamily, fontSize: baseFontSize - 2 }]}>
+            {bonusKpis.skuCount} producto(s) regalo · {bonusKpis.unitsCount} unidad(es)
+          </Text>
+        </View>
+      )}
 
       <View style={styles.divider} />
 
@@ -128,6 +238,8 @@ const DeliveryTicket = ({ sale, settings }) => {
       {sale.items && sale.items.map((item, index) => {
         const pricingTag = getPricingTag(item);
         const hasManualDiscount = Number(item?.discount || 0) > 0;
+        const itemBonuses = getItemBonuses(item);
+        const itemBonusUnits = itemBonuses.reduce((sum, bonus) => sum + Number(bonus.__qty || 0), 0);
 
         return (
           <View key={index} style={styles.itemBox}>
@@ -139,8 +251,7 @@ const DeliveryTicket = ({ sale, settings }) => {
               </Text>
             </View>
             <View style={styles.itemMetaRow}>
-              <Text style={[styles.itemMetaText, { fontFamily, fontSize: baseFontSize - 2 }]}
-              >
+              <Text style={[styles.itemMetaText, { fontFamily, fontSize: baseFontSize - 2 }]}>
                 {item.quantity} x ${(Number(item.unitPrice) || 0).toFixed(2)}
               </Text>
               {pricingTag ? <Text style={[styles.itemTag, { fontFamily, fontSize: baseFontSize - 3 }]}>{pricingTag}</Text> : null}
@@ -148,9 +259,34 @@ const DeliveryTicket = ({ sale, settings }) => {
             {hasManualDiscount ? (
               <Text style={[styles.manualDiscountText, { fontFamily, fontSize: baseFontSize - 3 }]}>Manual: -${Number(item.discount || 0).toFixed(2)}</Text>
             ) : null}
+
+            {itemBonuses.length > 0 && (
+              <View style={styles.bonusItemCard}>
+                <Text style={[styles.bonusItemHeader, { fontFamily, fontSize: baseFontSize - 3 }]}>Regalos por este producto ({itemBonusUnits})</Text>
+                {itemBonuses.map((bonus, bonusIndex) => (
+                  <View key={`${bonus.__idx}_${bonusIndex}`} style={styles.bonusRowCompact}>
+                    <Text style={[styles.bonusQtyCompact, { fontFamily, fontSize: baseFontSize - 3 }]}>+{Number(bonus.__qty || 0)}</Text>
+                    <Text style={[styles.bonusNameCompact, { fontFamily, fontSize: baseFontSize - 3 }]} numberOfLines={2}>
+                      {bonus.__name}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         );
       })}
+
+      {hasBonuses && (bonusesByLink.get('__unlinked__') || []).length > 0 && (
+        <View style={styles.unlinkedBonusBox}>
+          <Text style={[styles.unlinkedBonusTitle, { fontFamily, fontSize: baseFontSize - 3 }]}>Bonificaciones sin vinculo directo</Text>
+          {(bonusesByLink.get('__unlinked__') || []).map((bonus, idx) => (
+            <Text key={`unlinked_${idx}`} style={[styles.unlinkedBonusText, { fontFamily, fontSize: baseFontSize - 3 }]}>
+              +{Number(bonus.__qty || 0)} {bonus.__name}
+            </Text>
+          ))}
+        </View>
+      )}
 
       <View style={styles.divider} />
 
@@ -206,7 +342,7 @@ const DeliveryTicket = ({ sale, settings }) => {
         </View>
       )}
 
-      <Text style={[styles.footer, { fontFamily, fontSize: baseFontSize - 2 }]}>¡Gracias por su compra!</Text>
+      <Text style={[styles.footer, { fontFamily, fontSize: baseFontSize - 2 }]}>Gracias por su compra</Text>
     </ScrollView>
   );
 };
@@ -316,33 +452,67 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '600'
   },
-  bonusHeader: {
-      fontSize: 12,
-      fontWeight: 'bold',
-      color: '#e67eff',
-      marginBottom: 4
+  bonusSummaryCard: {
+    marginTop: 2,
+    backgroundColor: '#F3E8FF',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  bonusRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 4
+  bonusSummaryTitle: {
+    color: '#6D28D9',
+    fontWeight: '800',
   },
-  bonusQty: {
-      width: 32,
-      fontSize: 12,
-      fontWeight: '700',
-      color: '#555'
+  bonusSummaryKpi: {
+    marginTop: 2,
+    color: '#7C3AED',
+    fontWeight: '600',
   },
-  bonusInfo: {
-      flex: 1
+  bonusItemCard: {
+    marginTop: 5,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 4,
   },
-  bonusName: {
-      fontSize: 12,
-      color: '#555'
+  bonusItemHeader: {
+    color: '#475569',
+    fontWeight: '800',
   },
-  bonusRef: {
-      fontSize: 11,
-      color: '#888'
+  bonusRowCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  bonusQtyCompact: {
+    width: 38,
+    color: '#6D28D9',
+    fontWeight: '800',
+  },
+  bonusNameCompact: {
+    flex: 1,
+    color: '#334155',
+    fontWeight: '600',
+  },
+  unlinkedBonusBox: {
+    marginTop: 6,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  unlinkedBonusTitle: {
+    color: '#9A3412',
+    fontWeight: '800',
+    marginBottom: 3,
+  },
+  unlinkedBonusText: {
+    color: '#7C2D12',
+    fontWeight: '600',
   },
   footer: {
     marginTop: 20,

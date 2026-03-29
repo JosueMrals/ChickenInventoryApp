@@ -1,0 +1,10 @@
+﻿C:\ChickenInventoryApp\android\app\src\main\res\mipmap-hdpi\ic_launcher.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-hdpi\ic_launcher_round.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-mdpi\ic_launcher.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-mdpi\ic_launcher_round.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-xhdpi\ic_launcher.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-xhdpi\ic_launcher_round.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-xxhdpi\ic_launcher.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-xxhdpi\ic_launcher_round.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-xxxhdpi\ic_launcher.png|89 50 4E 47 0D 0A 1A 0A
+C:\ChickenInventoryApp\android\app\src\main\res\mipmap-xxxhdpi\ic_launcher_round.png|89 50 4E 47 0D 0A 1A 0A

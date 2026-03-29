@@ -1,0 +1,8 @@
+# Copia este archivo a android/gradle.local.properties y completa tus secretos locales.
+# No subas android/gradle.local.properties al repositorio.
+
+MYAPP_UPLOAD_STORE_FILE=my-release-key.keystore
+MYAPP_UPLOAD_KEY_ALIAS=your_alias
+MYAPP_UPLOAD_STORE_PASSWORD=your_store_password
+MYAPP_UPLOAD_KEY_PASSWORD=your_key_password
+

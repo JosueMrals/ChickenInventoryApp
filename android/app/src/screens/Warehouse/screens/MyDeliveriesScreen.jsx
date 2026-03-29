@@ -95,8 +95,33 @@ const isWithinRange = (date, rangeKey) => {
   return true;
 };
 
+const getBonusSummary = (sale) => {
+  const bonuses = sale?.bonusesAwarded || sale?.bonuses || [];
+  if (!Array.isArray(bonuses) || bonuses.length === 0) {
+    return { hasBonuses: false, skuCount: 0, unitsCount: 0 };
+  }
+
+  const skuSet = new Set();
+  let units = 0;
+
+  bonuses.forEach((bonus, idx) => {
+    const skuKey = String(bonus?.productId || bonus?.id || bonus?.productName || bonus?.name || `bonus_${idx}`)
+      .trim()
+      .toLowerCase();
+    if (skuKey) skuSet.add(skuKey);
+    units += Number(bonus?.quantity || bonus?.qty || bonus?.bonusQty || 0);
+  });
+
+  return {
+    hasBonuses: true,
+    skuCount: skuSet.size,
+    unitsCount: Number(units.toFixed(2)),
+  };
+};
+
 const HistoryItem = ({ item, onOpen, customerName }) => {
   const paidDate = formatTimestamp(item.fechaPago || item.fechaEntregaRepartidor);
+  const bonusSummary = getBonusSummary(item);
   return (
     <TouchableOpacity style={styles.historyCard} onPress={() => onOpen(item)}>
       <View style={styles.historyRow}>
@@ -110,6 +135,16 @@ const HistoryItem = ({ item, onOpen, customerName }) => {
           <Icon name="chevron-forward" size={20} color="#94A3B8" />
         </View>
       </View>
+
+      {bonusSummary.hasBonuses && (
+        <View style={styles.historyBonusRow}>
+          <Icon name="gift-outline" size={14} color="#6D28D9" />
+          <Text style={styles.historyBonusText}>
+            {bonusSummary.skuCount} regalo(s) · {bonusSummary.unitsCount} unidad(es)
+          </Text>
+        </View>
+      )}
+
       {(item.paymentMethod === 'credit' || String(item.status || '').startsWith('credit_')) && (
         <View style={styles.historyBadgeRow}>
           <View style={styles.creditBadge}>
@@ -546,6 +581,23 @@ const styles = StyleSheet.create({
   historyRight: { alignItems: 'flex-end', gap: 4 },
   historyTotal: { fontSize: 16, fontWeight: 'bold', color: '#2DCE89' },
   historyBadgeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
+  historyBonusRow: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: '#F3E8FF',
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historyBonusText: {
+    color: '#6D28D9',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   creditBadge: {
     backgroundColor: '#1F2937',
     paddingHorizontal: 8,

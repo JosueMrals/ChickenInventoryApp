@@ -101,44 +101,62 @@ export function PreSaleProvider({ children }) {
   }, [categoryDiscountMap]);
 
   const applyBonuses = useCallback((currentCart) => {
-    // 1. Empezar solo con los items que no son bonificaciones
-    // Usamos filter sobre currentCart para asegurar que iteramos sobre la base limpia si vinieran mezclados,
-    // pero idealmente 'newCart' son solo los productos de venta.
-    const cartItems = currentCart.filter(item => !item.isBonus);
+    const cartItems = currentCart.filter((item) => !item.isBonus);
     let newCart = [...cartItems];
 
-    // 2. Iterar sobre los items regulares para calcular sus bonificaciones
-    cartItems.forEach(item => {
+    cartItems.forEach((item) => {
       const product = item.product;
+      const bonusesConfig = (product?.bonuses && Array.isArray(product.bonuses))
+        ? product.bonuses
+        : (product?.bonus && product.bonus.enabled ? [product.bonus] : []);
 
-      // Obtener arreglo de bonificaciones: Prioriza 'bonuses' array, fallback a 'bonus' objeto legacy
-      const bonusesConfig = (product.bonuses && Array.isArray(product.bonuses))
-          ? product.bonuses
-          : (product.bonus && product.bonus.enabled ? [product.bonus] : []);
+      // Se evalua la misma base (cantidad del producto principal) en todas las reglas.
+      const eligibleRules = bonusesConfig
+        .map((bonusInfo, idx) => ({
+          ...bonusInfo,
+          ruleIndex: idx + 1,
+          threshold: Number(bonusInfo?.threshold || 0),
+          bonusQuantity: Number(bonusInfo?.bonusQuantity || 0),
+          enabled: !!bonusInfo?.enabled,
+        }))
+        .filter((rule) => (
+          rule.enabled
+          && rule.threshold > 0
+          && rule.bonusQuantity > 0
+          && !!rule.bonusProductId
+          && Number(item.quantity || 0) >= rule.threshold
+        ));
 
-      bonusesConfig.forEach((bonusInfo, idx) => {
-        if (bonusInfo?.enabled && bonusInfo.threshold > 0 && bonusInfo.bonusQuantity > 0 && bonusInfo.bonusProductId) {
-            const numberOfBonuses = Math.floor(item.quantity / bonusInfo.threshold);
+      if (!eligibleRules.length) return;
 
-            if (numberOfBonuses > 0) {
-              newCart.push({
-                id: `${item.id}_bonus_${idx}_${bonusInfo.bonusProductId}`, // ID único compuesto
-                product: {
-                    id: bonusInfo.bonusProductId,
-                    name: bonusInfo.bonusProductName || 'Producto de regalo',
-                },
-                quantity: numberOfBonuses * bonusInfo.bonusQuantity,
-                unitPrice: 0,
-                discount: 0,
-                total: 0,
-                isBonus: true,
-                linkedTo: item.id, // Enlazar al producto que genera la bonificación
-                linkedToName: product.name // Nombre del producto padre para visualización
-              });
-            }
-          }
+      // Prioridad secuencial: regla 2 reemplaza regla 1, regla 3 reemplaza 2, etc.
+      const selectedRule = eligibleRules.reduce((winner, current) => (
+        current.ruleIndex > winner.ruleIndex ? current : winner
+      ));
+
+      const numberOfBonuses = Math.floor(Number(item.quantity || 0) / selectedRule.threshold);
+      if (numberOfBonuses <= 0) return;
+
+      newCart.push({
+        id: `${item.id}_bonus_rule_${selectedRule.ruleIndex}_${selectedRule.bonusProductId}`,
+        product: {
+          id: selectedRule.bonusProductId,
+          name: selectedRule.bonusProductName || 'Producto de regalo',
+        },
+        quantity: numberOfBonuses * selectedRule.bonusQuantity,
+        unitPrice: 0,
+        discount: 0,
+        total: 0,
+        isBonus: true,
+        linkedTo: item.id,
+        linkedToName: product?.name,
+        bonusRuleIndex: selectedRule.ruleIndex,
+        bonusRuleOrigin: `product_bonus_rule_${selectedRule.ruleIndex}`,
+        bonusRuleThreshold: selectedRule.threshold,
+        bonusRuleQuantity: selectedRule.bonusQuantity,
       });
     });
+
     return newCart;
   }, []);
 

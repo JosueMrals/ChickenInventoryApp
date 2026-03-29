@@ -4,35 +4,38 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import globalStyles from '../../styles/globalStyles';
 import packageJson from '../../../../../package.json';
 import {
-    checkForUpdateSafe,
-    downloadReleaseSafe,
-    isAppDistributionSupported,
+    checkForUpdates,
+    startReleaseDownload,
     isNotSupportedError,
-} from '../../services/appDistributionService';
+} from './updates';
 
 export default function SettingsScreen({ navigation }) {
     const [checkingUpdate, setCheckingUpdate] = useState(false);
     const [remoteVersion, setRemoteVersion] = useState(null);
-    const [updatesSupported, setUpdatesSupported] = useState(isAppDistributionSupported());
+    const [updatesSupported, setUpdatesSupported] = useState(true);
+
+    const syncUpdateState = async () => {
+        try {
+            const result = await checkForUpdates({ localVersion: packageJson.version });
+            setUpdatesSupported(result.updatesSupported);
+            setRemoteVersion(result.remoteVersion || packageJson.version);
+            return result;
+        } catch (error) {
+            if (isNotSupportedError(error)) {
+                setUpdatesSupported(false);
+            }
+            setRemoteVersion(packageJson.version);
+            throw error;
+        }
+    };
 
     // Verificar versión remota al montar el componente
     useEffect(() => {
         const fetchRemoteVersion = async () => {
             try {
-                const release = await checkForUpdateSafe();
-                setUpdatesSupported(true);
-                if (release) {
-                    setRemoteVersion(release.displayVersion);
-                } else {
-                    setRemoteVersion(packageJson.version);
-                }
+                await syncUpdateState();
             } catch (error) {
-                if (isNotSupportedError(error)) {
-                    setUpdatesSupported(false);
-                } else {
-                    console.log('Error fetching remote version:', error);
-                }
-                setRemoteVersion(packageJson.version);
+                console.log('Error fetching remote version:', error);
             }
         };
 
@@ -42,19 +45,29 @@ export default function SettingsScreen({ navigation }) {
     const handleCheckUpdate = async () => {
         setCheckingUpdate(true);
         try {
-            const release = await checkForUpdateSafe();
-            setUpdatesSupported(true);
-            if (release && release.downloadUrl) {
+            const result = await syncUpdateState();
+
+            if (!result.updatesSupported) {
+                Alert.alert('Aviso', 'La verificacion de actualizaciones no esta disponible en este entorno. Usa una build distribuida por Firebase App Distribution.');
+                return;
+            }
+
+            if (!result.isTester) {
+                Alert.alert('Sin acceso', 'El perfil actual no esta habilitado como tester para actualizaciones en Firebase App Distribution.');
+                return;
+            }
+
+            if (result.hasUpdate && result.release) {
                 Alert.alert(
                     'Nueva Actualizacion Disponible',
-                    `Version ${release.displayVersion} (${release.versionCode}).\nDeseas descargarla e instalarla ahora?`,
+                    `Version ${result.release.displayVersion || result.remoteVersion} (${result.release.versionCode || 's/n'}).\nDeseas descargarla e instalarla ahora?`,
                     [
                         { text: 'Cancelar', style: 'cancel' },
                         {
                             text: 'Actualizar',
                             onPress: async () => {
                                 try {
-                                    await downloadReleaseSafe(release);
+                                    await startReleaseDownload(result.release);
                                 } catch (err) {
                                     Alert.alert('Error', 'No se pudo iniciar la descarga.');
                                     console.error('Download error:', err);

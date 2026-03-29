@@ -44,6 +44,7 @@ const InfoRow = React.memo(({ label, value, icon }) => (
 const ItemCard = React.memo(({ item, isBonus = false }) => {
     const categoryRuleText = formatCategoryRule(item);
     const hasManualDiscount = Number(item?.discount || 0) > 0;
+    const bonusRuleIndex = Number(item?.bonusRuleIndex || 0);
 
     return (
         <View style={[styles.itemCard, isBonus && styles.bonusItemCard]}>
@@ -52,6 +53,10 @@ const ItemCard = React.memo(({ item, isBonus = false }) => {
                 <Text style={styles.itemDetails}>
                     {isBonus ? `${item.quantity} x GRATIS` : `${item.quantity} x ${formatCurrency(item.unitPrice)}`}
                 </Text>
+
+{/*                 {isBonus && bonusRuleIndex > 0 ? ( */}
+{/*                     <Text style={styles.bonusRuleMeta}>Regla #{bonusRuleIndex}</Text> */}
+{/*                 ) : null} */}
 
                 {!isBonus && (
                     <View style={styles.compactChipRow}>
@@ -408,7 +413,17 @@ const styles = StyleSheet.create({
     compactChipTextCategory: { color: '#1D4ED8' },
     compactChipTextManual: { color: '#B91C1C' },
     bonusTag: { backgroundColor: '#007AFF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
-    bonusTagText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
+    bonusTagText: {
+        color: '#007AFF',
+        fontWeight: 'bold',
+        fontSize: 11,
+    },
+    bonusRuleMeta: {
+        marginTop: 2,
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#1D4ED8',
+    },
     financialSection: { backgroundColor: 'white', borderRadius: 12, elevation: 1, marginVertical: 10 },
     totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, marginTop: 8, borderTopWidth: 1, borderTopColor: '#F0F0F0', padding: 16 },
     totalLabel: { fontSize: 18, fontWeight: 'bold', color: '#333' },

@@ -19,6 +19,25 @@ export default function DeliveryDoneScreen({ navigation, route }) {
   const ticketWidth = ticketSettings.paperWidthMm >= 75 ? 576 : 384;
   const bonuses = sale?.bonusesAwarded || sale?.bonuses || [];
   const hasBonuses = Array.isArray(bonuses) && bonuses.length > 0;
+  const bonusKpis = React.useMemo(() => {
+    if (!hasBonuses) return { skuCount: 0, unitsCount: 0 };
+
+    const skuSet = new Set();
+    let units = 0;
+
+    bonuses.forEach((bonus, idx) => {
+      const skuKey = String(bonus?.productId || bonus?.id || bonus?.productName || bonus?.name || `bonus_${idx}`)
+        .trim()
+        .toLowerCase();
+      if (skuKey) skuSet.add(skuKey);
+      units += Number(bonus?.quantity || bonus?.qty || bonus?.bonusQty || 0);
+    });
+
+    return {
+      skuCount: skuSet.size,
+      unitsCount: Number(units.toFixed(2)),
+    };
+  }, [bonuses, hasBonuses]);
 
   useEffect(() => {
     const unsub = firestore()
@@ -110,7 +129,9 @@ export default function DeliveryDoneScreen({ navigation, route }) {
           {hasBonuses && (
             <View style={[styles.bonusBanner, { maxWidth: ticketWidth }]}>
               <Icon name="gift-outline" size={16} color="#7C3AED" />
-              <Text style={styles.bonusBannerText}>Incluye {bonuses.length} regalo(s)</Text>
+              <Text style={styles.bonusBannerText}>
+                {bonusKpis.skuCount} regalo(s) · {bonusKpis.unitsCount} unidad(es)
+              </Text>
             </View>
           )}
           <ViewShot

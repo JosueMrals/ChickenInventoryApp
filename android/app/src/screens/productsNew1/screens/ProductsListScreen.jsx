@@ -13,10 +13,13 @@ export default function ProductsListScreen({ navigation, route }) {
   const {
     products,
     loading,
+    loadingMore,
+    hasMore,
     setQuery,
     clearQuery,
     query,
     refresh,
+    loadMore,
     categories,
     categoryFilter,
     setCategoryFilter,
@@ -117,6 +120,27 @@ export default function ProductsListScreen({ navigation, route }) {
       );
   };
 
+  const renderListFooter = () => {
+    if (loadingMore) {
+      return (
+        <View style={styles.listFooterLoading}>
+          <ActivityIndicator size="small" color="#007AFF" />
+          <Text style={styles.listFooterText}>Cargando mas productos...</Text>
+        </View>
+      );
+    }
+
+    if (!loading && !hasMore && products.length > 0 && !query) {
+      return (
+        <View style={styles.listFooterDone}>
+          <Text style={styles.listFooterDoneText}>Fin de la lista</Text>
+        </View>
+      );
+    }
+
+    return <View style={styles.listFooterSpacer} />;
+  };
+
   return (
     <View style={globalStyles.container}>
       <View style={globalStyles.header}>
@@ -214,8 +238,15 @@ export default function ProductsListScreen({ navigation, route }) {
         renderItem={renderProductItem}
         contentContainerStyle={{ paddingBottom: 80, paddingTop: 10, flexGrow: 1 }}
         ListEmptyComponent={renderEmptyState}
+        ListFooterComponent={renderListFooter}
         refreshing={loading}
         onRefresh={handleRefresh}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.45}
+        initialNumToRender={14}
+        maxToRenderPerBatch={18}
+        windowSize={11}
+        removeClippedSubviews
       />
 
       <CreateAddButton
@@ -818,5 +849,29 @@ const styles = StyleSheet.create({
     },
     actionTextActive: {
         color: '#fff',
+    },
+    listFooterLoading: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 14,
+    },
+    listFooterText: {
+        fontSize: 13,
+        color: '#3B82F6',
+        fontWeight: '600',
+    },
+    listFooterDone: {
+        paddingVertical: 14,
+        alignItems: 'center',
+    },
+    listFooterDoneText: {
+        fontSize: 12,
+        color: '#94A3B8',
+        fontWeight: '700',
+    },
+    listFooterSpacer: {
+        height: 8,
     },
 });

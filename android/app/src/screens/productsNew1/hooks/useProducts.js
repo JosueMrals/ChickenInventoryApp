@@ -1,32 +1,131 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { db } from '../../../services/firebase';
 import { DEFAULT_CATEGORY_LABEL, normalizeCategory } from '../constants/productCategories';
+import { searchProductsByBarcodeOrName, subscribeProducts } from '../services/productsService';
+
+const SEARCH_PAGE_SIZE = 250;
+
+function mergeUniqueById(primary = [], secondary = []) {
+  const seen = new Set();
+  const merged = [];
+
+  [...primary, ...secondary].forEach((item) => {
+    if (!item?.id || seen.has(item.id)) return;
+    seen.add(item.id);
+    merged.push(item);
+  });
+
+  return merged;
+}
 
 /**
  * useProducts
- * - Suscribe en tiempo real a /products ordenado por name
- * - Provee filtrado local por name (parcial, case-insensitive)
- * - getProductByBarcode busca 1 producto exacto por barcode y devuelve el objeto o null
+ * - Carga inicial paginada de /products
+ * - Soporta carga incremental para scroll en gran escala
+ * - Busqueda remota global por nombre/codigo para no depender del primer lote
  */
-export function useProducts({ pageSize = 200 } = {}) {
+export function useProducts({ pageSize = 100 } = {}) {
   const [rawProducts, setRawProducts] = useState([]);
+  const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [liveLimit, setLiveLimit] = useState(pageSize);
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const mountedRef = useRef(true);
 
-  // Debounce solo para el filtrado: el input se actualiza al instante.
+  const normalizedQuery = debouncedQuery.trim().toLowerCase();
+  const isSearchMode = normalizedQuery.length > 0;
+
   useEffect(() => {
     const timer = setTimeout(() => {
       if (mountedRef.current) setDebouncedQuery(query);
-    }, 120);
+    }, 220);
     return () => clearTimeout(timer);
   }, [query]);
+
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMore || isSearchMode || !hasMore) return;
+    setLoadingMore(true);
+    setLiveLimit((prev) => prev + pageSize);
+  }, [hasMore, isSearchMode, loading, loadingMore, pageSize]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isSearchMode) return undefined;
+
+    setLoading(true);
+    const unsubscribe = subscribeProducts(
+      (items = [], err) => {
+        if (!mountedRef.current) return;
+        if (err) {
+          console.error('useProducts realtime subscription error:', err);
+          setRawProducts([]);
+          setHasMore(false);
+          setLoading(false);
+          setLoadingMore(false);
+          return;
+        }
+
+        setRawProducts(Array.isArray(items) ? items : []);
+        setHasMore(Array.isArray(items) ? items.length >= liveLimit : false);
+        setLoading(false);
+        setLoadingMore(false);
+      },
+      {
+        orderBy: 'name',
+        limit: liveLimit,
+      },
+    );
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [isSearchMode, liveLimit]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isSearchMode) {
+      setSearchResults([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setLoading(true);
+    (async () => {
+      try {
+        const remote = await searchProductsByBarcodeOrName(normalizedQuery, SEARCH_PAGE_SIZE);
+        if (!mountedRef.current || cancelled) return;
+        setSearchResults(Array.isArray(remote) ? remote : []);
+      } catch (err) {
+        console.error('useProducts search error:', err);
+        if (!mountedRef.current || cancelled) return;
+        setSearchResults([]);
+      } finally {
+        if (mountedRef.current && !cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSearchMode, normalizedQuery]);
 
   const clearQuery = useCallback(() => {
     setQuery('');
     setDebouncedQuery('');
+    setSearchResults([]);
   }, []);
 
   const clearFilters = useCallback(() => {
@@ -34,33 +133,14 @@ export function useProducts({ pageSize = 200 } = {}) {
     setCategoryFilter('all');
   }, [clearQuery]);
 
-  // suscripción en tiempo real
-  useEffect(() => {
-    mountedRef.current = true;
-    setLoading(true);
-
-    const coll = db.collection('products').orderBy('name').limit(pageSize);
-    const unsubscribe = coll.onSnapshot(
-      snapshot => {
-        if (!mountedRef.current) return;
-        const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        setRawProducts(items);
-        setLoading(false);
-      },
-      error => {
-        console.error('useProducts onSnapshot error:', error);
-        if (mountedRef.current) setLoading(false);
-      }
-    );
-
-    return () => {
-      mountedRef.current = false;
-      if (unsubscribe) unsubscribe();
-    };
-  }, [pageSize]);
+  const sourceProducts = useMemo(() => {
+    if (!isSearchMode) return rawProducts;
+    // Mantiene coincidencias remotas y permite fallback local por contains
+    return mergeUniqueById(searchResults, rawProducts);
+  }, [isSearchMode, rawProducts, searchResults]);
 
   const indexedProducts = useMemo(() => {
-    return rawProducts.map((p) => {
+    return sourceProducts.map((p) => {
       const name = (p?.name || '').toString();
       const barcode = (p?.barcode || '').toString();
       const category = normalizeCategory(p?.category) || DEFAULT_CATEGORY_LABEL;
@@ -71,7 +151,7 @@ export function useProducts({ pageSize = 200 } = {}) {
         _categoryNorm: category,
       };
     });
-  }, [rawProducts]);
+  }, [sourceProducts]);
 
   const categories = useMemo(() => {
     const uniques = new Set();
@@ -83,22 +163,19 @@ export function useProducts({ pageSize = 200 } = {}) {
     return Array.from(uniques).sort((a, b) => a.localeCompare(b));
   }, [indexedProducts]);
 
-  // filtered products (client-side)
   const products = useMemo(() => {
     const baseList = categoryFilter === 'all'
       ? indexedProducts
       : indexedProducts.filter((p) => p._categoryNorm === categoryFilter);
 
-    if (!debouncedQuery || debouncedQuery.trim() === '') return baseList;
+    if (!normalizedQuery) return baseList;
 
-    const q = debouncedQuery.trim().toLowerCase();
-    const exactBarcodeMatches = baseList.filter((p) => p._barcodeLower === q);
+    const exactBarcodeMatches = baseList.filter((p) => p._barcodeLower === normalizedQuery);
     if (exactBarcodeMatches.length > 0) return exactBarcodeMatches;
 
-    return baseList.filter((p) => p._nameLower.includes(q) || p._barcodeLower.includes(q));
-  }, [indexedProducts, debouncedQuery, categoryFilter]);
+    return baseList.filter((p) => p._nameLower.includes(normalizedQuery) || p._barcodeLower.includes(normalizedQuery));
+  }, [indexedProducts, normalizedQuery, categoryFilter]);
 
-  // get single product by barcode (returns object or null)
   const getProductByBarcode = useCallback(async (term) => {
     if (!term) return null;
     try {
@@ -112,23 +189,16 @@ export function useProducts({ pageSize = 200 } = {}) {
     }
   }, []);
 
-  // manual refresh: re-lee la collection una vez (no reemplaza la suscripción)
   const refresh = useCallback(async () => {
-    try {
-      setLoading(true);
-      const snap = await db.collection('products').orderBy('name').limit(pageSize).get();
-      if (mountedRef.current) setRawProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (err) {
-      console.error('useProducts refresh error:', err);
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
+    setLiveLimit(pageSize);
   }, [pageSize]);
 
   return {
     products,
     rawProducts,
     loading,
+    loadingMore,
+    hasMore,
     setQuery,
     clearQuery,
     query,
@@ -136,7 +206,8 @@ export function useProducts({ pageSize = 200 } = {}) {
     categoryFilter,
     setCategoryFilter,
     clearFilters,
-    getProductByBarcode, // devuelve single product o null
+    getProductByBarcode,
     refresh,
+    loadMore,
   };
 }

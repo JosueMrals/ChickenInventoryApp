@@ -91,11 +91,36 @@ function formatItemLines(item, columns, options = {}) {
   return lines;
 }
 
+function aggregateBonuses(bonuses = []) {
+  const map = new Map();
+
+  bonuses.forEach((bonus, idx) => {
+    const qtyValue = Number(bonus?.quantity || bonus?.qty || 0);
+    const name = bonus?.productName || bonus?.name || "Bonif";
+    const key = `${String(bonus?.productId || name || idx)}::${String(name)}`;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        id: key,
+        productName: name,
+        quantity: qtyValue,
+      });
+      return;
+    }
+
+    const prev = map.get(key);
+    prev.quantity += qtyValue;
+    map.set(key, prev);
+  });
+
+  return Array.from(map.values());
+}
+
 function formatBonusLine(bonus, columns, options = {}) {
   const rawName = bonus.productName || bonus.name || "Bonif";
   const name = (options.sanitize ? options.sanitize(rawName) : rawName) || "Bonif";
-  const qtyValue = bonus.quantity || bonus.qty || 0;
-  const label = `Bonif: ${qtyValue}x ${name}`;
+  const qtyValue = Number(bonus.quantity || bonus.qty || 0);
+  const label = `Regalo: +${qtyValue} ${name}`;
   return clampLine(label, columns.maxChars);
 }
 
@@ -122,7 +147,9 @@ function buildItemsWithBonusesBlock(items, bonuses, columns, options = {}) {
 
     const itemKey = item.id || item.productId || item.product?.id || "";
     const matched = itemKey ? (byLinkedId.get(itemKey) || []) : [];
-    matched.forEach((bonus) => {
+    const compactMatched = aggregateBonuses(matched);
+
+    compactMatched.forEach((bonus) => {
       lines.push(formatBonusLine(bonus, columns, options));
     });
 
@@ -131,7 +158,8 @@ function buildItemsWithBonusesBlock(items, bonuses, columns, options = {}) {
 
   if (unlinked.length > 0) {
     lines.push("Bonificaciones:");
-    unlinked.forEach((bonus) => {
+    const compactUnlinked = aggregateBonuses(unlinked);
+    compactUnlinked.forEach((bonus) => {
       lines.push(formatBonusLine(bonus, columns, options));
     });
     lines.push("");

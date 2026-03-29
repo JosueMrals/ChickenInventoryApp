@@ -1,6 +1,6 @@
 {
   "name": "ChickenInventoryApp",
-  "version": "1.8.3",
+  "version": "1.8.6",
   "private": true,
   "scripts": {
     "android": "react-native run-android --port 8081",
@@ -40,7 +40,7 @@
     "react-native-gesture-handler": "^2.30.0",
     "react-native-html-to-pdf": "^1.3.0",
     "react-native-image-picker": "^7.1.0",
-    "@bam.tech/react-native-image-resizer": "^2.1.0",
+    "@bam.tech/react-native-image-resizer": "^3.0.11",
     "react-native-modal-datetime-picker": "^18.0.0",
     "react-native-pager-view": "^8.0.0",
     "react-native-print": "^0.11.0",

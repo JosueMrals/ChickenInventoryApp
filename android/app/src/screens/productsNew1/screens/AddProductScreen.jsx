@@ -242,14 +242,11 @@ export default function AddProductScreen() {
     if (values.bonuses && values.bonuses.length > 0) {
       if (values.bonuses.length > 5) return { ok: false, msg: 'Máximo 5 bonificaciones permitidas.' };
       const enabledBonuses = values.bonuses.map((b, i) => ({ ...b, _idx: i })).filter(b => b.enabled);
-      const seen = new Set();
       for (const b of enabledBonuses) {
         const idxDisplay = b._idx + 1;
         if (!b.threshold || Number(b.threshold) <= 0) return { ok: false, msg: `Bonificación ${idxDisplay}: la 'cantidad mínima' debe ser mayor a 0.` };
         if (!b.bonusProductId) return { ok: false, msg: `Bonificación ${idxDisplay}: debe seleccionar un producto a regalar.` };
         if (!b.bonusQuantity || Number(b.bonusQuantity) <= 0) return { ok: false, msg: `Bonificación ${idxDisplay}: la 'cantidad a regalar' debe ser mayor a 0.` };
-        if (seen.has(b.bonusProductId)) return { ok: false, msg: `Bonificación ${idxDisplay}: producto repetido en otra bonificación.` };
-        seen.add(b.bonusProductId);
       }
     }
 

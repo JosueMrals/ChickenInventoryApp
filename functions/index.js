@@ -3,6 +3,7 @@ const admin = require('firebase-admin');
 admin.initializeApp();
 
 const db = admin.firestore();
+const enforceAppCheck = process.env.ENFORCE_APP_CHECK !== 'false';
 
 const sanitizeDocId = (rawId) => {
     if (typeof rawId !== 'string') return null;
@@ -33,6 +34,13 @@ const getPayload = (data) => {
     return data;
 };
 
+const ensureAppCheck = (context) => {
+    if (!enforceAppCheck) return;
+    if (!context.app) {
+        throw new functions.https.HttpsError('failed-precondition', 'App Check requerido.');
+    }
+};
+
 // Middleware de autenticación y rol de administrador
 const ensureAdmin = async (context, data) => {
     let uid;
@@ -55,6 +63,7 @@ const ensureAdmin = async (context, data) => {
 // --- GESTIÓN DE USUARIOS (ADMIN) ---
 
 exports.createUser = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
     const data = getPayload(reqData);
     await ensureAdmin(context, data);
 
@@ -87,6 +96,7 @@ exports.createUser = functions.https.onCall(async (reqData, context) => {
 });
 
 exports.deleteUser = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
     const data = getPayload(reqData);
     await ensureAdmin(context, data);
 
@@ -103,6 +113,7 @@ exports.deleteUser = functions.https.onCall(async (reqData, context) => {
 });
 
 exports.updateUserPassword = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
     const data = getPayload(reqData);
     await ensureAdmin(context, data);
 
@@ -120,6 +131,7 @@ exports.updateUserPassword = functions.https.onCall(async (reqData, context) => 
 // --- OPERACIONES DE NEGOCIO ---
 
 exports.dispatchPreSale = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
     const data = getPayload(reqData);
     // Lógica existente...
     // (Simplificado para evitar duplicar código en esta vista,
@@ -152,6 +164,7 @@ exports.dispatchPreSale = functions.https.onCall(async (reqData, context) => {
 });
 
 exports.completePreSalePayment = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
     const data = getPayload(reqData);
     let uid;
     if (context.auth) uid = context.auth.uid;
@@ -288,6 +301,7 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
 });
 
 exports.getDashboardStats = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
     const data = getPayload(reqData);
     let uid;
     if (context.auth) uid = context.auth.uid;

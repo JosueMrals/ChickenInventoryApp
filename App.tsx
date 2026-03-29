@@ -16,6 +16,7 @@ import SalesScreen from './android/app/src/screens/sales/SalesScreen';
 import CustomersScreen from './android/app/src/screens/customer/CustomerListScreen';
 import CustomerFormModal from './android/app/src/screens/customer/CustomerFormModal';
 import DashboardScreen from './android/app/src/screens/dashboard/DashboardScreen';
+import ProductList from './android/app/src/screens/ProductList';
 import CreditsScreen from './android/app/src/screens/credits/screens/CreditsScreen';
 import CreditsHistoryScreen from './android/app/src/screens/credits/screens/CreditsHistoryScreen';
 import CreditDetailScreen from './android/app/src/screens/credits/screens/CreditDetailScreen';
@@ -61,8 +62,17 @@ export const navigationRef = createNavigationContainerRef();
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
 
-function AppDrawer({ route }) {
-  const { role, user } = route.params || {};
+const DashboardScreenAny = DashboardScreen as React.ComponentType<any>;
+const ProductListAny = ProductList as React.ComponentType<any>;
+const SalesScreenAny = SalesScreen as React.ComponentType<any>;
+const ProfileScreenAny = ProfileScreen as React.ComponentType<any>;
+const CustomersScreenAny = CustomersScreen as React.ComponentType<any>;
+const CreditsScreenAny = CreditsScreen as React.ComponentType<any>;
+const CreditsHistoryScreenAny = CreditsHistoryScreen as React.ComponentType<any>;
+const MyDeliveriesScreenAny = MyDeliveriesScreen as React.ComponentType<any>;
+
+function AppDrawer({ route }: any) {
+  const { role, user } = route?.params || {};
 
   return (
     <Drawer.Navigator
@@ -71,16 +81,16 @@ function AppDrawer({ route }) {
       screenOptions={{ headerShown: false }}
     >
       <Drawer.Screen name="DashboardScreen">
-        {(props) => <DashboardScreen {...props} user={user} role={role} />}
+        {(props) => <DashboardScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
       <Drawer.Screen name="ProductList">
-        {(props) => <ProductList {...props} user={user} role={role} />}
+        {(props) => <ProductListAny {...props} user={user} role={role} />}
       </Drawer.Screen>
       <Drawer.Screen name="Sales">
-         {(props) => <SalesScreen {...props} user={user} role={role} />}
+         {(props) => <SalesScreenAny {...props} user={user} role={role} />}
        </Drawer.Screen>
       <Drawer.Screen name="Profile">
-        {(props) => <ProfileScreen {...props} user={user} role={role} />}
+        {(props) => <ProfileScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
       <Drawer.Screen 
         name="Register"
@@ -88,13 +98,13 @@ function AppDrawer({ route }) {
         initialParams={{ role, user }}
       />
       <Drawer.Screen name="Customer">
-        {(props) => <CustomersScreen {...props} user={user} role={role} />}
+        {(props) => <CustomersScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
       <Drawer.Screen name="Credits">
-        {(props) => <CreditsScreen {...props} user={user} role={role} initialFilter="pending" />}
+        {(props) => <CreditsScreenAny {...props} user={user} role={role} initialFilter="pending" />}
       </Drawer.Screen>
       <Drawer.Screen name="CreditsHistory">
-        {(props) => <CreditsHistoryScreen {...props} user={user} role={role} />}
+        {(props) => <CreditsHistoryScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
       <Drawer.Screen
         name="CreditDetail"
@@ -171,7 +181,7 @@ function AppDrawer({ route }) {
       />
 
       <Drawer.Screen name="MyDeliveries">
-        {(props) => <MyDeliveriesScreen {...props} user={user} role={role} />}
+        {(props) => <MyDeliveriesScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
       {/* ---------------- */}
 
@@ -221,10 +231,13 @@ export default function App() {
     async function checkUpdates() {
       try {
         const release = await checkForUpdateSafe();
-        if (release && release.downloadUrl) {
+        const releaseInfo = release as any;
+        const downloadUrl = releaseInfo?.downloadURL || releaseInfo?.downloadUrl;
+        if (release && downloadUrl) {
+          const buildVersion = releaseInfo?.buildVersion || releaseInfo?.versionCode || '---';
           Alert.alert(
             'Nueva Actualizacion Disponible',
-            `Version ${release.displayVersion} (${release.versionCode}).\nDeseas descargarla e instalarla ahora?`,
+            `Version ${release.displayVersion} (${buildVersion}).\nDeseas descargarla e instalarla ahora?`,
             [
               {
                 text: 'Mas tarde',
@@ -268,15 +281,9 @@ export default function App() {
         provider.configure({
           android: {
             provider: __DEV__ ? 'debug' : 'playIntegrity',
-            debug: {
-              token: 'DE892224-2C47-4189-93C0-D6F39F80D87E' // Token fijo opcional para desarrollo, o ver logs para uno nuevo
-            }
           },
-          ios: {
+          apple: {
             provider: __DEV__ ? 'debug' : 'appAttestWithDeviceCheckFallback',
-            debug: {
-              token: 'DE892224-2C47-4189-93C0-D6F39F80D87E'
-            }
           },
         });
 

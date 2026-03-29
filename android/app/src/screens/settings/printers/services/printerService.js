@@ -148,7 +148,7 @@ export function build58mmReceipt(sale, layout = {}) {
 
   text += `[[B]]${formatHeaderLine(columns, { name: "Producto", total: "Subt" })}\n`;
 
-  const itemLines = buildItemsWithBonusesBlock(sale.items || [], sale.bonuses || sale.bonusesAwarded || [], columns, {
+  const itemLines = buildItemsWithBonusesBlock(sale.items || [], sale.bonusesAwarded || sale.bonuses || [], columns, {
     currency: "C$",
     sanitize,
   });
@@ -298,7 +298,7 @@ function buildDeliveryReceiptText(sale, layout = {}) {
   text += line;
 
   text += `[[B]]${formatHeaderLine(columns)}\n`;
-  const itemLines = buildItemsWithBonusesBlock(sale.items || [], sale.bonuses || sale.bonusesAwarded || [], columns, {
+  const itemLines = buildItemsWithBonusesBlock(sale.items || [], sale.bonusesAwarded || sale.bonuses || [], columns, {
     currency: "C$",
     sanitize,
   });

@@ -122,6 +122,11 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
     }}>
       <View style={{flex: 1, marginRight: 8}}>
         <Text style={{fontSize: 13, color: '#333', fontWeight: '500'}}>{product.name}</Text>
+{/*         {Number(item?.bonusRuleIndex || 0) > 0 ? ( */}
+{/*           <Text style={{ fontSize: 11, color: '#1D4ED8', marginTop: 2, fontWeight: '700' }}> */}
+{/*             Regla #{Number(item.bonusRuleIndex)} */}
+{/*           </Text> */}
+{/*         ) : null} */}
       </View>
       <View style={{alignItems: 'flex-end', justifyContent: 'center'}}>
          <Text style={{fontSize: 14, color: '#007AFF', fontWeight: 'bold'}}>x{quantity}</Text>
