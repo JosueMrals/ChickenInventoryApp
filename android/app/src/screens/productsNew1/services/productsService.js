@@ -170,6 +170,62 @@ export async function searchProductsByBarcodeOrName(term, pageSize = 50) {
   }
 }
 
+export function subscribeProductsByBarcodeOrName(term, onUpdate, options = {}) {
+  if (!term && term !== 0) {
+    onUpdate([]);
+    return () => {};
+  }
+
+  const t = term.toString();
+  const lower = t.toLowerCase();
+  const pageSize = options.pageSize ?? 50;
+
+  let barcodeItems = [];
+  let nameItems = [];
+
+  const emit = () => {
+    // Conserva la semántica actual: si hay match exacto de barcode, se prioriza ese resultado.
+    onUpdate(barcodeItems.length > 0 ? barcodeItems : nameItems);
+  };
+
+  const barcodeUnsubscribe = db
+    .collection(COLLECTION)
+    .where('barcode', '==', t)
+    .limit(20)
+    .onSnapshot(
+      (snapshot) => {
+        barcodeItems = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        emit();
+      },
+      (err) => {
+        console.error('subscribeProductsByBarcodeOrName barcode snapshot error:', err);
+        onUpdate([], err);
+      },
+    );
+
+  const nameUnsubscribe = db
+    .collection(COLLECTION)
+    .orderBy('name_lower')
+    .startAt(lower)
+    .endAt(lower + '\uf8ff')
+    .limit(pageSize)
+    .onSnapshot(
+      (snapshot) => {
+        nameItems = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        emit();
+      },
+      (err) => {
+        console.error('subscribeProductsByBarcodeOrName name snapshot error:', err);
+        onUpdate([], err);
+      },
+    );
+
+  return () => {
+    if (typeof barcodeUnsubscribe === 'function') barcodeUnsubscribe();
+    if (typeof nameUnsubscribe === 'function') nameUnsubscribe();
+  };
+}
+
 /* -------------------------
    Stock operations
    ------------------------- */
@@ -253,6 +309,7 @@ const productsService = {
   subscribeProducts,
   searchProductsByNamePrefix,
   searchProductsByBarcodeOrName,
+  subscribeProductsByBarcodeOrName,
   incrementStock,
   setStock,
   validateNoDuplicates,

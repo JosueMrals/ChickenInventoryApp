@@ -79,6 +79,7 @@ yarn-error.log
 
 # Firebase native config (local/CI secret files)
 android/app/google-services.json
+android/app/src/**/google-services.json
 ios/**/GoogleService-Info.plist
 
 # Local secrets and env files

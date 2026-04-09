@@ -6,6 +6,12 @@ This is a new [**React Native**](https://reactnative.dev) project, bootstrapped 
 
 Antes de configurar Firebase y firma de release, revisa `SECURITY.md`.
 
+`android/app/google-services.json` no se versiona. Debe inyectarse en local/CI con secretos (por ejemplo `GOOGLE_SERVICES_JSON_B64`).
+
+## Error Monitoring
+
+El proyecto integra Firebase Crashlytics para reportar errores/crashes en produccion. La coleccion se activa en release y se desactiva en desarrollo.
+
 > **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
 
 ## Step 1: Start Metro

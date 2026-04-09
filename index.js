@@ -8,6 +8,7 @@ import { name as appName } from './app.json';
 
 import appCheck from '@react-native-firebase/app-check';
 import { firebase } from '@react-native-firebase/app';
+import { initializeErrorMonitoring } from './android/app/src/services/errorMonitoring';
 
 // --- INICIALIZACIÓN DE APP CHECK ---
 async function initializeAppCheck() {
@@ -27,6 +28,7 @@ async function initializeAppCheck() {
   }
 }
 initializeAppCheck();
+initializeErrorMonitoring();
 // --- FIN DE LA INICIALIZACIÓN ---
 
 AppRegistry.registerComponent(appName, () => App);

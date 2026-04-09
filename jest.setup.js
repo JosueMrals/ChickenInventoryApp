@@ -1,5 +1,12 @@
 import 'react-native-gesture-handler/jestSetup';
 
+jest.mock('react-native-encrypted-storage', () => ({
+  getItem: jest.fn(),
+  setItem: jest.fn(),
+  removeItem: jest.fn(),
+  clear: jest.fn(),
+}), { virtual: true });
+
 jest.mock('react-native-worklets', () => ({
   createRunOnJS: () => () => {},
   createRunOnUI: () => () => {},
@@ -92,6 +99,17 @@ jest.mock('@react-native-firebase/app-distribution', () => {
   });
   return appDistribution;
 });
+
+jest.mock('@react-native-firebase/crashlytics', () => {
+  const crashlyticsInstance = {
+    setCrashlyticsCollectionEnabled: jest.fn(),
+    setAttribute: jest.fn(),
+    recordError: jest.fn(),
+    setUserId: jest.fn(),
+  };
+  const crashlytics = () => crashlyticsInstance;
+  return crashlytics;
+}, { virtual: true });
 
 jest.mock('@react-native-firebase/firestore', () => {
   const firestore = () => ({

@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { db } from '../../../services/firebase';
 import { DEFAULT_CATEGORY_LABEL, normalizeCategory } from '../constants/productCategories';
-import { searchProductsByBarcodeOrName, subscribeProducts } from '../services/productsService';
+import { subscribeProducts, subscribeProductsByBarcodeOrName } from '../services/productsService';
 
 const SEARCH_PAGE_SIZE = 250;
 
@@ -93,32 +93,34 @@ export function useProducts({ pageSize = 100 } = {}) {
   }, [isSearchMode, liveLimit]);
 
   useEffect(() => {
-    let cancelled = false;
-
     if (!isSearchMode) {
       setSearchResults([]);
-      return () => {
-        cancelled = true;
-      };
+      return undefined;
     }
 
     setLoading(true);
-    (async () => {
-      try {
-        const remote = await searchProductsByBarcodeOrName(normalizedQuery, SEARCH_PAGE_SIZE);
-        if (!mountedRef.current || cancelled) return;
-        setSearchResults(Array.isArray(remote) ? remote : []);
-      } catch (err) {
-        console.error('useProducts search error:', err);
-        if (!mountedRef.current || cancelled) return;
-        setSearchResults([]);
-      } finally {
-        if (mountedRef.current && !cancelled) setLoading(false);
+    setLoadingMore(false);
+
+    const unsubscribe = subscribeProductsByBarcodeOrName(
+      normalizedQuery,
+      (items = [], err) => {
+        if (!mountedRef.current) return;
+        if (err) {
+          console.error('useProducts realtime search error:', err);
+          setSearchResults([]);
+          setLoading(false);
+          return;
+        }
+
+        setSearchResults(Array.isArray(items) ? items : []);
+        setLoading(false);
       }
-    })();
+      ,
+      { pageSize: SEARCH_PAGE_SIZE },
+    );
 
     return () => {
-      cancelled = true;
+      if (typeof unsubscribe === 'function') unsubscribe();
     };
   }, [isSearchMode, normalizedQuery]);
 

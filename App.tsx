@@ -56,6 +56,7 @@ import {
   downloadReleaseSafe,
   isNotSupportedError,
 } from './android/app/src/services/appDistributionService';
+import { setMonitoringUser } from './android/app/src/services/errorMonitoring';
 
 export const navigationRef = createNavigationContainerRef();
 
@@ -224,6 +225,14 @@ function AppDrawer({ route }: any) {
 }
 
 export default function App() {
+
+  useEffect(() => {
+    const unsubscribe = auth().onAuthStateChanged((user) => {
+      setMonitoringUser(user?.uid || null);
+    });
+
+    return unsubscribe;
+  }, []);
 
   // Verificar actualizaciones de App Distribution al iniciar (o al hacer login)
   // Como `App` se monta una vez, este useEffect corre al arrancar la app.
