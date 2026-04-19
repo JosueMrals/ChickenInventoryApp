@@ -100,6 +100,29 @@ jest.mock('@react-native-firebase/app-distribution', () => {
   return appDistribution;
 });
 
+jest.mock('sp-react-native-in-app-updates', () => {
+  const IAUUpdateKind = { FLEXIBLE: 0, IMMEDIATE: 1 };
+  class SpInAppUpdates {
+    constructor() {}
+    checkNeedsUpdate() {
+      return Promise.resolve({
+        shouldUpdate: false,
+        storeVersion: '1.0.0',
+        other: { updatePriority: 0 },
+      });
+    }
+    startUpdate() {
+      return Promise.resolve();
+    }
+  }
+  SpInAppUpdates.IAUUpdateKind = IAUUpdateKind;
+  return {
+    __esModule: true,
+    default: SpInAppUpdates,
+    IAUUpdateKind,
+  };
+});
+
 jest.mock('@react-native-firebase/crashlytics', () => {
   const crashlyticsInstance = {
     setCrashlyticsCollectionEnabled: jest.fn(),

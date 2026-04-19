@@ -104,22 +104,14 @@ android {
         }
     }
     buildTypes {
-        release {
-            signingConfig signingConfigs.release
-            minifyEnabled false
-            shrinkResources false
-            debuggable false
-        }
-    }
-    buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
+            shrinkResources false
+            debuggable false
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }

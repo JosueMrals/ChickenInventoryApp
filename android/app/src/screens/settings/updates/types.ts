@@ -1,5 +1,7 @@
 export type UserRole = 'admin' | 'bodeguero' | 'entregador' | 'tester' | 'user' | string;
 
+export type UpdateSource = 'play-store' | 'app-distribution';
+
 export interface FirebaseRelease {
   displayVersion?: string;
   versionCode?: number | string;
@@ -17,6 +19,10 @@ export interface UpdateCheckResult {
   hasUpdate: boolean;
   release: FirebaseRelease | null;
   reason?: string;
+  /** Indica la fuente de la actualizacion: 'play-store' o 'app-distribution' */
+  source?: UpdateSource;
+  /** Prioridad de la actualizacion (solo Play Store, 0-5) */
+  updatePriority?: number;
 }
 
 export interface TesterProfileResult {
