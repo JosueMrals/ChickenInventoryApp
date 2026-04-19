@@ -5,20 +5,22 @@ import globalStyles from '../../styles/globalStyles';
 import packageJson from '../../../../../package.json';
 import {
     checkForUpdates,
-    startReleaseDownload,
+    startUpdate,
     isNotSupportedError,
 } from './updates';
 
 export default function SettingsScreen({ navigation }) {
     const [checkingUpdate, setCheckingUpdate] = useState(false);
-    const [remoteVersion, setRemoteVersion] = useState(null);
+    const [remoteVersion, setRemoteVersion] = useState<string | null>(null);
     const [updatesSupported, setUpdatesSupported] = useState(true);
+    const [updateSource, setUpdateSource] = useState<string | null>(null);
 
     const syncUpdateState = async () => {
         try {
             const result = await checkForUpdates({ localVersion: packageJson.version });
             setUpdatesSupported(result.updatesSupported);
             setRemoteVersion(result.remoteVersion || packageJson.version);
+            setUpdateSource(result.source || null);
             return result;
         } catch (error) {
             if (isNotSupportedError(error)) {
@@ -48,49 +50,57 @@ export default function SettingsScreen({ navigation }) {
             const result = await syncUpdateState();
 
             if (!result.updatesSupported) {
-                Alert.alert('Aviso', 'La verificacion de actualizaciones no esta disponible en este entorno. Usa una build distribuida por Firebase App Distribution.');
+                Alert.alert('Aviso', 'La verificacion de actualizaciones no esta disponible en este entorno.');
                 return;
             }
 
-            if (!result.isTester) {
+            if (result.source === 'app-distribution' && !result.isTester) {
                 Alert.alert('Sin acceso', 'El perfil actual no esta habilitado como tester para actualizaciones en Firebase App Distribution.');
                 return;
             }
 
-            if (result.hasUpdate && result.release) {
+            if (result.hasUpdate) {
+                const sourceLabel = result.source === 'play-store' ? 'Google Play' : 'App Distribution';
                 Alert.alert(
                     'Nueva Actualizacion Disponible',
-                    `Version ${result.release.displayVersion || result.remoteVersion} (${result.release.versionCode || 's/n'}).\nDeseas descargarla e instalarla ahora?`,
+                    `Version ${result.remoteVersion} disponible via ${sourceLabel}.\nDeseas actualizar ahora?`,
                     [
                         { text: 'Cancelar', style: 'cancel' },
                         {
                             text: 'Actualizar',
                             onPress: async () => {
                                 try {
-                                    await startReleaseDownload(result.release);
+                                    await startUpdate(result);
                                 } catch (err) {
-                                    Alert.alert('Error', 'No se pudo iniciar la descarga.');
-                                    console.error('Download error:', err);
+                                    Alert.alert('Error', 'No se pudo iniciar la actualizacion.');
+                                    console.error('Update error:', err);
                                 }
                             },
                         },
                     ]
                 );
             } else {
-                Alert.alert('Sin nueva version', 'No se encontro una release mas nueva en App Distribution para esta build/dispositivo.');
+                Alert.alert('Sin nueva version', 'Ya tienes la version mas reciente.');
                 setRemoteVersion(packageJson.version);
             }
         } catch (error) {
             console.error('Check update error:', error);
             if (isNotSupportedError(error)) {
                 setUpdatesSupported(false);
-                Alert.alert('Aviso', 'La verificacion de actualizaciones no esta disponible en este entorno. Usa una build distribuida por Firebase App Distribution.');
+                Alert.alert('Aviso', 'La verificacion de actualizaciones no esta disponible en este entorno.');
             } else {
                 Alert.alert('Aviso', 'No se pudo verificar la actualizacion.');
             }
         } finally {
             setCheckingUpdate(false);
         }
+    };
+
+    const getUpdateSourceLabel = () => {
+        if (!updatesSupported) return 'No disponible en este entorno';
+        if (updateSource === 'play-store') return 'Actualizaciones via Google Play';
+        if (updateSource === 'app-distribution') return 'Actualizaciones via App Distribution (tester)';
+        return 'Buscar nueva version';
     };
 
     const renderSettingItem = (title, icon, onPress, description = '') => (
@@ -147,16 +157,14 @@ export default function SettingsScreen({ navigation }) {
                         <Text style={styles.itemDescription}>
                             {checkingUpdate
                               ? 'Verificando...'
-                              : updatesSupported
-                                ? 'Buscar nueva version en Firebase'
-                                : 'No disponible en este entorno'}
+                              : getUpdateSourceLabel()}
                         </Text>
                     </View>
                     {!checkingUpdate && updatesSupported && <Icon name="chevron-forward" size={20} color="#C7C7CC" />}
                 </TouchableOpacity>
 
                 <View style={styles.versionContainer}>
-                    <Text style={styles.versionText}>Version local (package.json): {packageJson.version}</Text>
+                    <Text style={styles.versionText}>Version local: {packageJson.version}</Text>
                     {remoteVersion && remoteVersion !== packageJson.version && (
                         <Text style={[styles.versionText, { color: '#007AFF', fontWeight: 'bold', marginTop: 4 }]}>
                             Nueva Version Disponible: {remoteVersion}
@@ -164,12 +172,12 @@ export default function SettingsScreen({ navigation }) {
                     )}
                     {updatesSupported && remoteVersion && remoteVersion === packageJson.version && (
                         <Text style={[styles.versionText, { color: '#34C759', marginTop: 4, fontSize: 12 }]}>
-                            (Sin release mas nueva detectada en App Distribution)
+                            (Ya tienes la version mas reciente)
                         </Text>
                     )}
                     {!updatesSupported && (
                         <Text style={[styles.versionText, { color: '#999', marginTop: 4, fontSize: 12 }]}>
-                            (App Distribution no disponible en este entorno)
+                            (Actualizaciones no disponibles en este entorno)
                         </Text>
                     )}
                     <Text style={styles.copyrightText}>© 2025 DIALIFGH</Text>
