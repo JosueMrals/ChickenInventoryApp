@@ -52,10 +52,11 @@ import { SessionManager } from './android/app/src/utils/SessionManager';
 import { PreSaleProvider } from './android/app/src/screens/presales/context/preSaleContext';
 import { RouteProvider } from './android/app/src/context/RouteContext';
 import {
-  checkForUpdateSafe,
-  downloadReleaseSafe,
+  checkForUpdates,
+  startUpdate,
   isNotSupportedError,
-} from './android/app/src/services/appDistributionService';
+} from './android/app/src/screens/settings/updates';
+import packageJson from './package.json';
 import { setMonitoringUser } from './android/app/src/services/errorMonitoring';
 
 export const navigationRef = createNavigationContainerRef();
@@ -234,19 +235,18 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Verificar actualizaciones de App Distribution al iniciar (o al hacer login)
-  // Como `App` se monta una vez, este useEffect corre al arrancar la app.
+  // Verificar actualizaciones al iniciar la app.
+  // Usa el servicio unificado: Play Store (produccion) o App Distribution (testing).
   useEffect(() => {
     async function checkUpdates() {
       try {
-        const release = await checkForUpdateSafe();
-        const releaseInfo = release as any;
-        const downloadUrl = releaseInfo?.downloadURL || releaseInfo?.downloadUrl;
-        if (release && downloadUrl) {
-          const buildVersion = releaseInfo?.buildVersion || releaseInfo?.versionCode || '---';
+        const result = await checkForUpdates({ localVersion: packageJson.version });
+
+        if (result.hasUpdate) {
+          const sourceLabel = result.source === 'play-store' ? 'Google Play' : 'App Distribution';
           Alert.alert(
             'Nueva Actualizacion Disponible',
-            `Version ${release.displayVersion} (${buildVersion}).\nDeseas descargarla e instalarla ahora?`,
+            `Version ${result.remoteVersion} disponible via ${sourceLabel}.\nDeseas actualizar ahora?`,
             [
               {
                 text: 'Mas tarde',
@@ -256,10 +256,10 @@ export default function App() {
                 text: 'Actualizar',
                 onPress: async () => {
                   try {
-                    await downloadReleaseSafe(release);
+                    await startUpdate(result);
                   } catch (err) {
-                    Alert.alert('Error', 'No se pudo iniciar la descarga.');
-                    console.log('Download error:', err);
+                    Alert.alert('Error', 'No se pudo iniciar la actualizacion.');
+                    console.log('Update error:', err);
                   }
                 },
               },
@@ -269,9 +269,9 @@ export default function App() {
         }
       } catch (error) {
         if (isNotSupportedError(error)) {
-          console.log('App Distribution check skipped: Not supported in this environment.');
+          console.log('Update check skipped: Not supported in this environment.');
         } else {
-          console.log('App Distribution check error:', error);
+          console.log('Update check error:', error);
         }
       }
     }
