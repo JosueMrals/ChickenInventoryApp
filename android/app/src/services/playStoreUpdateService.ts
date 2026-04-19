@@ -25,10 +25,12 @@ export async function checkPlayStoreUpdate(): Promise<PlayStoreUpdateResult> {
   const updater = getInAppUpdates();
   const result = await updater.checkNeedsUpdate();
 
+  const extras = result.other as Record<string, unknown> | undefined;
+
   return {
     updateAvailable: result.shouldUpdate,
     storeVersion: result.storeVersion ?? null,
-    updatePriority: (result.other as Record<string, unknown>)?.updatePriority as number ?? 0,
+    updatePriority: typeof extras?.updatePriority === 'number' ? extras.updatePriority : 0,
   };
 }
 
