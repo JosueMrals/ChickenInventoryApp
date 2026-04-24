@@ -5,10 +5,9 @@ import BonusProductSelectModal from './BonusProductSelectModal';
 
 // Extraemos los estilos de los componentes padre para reutilizarlos.
 const inheritedStyles = StyleSheet.create({
-  section: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
-  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 16 },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 14 },
   label: { fontSize: 13, color: '#666', marginBottom: 6, fontWeight: '600', textTransform: 'uppercase' },
-  input: { backgroundColor: '#F5F6FA', padding: 12, borderRadius: 10, fontSize: 16, color: '#333', marginBottom: 16, borderWidth: 1, borderColor: '#F0F0F0' },
+  input: { backgroundColor: '#fff', padding: 12, borderRadius: 10, fontSize: 16, color: '#333', marginBottom: 16, borderWidth: 1, borderColor: '#E8E8E8' },
 });
 
 const emptyBonus = () => ({ enabled: true, threshold: '', bonusProductId: null, bonusProductName: '', bonusQuantity: '' });
@@ -58,10 +57,9 @@ const BonusSetup = ({ bonuses = [], onChange }) => {
   const sanitizeNumber = (text) => text.replace(/[^0-9]/g, '');
 
   return (
-    <View style={inheritedStyles.section}>
+    <View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text style={inheritedStyles.sectionTitle}>Bonificaciones</Text>
-        {/* No hay switch global: cada bonificación tiene su propio switch */}
       </View>
 
       {bonuses.length === 0 && (
@@ -124,7 +122,7 @@ const BonusSetup = ({ bonuses = [], onChange }) => {
         </View>
       ))}
 
-      <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end' }}>
+      <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 12 }}>
         {bonuses.length < 5 && (
           <TouchableOpacity onPress={addBonus} style={styles.addBtn}>
             <Icon name="add" size={16} color="#fff" />
@@ -147,12 +145,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        backgroundColor: '#F5F6FA',
+        backgroundColor: '#fff',
         padding: 12,
         borderRadius: 10,
         marginBottom: 16,
         borderWidth: 1,
-        borderColor: '#F0F0F0',
+        borderColor: '#E8E8E8',
     },
     productSelectorText: {
         fontSize: 16,

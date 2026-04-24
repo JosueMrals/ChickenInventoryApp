@@ -1,17 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  Platform,
-  UIManager,
-  View,
-  Alert,
-  Text,
-  TextInput,
+  ActivityIndicator, FlatList, Platform, UIManager,
+  View, Alert, Text, TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { getPreSaleById } from '../../../services/preSaleService';
 import styles from '../styles/creditsStyles';
+import globalStyles from '../../../styles/globalStyles';
 import { useCredits } from '../hooks/useCredits';
 import CreditCard from '../components/CreditCard';
 import CreditPaymentModal from '../components/CreditPaymentModal';
@@ -28,22 +24,12 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
   const user = routeUser || userProp || null;
   const role = routeRole || roleProp || null;
   const [search, setSearch] = useState('');
+
   const {
-    loading,
-    filter,
-    setFilter,
-    filteredCredits,
-    totals,
-    selectedCredit,
-    paymentAmount,
-    setPaymentAmount,
-    modalVisible,
-    openModal,
-    closeModal,
-    animValue,
-    handleAbono,
-    handleDelete,
-    submittingPayment,
+    loading, filter, setFilter, filteredCredits, totals,
+    selectedCredit, paymentAmount, setPaymentAmount,
+    modalVisible, openModal, closeModal, animValue,
+    handleAbono, handleDelete, submittingPayment,
   } = useCredits(user, role, initialFilter || 'pending');
 
   const handleEditPreSale = async (credit) => {
@@ -51,65 +37,69 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
       Alert.alert('Sin preventa', 'Este crédito no está vinculado a una pre-venta.');
       return;
     }
-
     try {
       const presale = await getPreSaleById(credit.preSaleId);
-      if (!presale) {
-        Alert.alert('No encontrada', 'No se encontró la pre-venta asociada.');
-        return;
-      }
+      if (!presale) { Alert.alert('No encontrada', 'No se encontró la pre-venta asociada.'); return; }
       navigation.navigate('PreSaleDetail', { presale, role });
     } catch (error) {
-      console.error('Error loading pre-sale:', error);
       Alert.alert('Error', 'No se pudo cargar la pre-venta.');
     }
   };
 
-  const normalize = (value) => (value || '').toString().toLowerCase().trim();
+  const normalize = (v) => (v || '').toString().toLowerCase().trim();
 
   const visibleCredits = useMemo(() => {
     const query = normalize(search);
     if (!query) return filteredCredits;
     return filteredCredits.filter((credit) => {
-      const haystack = [
-        credit.id,
-        credit.customerName,
-        credit.clientName,
-        credit.total,
-        credit.paid,
-        credit.pending,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+      const haystack = [credit.id, credit.customerName, credit.clientName, credit.total, credit.paid, credit.pending]
+        .filter(Boolean).join(' ').toLowerCase();
       return haystack.includes(query);
     });
   }, [filteredCredits, search]);
 
-  if (loading)
+  // Counts per status for filter chips
+  const filterCounts = useMemo(() => {
+    const all = filteredCredits.length;
+    const pending = filteredCredits.filter(c => c.status !== 'paid').length;
+    const paid = filteredCredits.filter(c => c.status === 'paid').length;
+    return { all, pending, paid };
+  }, [filteredCredits]);
+
+  if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F2F3F7' }}>
         <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={{ marginTop: 10, color: '#6B7280', fontSize: 13 }}>Cargando créditos...</Text>
       </View>
     );
+  }
 
   return (
-    <View style={styles.container}>
+    <View style={globalStyles.container}>
       <CreditsHeader
         totals={totals}
+        onBack={() => navigation.goBack()}
         onOpenHistory={() => navigation.navigate('CreditsHistory', { user, role })}
       />
 
       <View style={styles.screenContent}>
-        <Text style={styles.sectionTitle}>Créditos activos</Text>
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Buscar por cliente, id o monto"
-          placeholderTextColor="#94A3B8"
-          style={styles.searchInput}
-        />
-        <CreditsFilters filter={filter} onChange={setFilter} />
+        {/* Search bar */}
+        <View style={styles.searchWrap}>
+          <Icon name="magnify" size={18} color="#9CA3AF" />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Buscar por cliente, id o monto..."
+            placeholderTextColor="#9CA3AF"
+            style={styles.searchInput}
+          />
+          {search.length > 0 && (
+            <Icon name="close-circle" size={16} color="#9CA3AF" onPress={() => setSearch('')} />
+          )}
+        </View>
+
+        <CreditsFilters filter={filter} onChange={setFilter} counts={filterCounts} />
 
         <FlatList
           data={visibleCredits}
@@ -125,8 +115,11 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
             />
           )}
           contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyState}>
+              <Icon name="credit-card-off-outline" size={40} color="#D1D5DB" />
               <Text style={styles.emptyText}>No hay créditos con esos filtros.</Text>
             </View>
           }

@@ -478,20 +478,7 @@ export default function EditProductScreen() {
               <Text style={styles.manageCategoryLink}>Gestionar</Text>
             </TouchableOpacity>
           </View>
-          <View style={styles.categoryWrap}>
-            {categoryOptions.map((categoryOption) => {
-              const active = values.category === categoryOption;
-              return (
-                <TouchableOpacity
-                  key={categoryOption}
-                  style={[styles.categoryChip, active && styles.categoryChipActive]}
-                  onPress={() => setField('category', categoryOption)}
-                >
-                  <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>{categoryOption}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+
           <TextInput
             style={styles.input}
             value={values.category || ''}

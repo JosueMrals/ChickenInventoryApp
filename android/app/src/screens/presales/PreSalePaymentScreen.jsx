@@ -60,7 +60,7 @@ export default function PreSalePaymentScreen({ navigation, route }) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <TouchableOpacity onPress={() => navigation.navigate('PreSaleDetail', { presale })}>
           <Icon name="chevron-back" size={26} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Finalizar Pre-Venta</Text>

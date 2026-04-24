@@ -7,9 +7,11 @@ import auth from '@react-native-firebase/auth';
 import { getUsersByRole } from '../../../services/auth';
 import { warehouseStyles as globalStyles } from '../styles/warehouseStyles';
 import { groupItemsByProduct } from '../../../utils/warehouseUtils';
+import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
 
 export default function ProductHandoverScreen({ route, navigation }) {
-    const { readyOrders } = route.params; // Expecting an array of orders with status 'ready_for_delivery'
+    const { readyOrders } = route.params;
+    const { bottomPadding } = useAdaptiveBottom();
 
     const [entregadores, setEntregadores] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -123,7 +125,7 @@ export default function ProductHandoverScreen({ route, navigation }) {
             await batch.commit();
 
             Alert.alert('Éxito', 'La carga ha sido entregada al repartidor correctamente.');
-            navigation.goBack();
+            navigation.navigate('PreparePreSales');
         } catch (error) {
             console.error("Error en bulk handover:", error);
             Alert.alert('Error', 'No se pudo completar la entrega de carga. Intenta nuevamente.');
@@ -139,7 +141,7 @@ export default function ProductHandoverScreen({ route, navigation }) {
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                 <TouchableOpacity onPress={() => navigation.goBack()}>
+                 <TouchableOpacity onPress={() => navigation.navigate('PreparePreSales')}>
                     <Icon name="close" size={28} color="#333" />
                  </TouchableOpacity>
                  <Text style={styles.headerTitle}>Entregar Carga</Text>
@@ -222,7 +224,7 @@ export default function ProductHandoverScreen({ route, navigation }) {
                 )}
             />
 
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: bottomPadding }]}>
                 <TouchableOpacity
                     style={[
                         styles.confirmButton,

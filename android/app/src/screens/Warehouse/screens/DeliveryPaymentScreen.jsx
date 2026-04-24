@@ -4,11 +4,13 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import firestore from '@react-native-firebase/firestore';
 import { completePreSalePayment } from '../services/deliveryService';
 import { resolveCustomerName } from '../../../utils/customerUtils';
+import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
 
 export default function DeliveryPaymentScreen({ navigation, route }) {
   const { delivery } = route.params;
   const total = delivery.total || 0;
   const isCredit = delivery.paymentMethod === 'credit' || String(delivery.status || '').startsWith('credit_');
+  const { bottomPadding } = useAdaptiveBottom();
 
   const [amountPaid, setAmountPaid] = useState('');
   const [loading, setLoading] = useState(false);
@@ -173,7 +175,7 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
 
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: bottomPadding }]}>
          <TouchableOpacity
             style={[styles.payButton, loading && styles.disabledButton]}
             onPress={handleConfirmPayment}

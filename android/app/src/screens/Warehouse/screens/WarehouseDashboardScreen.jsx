@@ -21,6 +21,19 @@ export default function WarehouseDashboardScreen({ navigation }) {
   const [preSales, setPreSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard'); // 'list' | 'dashboard'
+
+  // Restore tab from navigation params (e.g. coming back from detail)
+  useEffect(() => {
+    if (navigation) {
+      const unsubscribe = navigation.addListener('focus', () => {
+        const tab = navigation.getState?.()?.routes?.find(r => r.name === 'WarehouseDashboard')?.params?.tab;
+        if (tab) {
+          setActiveTab(tab);
+        }
+      });
+      return unsubscribe;
+    }
+  }, [navigation]);
   const [customersById, setCustomersById] = useState({});
   const [todayPaidTotal, setTodayPaidTotal] = useState(0);
   const [todayAssignedCount, setTodayAssignedCount] = useState(0);
@@ -325,14 +338,14 @@ export default function WarehouseDashboardScreen({ navigation }) {
         {activeTab === 'dashboard' ? (
           <>
             <View style={styles.delivererStats}>
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>Cobrado hoy</Text>
-                <Text style={styles.statValue}>${todayPaidTotal.toFixed(2)}</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>Entregas hoy</Text>
-                <Text style={styles.statValue}>{todayAssignedCount}</Text>
-              </View>
+{/*               <View style={styles.statCard}> */}
+{/*                 <Text style={styles.statLabel}>Cobrado hoy</Text> */}
+{/*                 <Text style={styles.statValue}>${todayPaidTotal.toFixed(2)}</Text> */}
+{/*               </View> */}
+{/*               <View style={styles.statCard}> */}
+{/*                 <Text style={styles.statLabel}>Entregas hoy</Text> */}
+{/*                 <Text style={styles.statValue}>{todayAssignedCount}</Text> */}
+{/*               </View> */}
             </View>
             <DashboardPanel
               preSales={preSales}

@@ -1,6 +1,7 @@
 // screen/customer/CustomerListScreen.jsx
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, ActivityIndicator, SafeAreaView, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, SafeAreaView,
+    TouchableOpacity, Alert } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from "react-native-vector-icons/Ionicons";
 import CustomerCard from './components/CustomerCard';
@@ -9,18 +10,17 @@ import { useCustomers } from './hooks/useCustomers';
 import styles from './styles/styles';
 import SearchBar from '../../components/SearchBar';
 import globalStyles from '../../styles/globalStyles';
+import { useAdaptiveBottom } from '../../hooks/useAdaptiveBottom';
 
-export default function CustomerListScreen() {
+export default function CustomerListScreen({ role: roleProp }) {
   const navigation = useNavigation();
   const route = useRoute();
-  const role = route?.params?.role ?? 'vendedor';
+  const role = roleProp || route?.params?.role || 'vendedor';
 
   const { customers, loading, create, update, remove } = useCustomers();
   const [search, setSearch] = useState('');
-  // const [modalVisible, setModalVisible] = useState(false);
-  // const [editingCustomer, setEditingCustomer] = useState(null);
+  const { bottomPadding } = useAdaptiveBottom();
 
-  // Debug: imprimir customers cada vez que cambian
   useEffect(() => {
     console.log('[CustomerListScreen] customers length:', customers?.length ?? 0);
   }, [customers]);
@@ -40,6 +40,28 @@ export default function CustomerListScreen() {
 
     const goToCustomerForm = (customerToEdit) => {
       navigation.navigate('CustomerForm', { customer: customerToEdit, role });
+    };
+
+    const handleDelete = (customer) => {
+      Alert.alert(
+        'Eliminar cliente',
+        `¿Estás seguro de eliminar a ${customer.firstName || ''} ${customer.lastName || ''}?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Eliminar',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await remove(customer.id);
+              } catch (err) {
+                console.error('Error eliminando cliente:', err);
+                Alert.alert('Error', 'No se pudo eliminar el cliente.');
+              }
+            },
+          },
+        ]
+      );
     };
 
 
@@ -91,6 +113,7 @@ export default function CustomerListScreen() {
                 navigation.navigate('CustomerDetail', { customerId: c.id, role })
               }
               onCreateSale={goToSaleRegister}
+              onDelete={role === 'admin' ? handleDelete : undefined}
             />
           )}
           contentContainerStyle={styles.listContent}
@@ -104,6 +127,7 @@ export default function CustomerListScreen() {
       <CustomerFab
         visible={role === 'admin' || role === 'vendedor'}
         onPress={() => goToCustomerForm(null)}
+        bottom={bottomPadding + 12}
       />
     </SafeAreaView>
   );

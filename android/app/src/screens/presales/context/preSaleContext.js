@@ -2,7 +2,6 @@ import React, { createContext, useState, useCallback, useEffect } from "react";
 import { calcPriceForProduct } from "../../sales/hooks/useSalePricing";
 import { 
   savePreSaleToFirestore, 
-  getPreSalesFromFirestore,
   updatePreSaleInFirestore,
   deletePreSaleInFirestore,
 } from "../../../services/preSaleService";
@@ -223,24 +222,37 @@ export function PreSaleProvider({ children }) {
     });
   }, [recalculateFullCart]);
 
-  const loadPreSales = useCallback(async () => {
+  // Real-time listener for presales — no manual reload needed on focus
+  useEffect(() => {
     setLoading(true);
-    try {
-      const filters = {};
-      if (selectedRoute?.id) {
-        filters.routeId = selectedRoute.id;
-      }
-      const salesFromDb = await getPreSalesFromFirestore(filters);
-      setPreSales(salesFromDb);
-    } finally {
-      setLoading(false);
+    let query = firestore().collection('presales').orderBy('createdAt', 'desc');
+    if (selectedRoute?.id) {
+      query = query.where('routeId', '==', selectedRoute.id);
     }
+
+    const unsubscribe = query.onSnapshot(
+      (snapshot) => {
+        if (snapshot) {
+          const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setPreSales(docs);
+        }
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Presales snapshot error:', error);
+        setLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
   }, [selectedRoute]);
 
-  useEffect(() => {
-    loadPreSales();
-  }, [loadPreSales]);
-  
+  // Keep loadPreSales for imperative refreshes (e.g. after submit/delete)
+  const loadPreSales = useCallback(async () => {
+    // With the real-time listener the data updates automatically.
+    // This is kept only for backward-compatibility with callers.
+  }, []);
+
   const addItem = (product, qty = 1) => {
     setCart((prevCart) => {
       const soldItems = prevCart.filter((item) => !item.isBonus);
@@ -370,7 +382,7 @@ export function PreSaleProvider({ children }) {
       } else {
         await savePreSaleToFirestore(preSalePayload);
       }
-      await loadPreSales();
+      // Data refreshes automatically via onSnapshot listener
     } finally {
       setLoading(false);
     }
@@ -407,7 +419,7 @@ export function PreSaleProvider({ children }) {
     setLoading(true);
     try {
       await deletePreSaleInFirestore({ preSaleId, reason });
-      await loadPreSales();
+      // Data refreshes automatically via onSnapshot listener
     } finally {
       setLoading(false);
     }

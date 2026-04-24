@@ -1,5 +1,6 @@
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import styles from '../styles/creditsStyles';
 
 export default function CreditCard({ item, role, onAbonar, onDelete, onEditPreSale, onViewDetail }) {
@@ -7,82 +8,96 @@ export default function CreditCard({ item, role, onAbonar, onDelete, onEditPreSa
   const total = Number(item.total) || 0;
   const paid = Number(item.paid) || 0;
   const pending = Number(item.pending) || 0;
-  const canEditPreSale = !!item.preSaleId;
   const isPaid = item.status === 'paid';
-  const lastPayment = Array.isArray(item.payments) && item.payments.length > 0
-    ? item.payments[item.payments.length - 1]
-    : null;
+  const canEditPreSale = !!item.preSaleId;
+  const progress = total > 0 ? Math.min(paid / total, 1) : 0;
 
-  const formatPaymentDate = (dateValue) => {
-    if (!dateValue) return 'Fecha no disponible';
-    if (dateValue.seconds) return new Date(dateValue.seconds * 1000).toLocaleDateString();
-    if (typeof dateValue.toDate === 'function') return dateValue.toDate().toLocaleDateString();
-    const parsed = new Date(dateValue);
-    return Number.isNaN(parsed.getTime()) ? 'Fecha no disponible' : parsed.toLocaleDateString();
+  const initials = name.split(' ').slice(0, 2).map(w => w[0]?.toUpperCase() || '').join('');
+
+  const lastPayment = Array.isArray(item.payments) && item.payments.length > 0
+    ? item.payments[item.payments.length - 1] : null;
+
+  const formatDate = (v) => {
+    if (!v) return '';
+    if (v.seconds) return new Date(v.seconds * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+    if (typeof v.toDate === 'function') return v.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? '' : d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
   };
 
   return (
-    <View style={styles.cardCompact}>
-      <View style={styles.cardHeaderCompact}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle}>{name}</Text>
-          <Text style={styles.cardMeta}>ID: {item.id?.substring(0, 6).toUpperCase()}</Text>
+    <View style={styles.creditCard}>
+      {/* Top row: avatar + name + status */}
+      <View style={styles.cardTop}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{initials || '?'}</Text>
+        </View>
+        <View style={styles.cardTitleBlock}>
+          <Text style={styles.cardTitle} numberOfLines={1}>{name}</Text>
+          <Text style={styles.cardMeta}>#{item.id?.substring(0, 8).toUpperCase()}</Text>
         </View>
         <View style={[styles.statusPill, isPaid ? styles.statusPaid : styles.statusPending]}>
-          <Text style={styles.statusPillText}>{isPaid ? 'Pagado' : 'Pendiente'}</Text>
+          <Text style={[styles.statusPillText, { color: isPaid ? '#065F46' : '#991B1B' }]}>
+            {isPaid ? 'Pagado' : 'Pendiente'}
+          </Text>
         </View>
       </View>
 
+      {/* Progress bar */}
+      <View style={styles.progressWrap}>
+        <View style={[styles.progressBar, { width: `${progress * 100}%` }]} />
+      </View>
+
+      {/* Amount chips */}
       <View style={styles.amountsRow}>
-        <View style={styles.amountItem}>
+        <View style={styles.amountChip}>
           <Text style={styles.amountLabel}>Total</Text>
           <Text style={styles.amountValue}>C${total.toFixed(2)}</Text>
         </View>
-        <View style={styles.amountItem}>
-          <Text style={styles.amountLabel}>Pagado</Text>
-          <Text style={styles.amountValue}>C${paid.toFixed(2)}</Text>
+        <View style={styles.amountChip}>
+          <Text style={styles.amountLabel}>Cobrado</Text>
+          <Text style={[styles.amountValue, styles.amountValueSuccess]}>C${paid.toFixed(2)}</Text>
         </View>
-        <View style={styles.amountItem}>
-          <Text style={styles.amountLabel}>Pendiente</Text>
-          <Text style={styles.amountValue}>C${pending.toFixed(2)}</Text>
+        <View style={styles.amountChip}>
+          <Text style={styles.amountLabel}>Saldo</Text>
+          <Text style={[styles.amountValue, pending > 0 && styles.amountValueDanger]}>C${pending.toFixed(2)}</Text>
         </View>
       </View>
 
+      {/* Last payment */}
       {lastPayment && (
-        <Text style={styles.paymentHint}>
-          Último abono: {formatPaymentDate(lastPayment.date)} · C${Number(lastPayment.amount || 0).toFixed(2)}
-        </Text>
+        <View style={styles.lastPaymentRow}>
+          <Text style={styles.lastPaymentText}>
+            Último abono: {formatDate(lastPayment.date)}  ·  C${Number(lastPayment.amount || 0).toFixed(2)}
+          </Text>
+        </View>
       )}
 
+      {/* Actions */}
       <View style={styles.actionsRow}>
-        <TouchableOpacity
-          onPress={() => onViewDetail && onViewDetail(item)}
-          style={[styles.btn, styles.btnSecondaryCompact]}
-        >
-          <Text style={styles.btnText}>Detalle</Text>
+        <TouchableOpacity style={[styles.actionBtn, styles.btnDetail]} onPress={() => onViewDetail?.(item)}>
+          <Icon name="eye-outline" size={13} color="#fff" />
+          <Text style={styles.actionBtnText}>Detalle</Text>
         </TouchableOpacity>
+
         {canEditPreSale && (
-          <TouchableOpacity
-            onPress={() => onEditPreSale && onEditPreSale(item)}
-            style={[styles.btn, styles.btnSecondaryCompact]}
-          >
-            <Text style={styles.btnText}>Editar</Text>
+          <TouchableOpacity style={[styles.actionBtn, styles.btnEdit]} onPress={() => onEditPreSale?.(item)}>
+            <Icon name="pencil-outline" size={13} color="#fff" />
+            <Text style={styles.actionBtnText}>Editar</Text>
           </TouchableOpacity>
         )}
-        {item.status === 'pending' && (
-          <TouchableOpacity
-            onPress={() => onAbonar(item)}
-            style={[styles.btn, styles.btnPrimaryCompact]}
-          >
-            <Text style={styles.btnText}>Abonar</Text>
+
+        {!isPaid && (
+          <TouchableOpacity style={[styles.actionBtn, styles.btnPay]} onPress={() => onAbonar(item)}>
+            <Icon name="cash-plus" size={13} color="#fff" />
+            <Text style={styles.actionBtnText}>Abonar</Text>
           </TouchableOpacity>
         )}
+
         {role === 'admin' && (
-          <TouchableOpacity
-            onPress={() => onDelete(item.id)}
-            style={[styles.btn, styles.btnDangerCompact]}
-          >
-            <Text style={styles.btnText}>Eliminar</Text>
+          <TouchableOpacity style={[styles.actionBtn, styles.btnDelete]} onPress={() => onDelete(item.id)}>
+            <Icon name="trash-can-outline" size={13} color="#fff" />
+            <Text style={styles.actionBtnText}>Eliminar</Text>
           </TouchableOpacity>
         )}
       </View>

@@ -8,6 +8,7 @@ import globalStyles from '../../../styles/globalStyles';
 import styles from '../styles/WarehouseOrderDetailStyles';
 import { getUsersByRole } from '../../../services/auth';
 import { resolveCustomerName } from '../../../utils/customerUtils';
+import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
@@ -93,7 +94,7 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
     const [searchText, setSearchText] = useState('');
     const [processingEntregadorId, setProcessingEntregadorId] = useState(null);
     const [customersById, setCustomersById] = useState({});
-
+    const { bottomPadding } = useAdaptiveBottom();
     useEffect(() => {
         const unsub = firestore()
           .collection('customers')
@@ -176,7 +177,7 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
             Alert.alert('Éxito', 'La pre-venta ha sido asignada y está en reparto.');
             setSearchText('');
             setShowEntregadorPicker(false);
-            navigation.goBack();
+            navigation.navigate('PreparePreSales', { tab: 'list' });
         } catch (error) {
             console.error("❌ Error en dispatchToEntregador:", error);
             Alert.alert('Error', error.message || 'Error al asignar.');
@@ -231,7 +232,11 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
     return (
         <SafeAreaView style={globalStyles.container}>
             <View style={globalStyles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()}><Icon name="chevron-back" size={28} color="#FFF" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => {
+                    navigation.navigate('PreparePreSales', { tab: 'list' });
+                }}>
+                    <Icon name="chevron-back" size={28} color="#FFF" />
+                </TouchableOpacity>
                 <Text style={globalStyles.title}>Detalle de la Orden</Text>
                 <View style={{ width: 28 }} />
             </View>
@@ -275,7 +280,7 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
                 />
             </View>
 
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: bottomPadding }]}>
                 {loading ? <ActivityIndicator size="large" color="#5856D6" /> : (
                     <>
                         {(presale.status === 'pending' || presale.status === 'credit_pending') && (

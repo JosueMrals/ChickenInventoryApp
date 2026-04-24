@@ -13,6 +13,7 @@ export default StyleSheet.create({
       backgroundColor: '#007AFF',
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'space-between',
       borderBottomLeftRadius: 14,
       borderBottomRightRadius: 14,
       marginBottom: 10,
@@ -22,6 +23,7 @@ export default StyleSheet.create({
       fontSize: 22,
       fontWeight: '800',
       color: '#fff',
+      flex: 1,
       paddingLeft: 10,
     },
 });

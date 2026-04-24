@@ -1,52 +1,55 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, Alert, ScrollView, SafeAreaView, StyleSheet, ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, Alert, ScrollView,
+  SafeAreaView, ActivityIndicator,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
-import styles from './styles/styles';
-import globalStyles from '../../styles/globalStyles';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import * as customersService from '../../services/customersService';
+import globalStyles from '../../styles/globalStyles';
+import ls from './styles/customerFormStyles';
 
-/**
- * Props (via route params): customer (nullable), role
- */
+const Field = React.memo(({ icon, label, value, onChangeText, placeholder, keyboard, editable = true, half }) => (
+  <View style={[ls.fieldWrap, half && { flex: 1 }]}>
+    <Text style={ls.label}>{label}</Text>
+    <View style={[ls.inputRow, !editable && ls.inputDisabled]}>
+      {icon && <Icon name={icon} size={18} color={editable ? '#007AFF' : '#bbb'} style={{ marginRight: 8 }} />}
+      <TextInput
+        placeholder={placeholder}
+        placeholderTextColor="#bbb"
+        keyboardType={keyboard}
+        editable={editable}
+        value={value}
+        onChangeText={onChangeText}
+        style={ls.input}
+      />
+    </View>
+  </View>
+));
+
 export default function CustomerFormModal({ navigation, route }) {
   const { customer, customerId, role = 'vendedor' } = route?.params || {};
+  const isEditing = !!(customer || customerId);
+
   const [form, setForm] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    address: '',
-    cedula: '',
-    creditLimit: '',
-    type: 'Común',
-    discount: '',
+    firstName: '', lastName: '', phone: '', address: '',
+    cedula: '', creditLimit: '', type: 'Común', discount: '',
   });
   const [loadingCustomer, setLoadingCustomer] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const canEditSensitive = role === 'admin';
   const canEditCustomer = role === 'admin' || role === 'vendedor';
 
+  const set = (key) => (val) => setForm((f) => ({ ...f, [key]: val }));
+
   const applyCustomerToForm = (value) => {
     if (!value) {
-      setForm({
-        firstName: '',
-        lastName: '',
-        phone: '',
-        address: '',
-        cedula: '',
-        creditLimit: '',
-        type: 'Común',
-        discount: '',
-      });
+      setForm({ firstName: '', lastName: '', phone: '', address: '', cedula: '', creditLimit: '', type: 'Común', discount: '' });
       return;
     }
-
     setForm({
-      firstName: value.firstName || '',
-      lastName: value.lastName || '',
-      phone: value.phone || '',
-      address: value.address || '',
+      firstName: value.firstName || '', lastName: value.lastName || '',
+      phone: value.phone || '', address: value.address || '',
       cedula: value.cedula || '',
       creditLimit: value.creditLimit != null ? String(value.creditLimit) : '',
       type: value.type || 'Común',
@@ -55,42 +58,21 @@ export default function CustomerFormModal({ navigation, route }) {
   };
 
   useEffect(() => {
-    let isMounted = true;
-
-    const loadCustomer = async () => {
-      if (customer) {
-        applyCustomerToForm(customer);
-        return;
-      }
-
-      if (!customerId) {
-        applyCustomerToForm(null);
-        return;
-      }
-
+    let alive = true;
+    (async () => {
+      if (customer) { applyCustomerToForm(customer); return; }
+      if (!customerId) { applyCustomerToForm(null); return; }
       setLoadingCustomer(true);
       try {
         const fetched = await customersService.getCustomerById(customerId);
-        if (isMounted) {
-          applyCustomerToForm(fetched);
-        }
-      } catch (error) {
-        console.error('[CustomerFormModal] loadCustomer error:', error);
-        if (isMounted) {
-          Alert.alert('Error', 'No se pudo cargar el cliente.');
-        }
+        if (alive) applyCustomerToForm(fetched);
+      } catch (e) {
+        if (alive) Alert.alert('Error', 'No se pudo cargar el cliente.');
       } finally {
-        if (isMounted) {
-          setLoadingCustomer(false);
-        }
+        if (alive) setLoadingCustomer(false);
       }
-    };
-
-    loadCustomer();
-
-    return () => {
-      isMounted = false;
-    };
+    })();
+    return () => { alive = false; };
   }, [customer, customerId]);
 
   const handleClose = () => navigation.goBack();
@@ -100,183 +82,125 @@ export default function CustomerFormModal({ navigation, route }) {
       Alert.alert('Campos requeridos', 'Nombre y teléfono son obligatorios.');
       return;
     }
-
     if (!canEditCustomer) {
       Alert.alert('No autorizado', 'No tienes permisos para editar este cliente.');
       return;
     }
-
     if (customer && !canEditSensitive) {
-      const originalCredit = customer.creditLimit ?? 0;
-      const originalDiscount = customer.discount ?? 0;
-      if (parseFloat(form.creditLimit || 0) !== originalCredit) {
-        Alert.alert('No autorizado', 'Solo admin puede cambiar el límite de crédito.');
-        return;
+      if (parseFloat(form.creditLimit || 0) !== (customer.creditLimit ?? 0)) {
+        Alert.alert('No autorizado', 'Solo admin puede cambiar el límite de crédito.'); return;
       }
-      if (parseFloat(form.discount || 0) !== originalDiscount) {
-        Alert.alert('No autorizado', 'Solo admin puede cambiar el descuento.');
-        return;
+      if (parseFloat(form.discount || 0) !== (customer.discount ?? 0)) {
+        Alert.alert('No autorizado', 'Solo admin puede cambiar el descuento.'); return;
       }
     }
 
     const payload = {
-      firstName: form.firstName.trim(),
-      lastName: form.lastName.trim(),
-      phone: form.phone.trim(),
-      address: form.address.trim(),
+      firstName: form.firstName.trim(), lastName: form.lastName.trim(),
+      phone: form.phone.trim(), address: form.address.trim(),
       cedula: form.cedula.trim(),
       creditLimit: parseFloat(form.creditLimit) || 0,
-      type: form.type,
-      discount: parseFloat(form.discount) || 0,
+      type: form.type, discount: parseFloat(form.discount) || 0,
     };
 
+    setSaving(true);
     try {
-      if (customer) {
-        await customersService.updateCustomer(customer.id, payload);
-      } else {
-        await customersService.createCustomer(payload);
-      }
+      if (customer) await customersService.updateCustomer(customer.id, payload);
+      else await customersService.createCustomer(payload);
       Alert.alert('✅ Cliente guardado');
       handleClose();
     } catch (e) {
-      console.error(e);
       Alert.alert('Error', e.message || 'No se pudo guardar');
+    } finally {
+      setSaving(false);
     }
   };
 
+
+  const customerTypes = ['Común', 'Semi-mayorista', 'Mayorista'];
+
   return (
-    <SafeAreaView style={[globalStyles.container, localStyles.container]}>
+    <SafeAreaView style={ls.safe}>
+      {/* Header */}
       <View style={globalStyles.header}>
-        <TouchableOpacity onPress={handleClose}>
-          <Icon name="chevron-back" size={24} color="#fff" />
+        <TouchableOpacity onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Icon name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={globalStyles.title}>{(customer || customerId) ? 'Editar cliente' : 'Nuevo cliente'}</Text>
+        <Text style={globalStyles.title}>{isEditing ? 'Editar cliente' : 'Nuevo cliente'}</Text>
       </View>
 
-      <ScrollView
-        contentContainerStyle={localStyles.formContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={ls.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+
         {loadingCustomer && (
-          <View style={localStyles.loadingRow}>
+          <View style={ls.loadingRow}>
             <ActivityIndicator size="small" color="#007AFF" />
-            <Text style={localStyles.loadingText}>Cargando cliente...</Text>
+            <Text style={ls.loadingText}>Cargando...</Text>
           </View>
         )}
 
-        <View style={styles.rowBetween}>
-          <TextInput
-            placeholder="Nombres"
-            placeholderTextColor="#999"
-            style={[styles.input, { flex: 1, marginRight: 8 }]}
-            value={form.firstName}
-            onChangeText={(t) => setForm({ ...form, firstName: t })}
-          />
-          <TextInput
-            placeholder="Apellidos"
-            placeholderTextColor="#999"
-            style={[styles.input, { flex: 1, marginLeft: 8 }]}
-            value={form.lastName}
-            onChangeText={(t) => setForm({ ...form, lastName: t })}
-          />
-        </View>
-
-        <View style={styles.rowBetween}>
-          <TextInput
-            placeholder="Teléfono"
-            placeholderTextColor="#999"
-            keyboardType="phone-pad"
-            style={[styles.input, { flex: 1, marginRight: 8 }]}
-            value={form.phone}
-            onChangeText={(t) => setForm({ ...form, phone: t })}
-          />
-          <TextInput
-            placeholder="Cédula"
-            placeholderTextColor="#999"
-            style={[styles.input, { flex: 1, marginLeft: 8 }]}
-            value={form.cedula}
-            onChangeText={(t) => setForm({ ...form, cedula: t })}
-          />
-        </View>
-
-        <TextInput
-          placeholder="Dirección"
-          placeholderTextColor="#999"
-          style={styles.input}
-          value={form.address}
-          onChangeText={(t) => setForm({ ...form, address: t })}
-        />
-
-        <Text style={styles.label}>Tipo de cliente</Text>
-        <View style={styles.rowBetween}>
-          {['Común', 'Semi-mayorista', 'Mayorista'].map((t) => (
-            <TouchableOpacity
-              key={t}
-              onPress={() => setForm({ ...form, type: t })}
-              style={[styles.typeButton, form.type === t && styles.typeButtonActive]}
-            >
-              <Text style={[styles.typeText, form.type === t && styles.typeTextActive]}>{t}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.rowBetween}>
-          <View style={{ flex: 1, marginRight: 8 }}>
-            <Text style={styles.label}>Descuento (%)</Text>
-            <TextInput
-              placeholder="Ej: 10"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              editable={canEditSensitive}
-              style={[styles.input, !canEditSensitive && styles.inputDisabled]}
-              value={String(form.discount)}
-              onChangeText={(t) => setForm({ ...form, discount: t })}
-            />
+        {/* ── Información personal ── */}
+        <Text style={ls.sectionTitle}>Información personal</Text>
+        <View style={ls.card}>
+          <View style={ls.row}>
+            <Field icon="account" label="Nombres" value={form.firstName} onChangeText={set('firstName')} placeholder="Nombres" half />
+            <View style={{ width: 10 }} />
+            <Field icon="account-outline" label="Apellidos" value={form.lastName} onChangeText={set('lastName')} placeholder="Apellidos" half />
           </View>
-          <View style={{ flex: 1, marginLeft: 8 }}>
-            <Text style={styles.label}>Límite de crédito</Text>
-            <TextInput
-              placeholder="0.00"
-              placeholderTextColor="#999"
-              keyboardType="numeric"
-              editable={canEditSensitive}
-              style={[styles.input, !canEditSensitive && styles.inputDisabled]}
-              value={String(form.creditLimit)}
-              onChangeText={(t) => setForm({ ...form, creditLimit: t })}
-            />
+          <View style={ls.row}>
+            <Field icon="phone" label="Teléfono *" value={form.phone} onChangeText={set('phone')} placeholder="8888-0000" keyboard="phone-pad" half />
+            <View style={{ width: 10 }} />
+            <Field icon="card-account-details-outline" label="Cédula" value={form.cedula} onChangeText={set('cedula')} placeholder="000-000000-0000X" half />
+          </View>
+          <Field icon="map-marker-outline" label="Dirección" value={form.address} onChangeText={set('address')} placeholder="Dirección del cliente" />
+        </View>
+
+        {/* ── Tipo de cliente ── */}
+        <Text style={ls.sectionTitle}>Tipo de cliente</Text>
+        <View style={ls.card}>
+          <View style={ls.typesRow}>
+            {customerTypes.map((t) => {
+              const active = form.type === t;
+              return (
+                <TouchableOpacity key={t} onPress={() => set('type')(t)} style={[ls.typeChip, active && ls.typeChipActive]}>
+                  <Icon name={active ? 'check-circle' : 'circle-outline'} size={16} color={active ? '#fff' : '#999'} />
+                  <Text style={[ls.typeChipText, active && ls.typeChipTextActive]}>{t}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
-        <View style={styles.rowButtons}>
-          <TouchableOpacity style={styles.btnPrimary} onPress={handleSave}>
-            <Text style={styles.btnText}>Guardar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btnCancel} onPress={handleClose}>
-            <Text style={styles.btnText}>Cancelar</Text>
-          </TouchableOpacity>
+        {/* ── Configuración financiera ── */}
+        <Text style={ls.sectionTitle}>Configuración financiera</Text>
+        <View style={ls.card}>
+          {!canEditSensitive && (
+            <View style={ls.lockBanner}>
+              <Icon name="lock-outline" size={14} color="#FF9500" />
+              <Text style={ls.lockText}>Solo admin puede modificar estos campos</Text>
+            </View>
+          )}
+          <View style={ls.row}>
+            <Field icon="percent" label="Descuento (%)" value={String(form.discount)} onChangeText={set('discount')} placeholder="0" keyboard="numeric" editable={canEditSensitive} half />
+            <View style={{ width: 10 }} />
+            <Field icon="cash" label="Límite de crédito" value={String(form.creditLimit)} onChangeText={set('creditLimit')} placeholder="0.00" keyboard="numeric" editable={canEditSensitive} half />
+          </View>
         </View>
+
+        {/* ── Botones ── */}
+        <TouchableOpacity style={ls.btnSave} onPress={handleSave} disabled={saving} activeOpacity={0.8}>
+          {saving ? <ActivityIndicator color="#fff" size="small" /> : (
+            <>
+              <Icon name="content-save-outline" size={20} color="#fff" />
+              <Text style={ls.btnSaveText}>Guardar cliente</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity style={ls.btnCancel} onPress={handleClose} activeOpacity={0.8}>
+          <Text style={ls.btnCancelText}>Cancelar</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const localStyles = StyleSheet.create({
-  container: {
-    backgroundColor: '#F5F6FA',
-  },
-  formContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  loadingText: {
-    marginLeft: 8,
-    color: '#666',
-    fontSize: 12,
-  },
-});

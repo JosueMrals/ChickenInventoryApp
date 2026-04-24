@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react';
-import { View, TouchableWithoutFeedback, Alert } from 'react-native';
+import { View, Alert } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import appCheck from '@react-native-firebase/app-check'; // Importar App Check
 
@@ -332,12 +333,18 @@ export default function App() {
     });
 
   return (
+    <SafeAreaProvider>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <RouteProvider>
         <PreSaleProvider>
           <NavigationContainer ref={navigationRef}>
-            <TouchableWithoutFeedback onPress={() => SessionManager.updateActivity()}>
-              <View style={{ flex: 1 }}>
+              <View
+                style={{ flex: 1 }}
+                onStartShouldSetResponderCapture={() => {
+                  SessionManager.updateActivity();
+                  return false;
+                }}
+              >
                 <Stack.Navigator screenOptions={{ headerShown: false }}>
                     <Stack.Screen name="Login" component={LoginScreen} />
                     <Stack.Screen name="RouteSelection" component={RouteSelectionScreen} />
@@ -352,10 +359,10 @@ export default function App() {
                     <Stack.Screen name="DeliveryDone" component={DeliveryDoneScreen} />
                 </Stack.Navigator>
               </View>
-            </TouchableWithoutFeedback>
           </NavigationContainer>
         </PreSaleProvider>
       </RouteProvider>
     </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

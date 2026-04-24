@@ -36,7 +36,7 @@ export default function AddRouteScreen({ navigation }) {
             });
 
             Alert.alert('Éxito', 'Ruta creada correctamente.', [
-                { text: 'OK', onPress: () => navigation.goBack() }
+                { text: 'OK', onPress: () => navigation.navigate('Routes') }
             ]);
         } catch (error) {
             console.error('Error creating route:', error);
@@ -52,7 +52,7 @@ export default function AddRouteScreen({ navigation }) {
             style={globalStyles.container}
         >
             <View style={globalStyles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
+                <TouchableOpacity onPress={() => navigation.navigate('Routes')}>
                     <Icon name="chevron-back" size={28} color="#FFF" />
                 </TouchableOpacity>
                 <Text style={globalStyles.title}>Nueva Ruta</Text>

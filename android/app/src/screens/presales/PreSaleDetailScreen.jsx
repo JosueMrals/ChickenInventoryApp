@@ -189,7 +189,7 @@ export default function PreSaleDetailScreen({ route, navigation }) {
             await deletePreSale({ preSaleId: presale.id, reason });
             setDeleteModalVisible(false);
             Alert.alert('Pre-venta eliminada', 'La pre-venta fue eliminada y el inventario fue restaurado.');
-            navigation.goBack();
+            navigation.navigate('PreSalesList');
         } catch (error) {
             Alert.alert('No se pudo eliminar', error?.message || 'Ocurrió un error al eliminar la pre-venta.');
         } finally {
@@ -301,7 +301,7 @@ export default function PreSaleDetailScreen({ route, navigation }) {
     return (
         <SafeAreaView style={globalStyles.container}>
             <View style={globalStyles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()}><Icon name="chevron-back" size={28} color="#FFF" /></TouchableOpacity>
+                <TouchableOpacity onPress={() => navigation.navigate('PreSalesList')}><Icon name="chevron-back" size={28} color="#FFF" /></TouchableOpacity>
                 <Text style={globalStyles.title}>Detalles de Pre-Venta</Text>
                 <View style={{ width: 28 }} />
             </View>

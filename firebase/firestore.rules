@@ -185,6 +185,15 @@ service cloud.firestore {
     }
 
     // =====================================================
+    //  🗺 ROUTES — rutas de reparto
+    // =====================================================
+    match /routes/{routeId} {
+      allow read: if isOperativo();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || isVendedor() || isBodeguero();
+    }
+
+    // =====================================================
     //  🔢 COUNTERS — consecutivos (ventas, preventas, etc.)
     // =====================================================
     match /counters/{counterId} {

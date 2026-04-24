@@ -5,14 +5,12 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  ScrollView,
   StyleSheet,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Keyboard,
-  Modal,
 } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import auth from '@react-native-firebase/auth';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -40,12 +38,6 @@ function buildProductCategoryDiscountRule(minQty, source = null) {
   };
 }
 
-function isPermissionDeniedError(err) {
-  const code = String(err?.code || '').toLowerCase();
-  const message = String(err?.message || '').toLowerCase();
-  return code.includes('permission-denied') || message.includes('permission-denied');
-}
-
 export default function AddProductScreen() {
   const navigation = useNavigation();
   const route = useRoute();
@@ -53,7 +45,6 @@ export default function AddProductScreen() {
 
   const [saving, setSaving] = useState(false);
 
-  // Estado Unificado
   const [values, setValues] = useState({
     name: '',
     barcode: '',
@@ -66,22 +57,16 @@ export default function AddProductScreen() {
     measureType: 'unit',
     wholesalePrices: [],
     initialStock: '',
-    // --- Nueva estructura de bonificaciones: array de hasta 5 ---
     bonuses: [],
     categoryDiscountRules: [],
   });
 
   const initialRef = useRef(JSON.stringify(values));
-
   const scrollRef = useRef(null);
   const inputsRef = useRef({});
   const assignRef = (field) => (r) => { inputsRef.current[field] = r; };
 
-  const { categoryRows, categories, addCategory, removeCategory, loading: categoriesLoading } = useProductCategories();
-
-  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [categoryBusy, setCategoryBusy] = useState(false);
+  const { categoryRows, categories } = useProductCategories();
 
   const categoryOptions = useMemo(() => {
     const merged = new Set(categories);
@@ -93,10 +78,8 @@ export default function AddProductScreen() {
   const categoryActivationRules = useMemo(() => {
     const selectedCategory = normalizeCategory(values.category).toLowerCase();
     if (!selectedCategory) return [];
-
     const row = categoryRows.find((item) => normalizeCategory(item?.name).toLowerCase() === selectedCategory);
     const rules = Array.isArray(row?.activationRules) ? row.activationRules : [];
-
     return rules
       .map((rule) => Math.max(1, Math.floor(Number(rule?.minQty || 0))))
       .filter((qty) => qty > 0)
@@ -107,81 +90,66 @@ export default function AddProductScreen() {
     setValues((prev) => {
       const activationSet = new Set(categoryActivationRules);
       const currentRules = Array.isArray(prev.categoryDiscountRules) ? prev.categoryDiscountRules : [];
-
       if (activationSet.size === 0) {
         if (currentRules.length === 0) return prev;
         return { ...prev, categoryDiscountRules: [] };
       }
-
       const byQty = currentRules.reduce((acc, rule) => {
         const qty = Math.max(1, Math.floor(Number(rule?.minQty || 0)));
         if (!qty) return acc;
         acc[qty] = rule;
         return acc;
       }, {});
-
       const nextRules = categoryActivationRules.map((minQty) => buildProductCategoryDiscountRule(minQty, byQty[minQty]));
       return { ...prev, categoryDiscountRules: nextRules };
     });
   }, [categoryActivationRules]);
 
   useEffect(() => {
-    if (scannedCode) {
-        setValues(prev => ({ ...prev, barcode: scannedCode }));
-    }
+    if (scannedCode) setValues(prev => ({ ...prev, barcode: scannedCode }));
   }, [scannedCode]);
 
   const calculateSalePriceFromMargin = (cost, margin) => {
-      if (!cost || !margin || margin >= 100) return '';
-      const c = Number(cost);
-      const m = Number(margin);
-      if (Number.isNaN(c) || Number.isNaN(m)) return '';
-      const sale = c / (1 - (m / 100));
-      return sale.toFixed(2);
+    if (!cost || !margin || margin >= 100) return '';
+    const c = Number(cost); const m = Number(margin);
+    if (Number.isNaN(c) || Number.isNaN(m)) return '';
+    return (c / (1 - (m / 100))).toFixed(2);
   };
 
   const calculateMarginFromSalePrice = (cost, sale) => {
-      if (!cost || !sale) return '';
-      const c = Number(cost);
-      const s = Number(sale);
-      if (Number.isNaN(c) || Number.isNaN(s) || s === 0) return '';
-      const margin = ((1 - (c / s)) * 100);
-      return margin.toFixed(2);
+    if (!cost || !sale) return '';
+    const c = Number(cost); const s = Number(sale);
+    if (Number.isNaN(c) || Number.isNaN(s) || s === 0) return '';
+    return (((1 - (c / s)) * 100)).toFixed(2);
   };
 
   const handlePriceChange = (field, text) => {
-      setValues(prev => {
-          const newValues = { ...prev, [field]: text };
-          if (field === 'purchasePrice') {
-               if (newValues.autoSalePrice && newValues.profitMargin) {
-                   newValues.salePrice = calculateSalePriceFromMargin(text, newValues.profitMargin);
-               } else if (!newValues.autoSalePrice && newValues.salePrice) {
-                   newValues.profitMargin = calculateMarginFromSalePrice(text, newValues.salePrice);
-               }
-               newValues.wholesalePrices = prev.wholesalePrices.map(wp => {
-                   if(wp.price) return {...wp, margin: calculateMarginFromSalePrice(text, wp.price)};
-                   return wp;
-               });
-          }
-          if (field === 'profitMargin') {
-              if (newValues.purchasePrice) newValues.salePrice = calculateSalePriceFromMargin(newValues.purchasePrice, text);
-          }
-          if (field === 'salePrice') {
-              if (newValues.purchasePrice) newValues.profitMargin = calculateMarginFromSalePrice(newValues.purchasePrice, text);
-          }
-          return newValues;
-      });
+    setValues(prev => {
+      const newValues = { ...prev, [field]: text };
+      if (field === 'purchasePrice') {
+        if (newValues.autoSalePrice && newValues.profitMargin) {
+          newValues.salePrice = calculateSalePriceFromMargin(text, newValues.profitMargin);
+        } else if (!newValues.autoSalePrice && newValues.salePrice) {
+          newValues.profitMargin = calculateMarginFromSalePrice(text, newValues.salePrice);
+        }
+        newValues.wholesalePrices = prev.wholesalePrices.map(wp => {
+          if (wp.price) return { ...wp, margin: calculateMarginFromSalePrice(text, wp.price) };
+          return wp;
+        });
+      }
+      if (field === 'profitMargin') {
+        if (newValues.purchasePrice) newValues.salePrice = calculateSalePriceFromMargin(newValues.purchasePrice, text);
+      }
+      if (field === 'salePrice') {
+        if (newValues.purchasePrice) newValues.profitMargin = calculateMarginFromSalePrice(newValues.purchasePrice, text);
+      }
+      return newValues;
+    });
   };
 
   function addWholesalePrice() {
-    if (values.wholesalePrices.length >= 5) {
-      Alert.alert('Límite alcanzado', 'Máximo 5 precios de mayorista.');
-      return;
-    }
-    setValues(v => ({
-      ...v,
-      wholesalePrices: [...v.wholesalePrices, { price: '', quantity: '', margin: '' }]
-    }));
+    if (values.wholesalePrices.length >= 5) { Alert.alert('Límite alcanzado', 'Máximo 5 precios de mayorista.'); return; }
+    setValues(v => ({ ...v, wholesalePrices: [...v.wholesalePrices, { price: '', quantity: '', margin: '' }] }));
   }
 
   function removeWholesalePrice(index) {
@@ -371,7 +339,7 @@ export default function AddProductScreen() {
       return () => navigation.removeListener('beforeRemove', onBeforeRemove);
     }, [navigation, hasChanges, saving])
   );
-  
+
   function setField(field, value) {
     setValues(v => ({ ...v, [field]: value }));
   }
@@ -381,63 +349,14 @@ export default function AddProductScreen() {
     setValues(prev => ({ ...prev, bonuses: newBonusesArray }));
   };
 
-  async function handleAddCategory() {
-    const categoryName = normalizeCategory(newCategoryName);
-    if (!categoryName) {
-      Alert.alert('Validacion', 'Ingresa un nombre de categoria.');
-      return;
-    }
-
-    setCategoryBusy(true);
-    try {
-      await addCategory(categoryName);
-      setField('category', categoryName);
-      setNewCategoryName('');
-    } catch (err) {
-      console.error('handleAddCategory error:', err);
-      if (isPermissionDeniedError(err)) {
-        Alert.alert('Permisos', 'Tu usuario no tiene permisos para agregar categorias.');
-      } else {
-        Alert.alert('Error', 'No se pudo agregar la categoria.');
-      }
-    } finally {
-      setCategoryBusy(false);
-    }
-  }
-
-  async function handleDeleteCategory(row) {
-    if (!row?.id) return;
-    Alert.alert('Eliminar categoria', `Se eliminara "${row.name}" de la lista.`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            setCategoryBusy(true);
-            await removeCategory(row.id);
-            if (normalizeCategory(values.category) === normalizeCategory(row.name)) {
-              setField('category', '');
-            }
-          } catch (err) {
-            console.error('handleDeleteCategory error:', err);
-            Alert.alert('Error', 'No se pudo eliminar la categoria.');
-          } finally {
-            setCategoryBusy(false);
-          }
-        },
-      },
-    ]);
-  }
-
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
         <View style={globalStyles.header}>
 			<TouchableOpacity onPress={() => navigation.goBack()}><Icon name="chevron-back" size={26} color="#fff" /></TouchableOpacity>
 			<Text style={globalStyles.title}>Nuevo Producto</Text>
             <View style={{width: 26}} />
 		</View>
-      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 10 }} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
           <View style={styles.section}>
               <Text style={styles.sectionTitle}>Informacion Basica</Text>
               <Text style={styles.label}>Nombre del producto *</Text>
@@ -445,24 +364,11 @@ export default function AddProductScreen() {
 
               <View style={styles.categoryHeaderRow}>
                 <Text style={styles.label}>Categoria</Text>
-                <TouchableOpacity onPress={() => setCategoryModalVisible(true)}>
+                <TouchableOpacity onPress={() => navigation.navigate('ManageCategories')}>
                   <Text style={styles.manageCategoryLink}>Gestionar</Text>
                 </TouchableOpacity>
               </View>
-              <View style={styles.categoryWrap}>
-                {categoryOptions.map((categoryOption) => {
-                  const active = values.category === categoryOption;
-                  return (
-                    <TouchableOpacity
-                      key={categoryOption}
-                      style={[styles.categoryChip, active && styles.categoryChipActive]}
-                      onPress={() => setField('category', categoryOption)}
-                    >
-                      <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>{categoryOption}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+
               <TextInput
                 ref={assignRef('category')}
                 style={styles.input}
@@ -499,7 +405,7 @@ export default function AddProductScreen() {
               <Text style={styles.label}>Descripción</Text>
               <TextInput ref={assignRef('description')} style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={values.description} onChangeText={t => setField('description', t)} placeholder="Opcional" placeholderTextColor={PLACEHOLDER_COLOR} />
           </View>
-          
+
           <View style={styles.section}>
              <Text style={styles.sectionTitle}>Precios y Costos</Text>
              <Text style={styles.label}>Costo de Compra ($)</Text>
@@ -589,49 +495,6 @@ export default function AddProductScreen() {
           </View>
       </ScrollView>
 
-      <Modal
-        animationType="slide"
-        transparent
-        visible={categoryModalVisible}
-        onRequestClose={() => setCategoryModalVisible(false)}
-      >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCategoryModalVisible(false)}>
-          <TouchableOpacity style={styles.categoryModal} activeOpacity={1} onPress={() => {}}>
-            <Text style={styles.categoryModalTitle}>Categorias</Text>
-
-            <View style={styles.categoryAddRow}>
-              <TextInput
-                style={styles.categoryAddInput}
-                value={newCategoryName}
-                onChangeText={setNewCategoryName}
-                placeholder="Ej. Congelados"
-                placeholderTextColor={PLACEHOLDER_COLOR}
-              />
-              <TouchableOpacity style={styles.categoryAddBtn} onPress={handleAddCategory} disabled={categoryBusy}>
-                {categoryBusy ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="add" size={18} color="#fff" />}
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={{ maxHeight: 280 }} keyboardShouldPersistTaps="handled">
-              {categoriesLoading ? (
-                <ActivityIndicator style={{ marginTop: 12 }} />
-              ) : (
-                categoryRows.map((row) => (
-                  <View key={row.id} style={styles.categoryListItem}>
-                    <TouchableOpacity style={{ flex: 1 }} onPress={() => { setField('category', row.name); setCategoryModalVisible(false); }}>
-                      <Text style={styles.categoryListText}>{row.name}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDeleteCategory(row)} style={styles.categoryDeleteBtn}>
-                      <Icon name="trash-outline" size={18} color="#FF3B30" />
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
       <View style={styles.bottomContainer}>
           <TouchableOpacity style={[styles.saveBtn, saving && styles.saveBtnDisabled]} onPress={handleSave} disabled={saving}>
               {saving ? (<ActivityIndicator color="#fff" />) : (<><Icon name="save-outline" size={22} color="#fff" style={{marginRight: 8}} /><Text style={styles.saveBtnText}>Guardar Producto</Text></>)}
@@ -642,8 +505,9 @@ export default function AddProductScreen() {
 }
 
 const styles = StyleSheet.create({
-  section: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, elevation: 1, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
-  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 16 },
+  scrollContent: { padding: 16, paddingBottom: 10 },
+  section: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#ECECEC' },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 14 },
   label: { fontSize: 13, color: '#666', marginBottom: 6, fontWeight: '600', textTransform: 'uppercase' },
   subLabel: { fontSize: 11, color: '#888', marginBottom: 4, fontWeight: '600' },
   input: { backgroundColor: '#F5F6FA', padding: 12, borderRadius: 10, fontSize: 16, color: '#333', marginBottom: 16, borderWidth: 1, borderColor: '#F0F0F0' },
@@ -657,21 +521,11 @@ const styles = StyleSheet.create({
   percentSymbol: { fontSize: 16, color: '#999', fontWeight: 'bold' },
   toggleContainer: { flexDirection: 'row', backgroundColor: '#F0F0F0', borderRadius: 10, padding: 3, marginBottom: 16, height: 48 },
   toggleBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: 8 },
-  toggleBtnActive: { backgroundColor: '#fff', elevation: 2 },
+  toggleBtnActive: { backgroundColor: '#fff' },
   toggleText: { fontSize: 13, color: '#888', fontWeight: '600' },
   toggleTextActive: { color: '#007AFF', fontWeight: '700' },
-  categoryWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 10, marginTop: 2 },
-  categoryChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#F1F4F8',
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  categoryChipActive: { backgroundColor: '#007AFF' },
-  categoryChipText: { color: '#51606F', fontWeight: '600', fontSize: 12 },
-  categoryChipTextActive: { color: '#fff' },
+  categoryHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  manageCategoryLink: { color: '#007AFF', fontWeight: '700', marginBottom: 8 },
   addBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#007AFF', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
   addBtnText: { color: '#fff', fontSize: 12, fontWeight: '700', marginLeft: 4 },
   wholesaleRow: { marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
@@ -681,31 +535,13 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: '#007AFF', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', elevation: 4, shadowColor: '#007AFF', shadowOpacity: 0.3, shadowRadius: 5, shadowOffset: { width: 0, height: 3 } },
   saveBtnDisabled: { backgroundColor: '#A0A0A0', elevation: 0 },
   saveBtnText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  categoryHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  manageCategoryLink: { color: '#007AFF', fontWeight: '700', marginBottom: 8 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
-  categoryModal: { backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 16, maxHeight: '70%' },
-  categoryModalTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 12 },
-  categoryAddRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  categoryAddInput: { flex: 1, backgroundColor: '#F5F6FA', borderRadius: 10, borderWidth: 1, borderColor: '#E8E8E8', paddingHorizontal: 12, paddingVertical: 10, marginRight: 8 },
-  categoryAddBtn: { width: 42, height: 42, borderRadius: 10, backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center' },
-  categoryListItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  categoryListText: { fontSize: 14, color: '#263238', fontWeight: '600' },
-  categoryDeleteBtn: { padding: 6 },
+  helperText: { fontSize: 12, color: '#888', marginBottom: 12 },
   discountRuleRow: { marginBottom: 16 },
   discountRuleLabel: { fontSize: 14, color: '#333', marginBottom: 8 },
   discountRuleInputs: { flexDirection: 'row', alignItems: 'center' },
   discountValueInput: { flex: 1, padding: 12, borderRadius: 8, fontSize: 16, color: '#333', backgroundColor: '#F5F6FA', borderWidth: 1, borderColor: '#E0E0E0', marginRight: 8 },
   discountTypeContainer: { flexDirection: 'row' },
-  discountTypeButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#F0F0F0',
-    borderWidth: 1,
-    borderColor: '#D0D0D0',
-    marginRight: 8,
-  },
+  discountTypeButton: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: '#F0F0F0', borderWidth: 1, borderColor: '#D0D0D0', marginRight: 8 },
   discountTypeButtonActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
   discountTypeText: { fontSize: 14, color: '#333', fontWeight: '600' },
   discountTypeTextActive: { color: '#fff' },

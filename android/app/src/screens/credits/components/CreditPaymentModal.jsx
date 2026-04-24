@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Animated, Modal, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import styles from '../styles/creditsStyles';
 
 export default function CreditPaymentModal({
@@ -12,6 +13,9 @@ export default function CreditPaymentModal({
   onCancel,
   submitting = false,
 }) {
+  const name = selectedCredit?.customerName || selectedCredit?.clientName || 'Cliente';
+  const pending = Number(selectedCredit?.pending || 0);
+
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={styles.modalOverlay}>
@@ -19,34 +23,54 @@ export default function CreditPaymentModal({
           <ActivityIndicator size="large" color="#fff" />
         ) : (
           <Animated.View style={[styles.modalContent, { transform: [{ scale: animValue }] }]}>
-            <Text style={{ fontSize: 20, fontWeight: '700', marginBottom: 10 }}>Registrar Abono</Text>
-            <Text style={{ color: '#007AFF', marginBottom: 8 }}>
-              Pendiente: C${Number(selectedCredit?.pending || 0).toFixed(2)}
-            </Text>
+            <Text style={styles.modalTitle}>Registrar Abono</Text>
+            <Text style={styles.modalCustomer}>{name}</Text>
 
-            <TextInput
-              placeholder="Monto a abonar"
-              keyboardType="numeric"
-              value={paymentAmount}
-              onChangeText={onChangeAmount}
-              editable={!submitting}
-              style={styles.input}
-            />
+            {/* Pending badge */}
+            <View style={styles.pendingBadge}>
+              <Icon name="cash-clock" size={20} color="#D97706" />
+              <View>
+                <Text style={styles.pendingBadgeText}>Saldo pendiente</Text>
+                <Text style={styles.pendingAmount}>C${pending.toFixed(2)}</Text>
+              </View>
+            </View>
 
-            <View style={styles.rowButtons}>
+            {/* Input */}
+            <View style={styles.inputWrap}>
+              <Icon name="cash" size={22} color={submitting ? '#bbb' : '#10B981'} />
+              <TextInput
+                placeholder="Monto a abonar"
+                placeholderTextColor="#9CA3AF"
+                keyboardType="numeric"
+                value={paymentAmount}
+                onChangeText={onChangeAmount}
+                editable={!submitting}
+                style={styles.input}
+              />
+            </View>
+
+            {/* Buttons */}
+            <View style={styles.modalButtons}>
               <TouchableOpacity
+                style={[styles.btnConfirm, submitting && { opacity: 0.7 }]}
                 onPress={onConfirm}
-                style={[styles.btn, styles.btnPrimary, submitting && { opacity: 0.7 }]}
                 disabled={submitting}
               >
-                {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Confirmar</Text>}
+                {submitting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Icon name="check-circle-outline" size={18} color="#fff" />
+                    <Text style={styles.btnConfirmText}>Confirmar</Text>
+                  </>
+                )}
               </TouchableOpacity>
               <TouchableOpacity
+                style={[styles.btnCancel, submitting && { opacity: 0.5 }]}
                 onPress={onCancel}
-                style={[styles.btn, styles.btnDanger, submitting && { opacity: 0.5 }]}
                 disabled={submitting}
               >
-                <Text style={styles.btnText}>Cancelar</Text>
+                <Text style={styles.btnCancelText}>Cancelar</Text>
               </TouchableOpacity>
             </View>
           </Animated.View>

@@ -1,19 +1,27 @@
 import React, { useState } from 'react';
 import firestore from '@react-native-firebase/firestore';
-import { View, Text, ScrollView, TouchableOpacity, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, LayoutAnimation, Platform, UIManager, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { warehouseStyles as styles } from '../styles/warehouseStyles';
+import { warehouseStyles as baseStyles } from '../styles/warehouseStyles';
 import { groupItemsByProduct, groupAggregatedProductsByCategory } from '../../../utils/warehouseUtils';
 import { Swipeable } from 'react-native-gesture-handler';
 import { updateAggregateProductStatus } from '../../../services/preSaleService';
+import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+const TAB_COLORS = {
+  pending: '#F59E0B',
+  preparing: '#3B82F6',
+  ready: '#10B981',
+};
+
 const DashboardPanel = ({ preSales, onHandoverPress }) => {
-    const [activeStatusTab, setActiveStatusTab] = useState('pending'); // 'pending', 'preparing', 'ready'
+    const [activeStatusTab, setActiveStatusTab] = useState('pending');
     const [productCategoryById, setProductCategoryById] = useState({});
+    const { bottomPadding } = useAdaptiveBottom();
 
     React.useEffect(() => {
         const unsubscribe = firestore()
@@ -23,9 +31,7 @@ const DashboardPanel = ({ preSales, onHandoverPress }) => {
               const map = {};
               snapshot.forEach((doc) => {
                 const data = doc.data() || {};
-                if (data.category) {
-                  map[doc.id] = data.category;
-                }
+                if (data.category) map[doc.id] = data.category;
               });
               setProductCategoryById(map);
             },
@@ -34,14 +40,11 @@ const DashboardPanel = ({ preSales, onHandoverPress }) => {
               setProductCategoryById({});
             }
           );
-
         return () => unsubscribe();
     }, []);
 
-    // Calcular contadores globales de ITEMS para las pestañas
     const statusCounts = React.useMemo(() => {
         const counts = { pending: 0, preparing: 0, ready: 0 };
-        // Mejor iteramos preSales nosotros mismos para mayor eficiencia en contadores globales
         preSales.forEach(sale => {
              const items = [...(sale.items || []), ...(sale.bonuses || [])];
              items.forEach(i => {
@@ -55,102 +58,57 @@ const DashboardPanel = ({ preSales, onHandoverPress }) => {
     const { aggregatedProducts, groupedByCategory, totalRegular, totalBonus } = React.useMemo(() => {
         const products = groupItemsByProduct(preSales, activeStatusTab, productCategoryById);
         const grouped = groupAggregatedProductsByCategory(products);
-
-        let tReg = 0;
-        let tBonus = 0;
-
-        products.forEach(p => {
-            tReg += p.regularQty;
-            tBonus += p.bonusQty;
-        });
-
-        return {
-            aggregatedProducts: products,
-            groupedByCategory: grouped,
-            totalRegular: tReg,
-            totalBonus: tBonus,
-        };
+        grouped.sort((a, b) => (a.category || '').localeCompare(b.category || ''));
+        let tReg = 0, tBonus = 0;
+        products.forEach(p => { tReg += p.regularQty; tBonus += p.bonusQty; });
+        return { aggregatedProducts: products, groupedByCategory: grouped, totalRegular: tReg, totalBonus: tBonus };
     }, [preSales, activeStatusTab, productCategoryById]);
 
-    const animateTransition = () => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    };
+    const animateTransition = () => LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
     const handleSwipeRight = (productName) => {
-        // Retroceder estado (Antes era izquierda)
         let prevStatus = '';
         if (activeStatusTab === 'ready') prevStatus = 'preparing';
         else if (activeStatusTab === 'preparing') prevStatus = 'pending';
         else return;
-
         animateTransition();
         updateAggregateProductStatus(productName, prevStatus, activeStatusTab);
     };
 
     const handleSwipeLeft = (productName) => {
-        // Avanzar estado (Antes era derecha)
         let nextStatus = '';
         if (activeStatusTab === 'pending') nextStatus = 'preparing';
         else if (activeStatusTab === 'preparing') nextStatus = 'ready';
-        else return; // Ya en ready, no avanza más (o se maneja entrega)
-
+        else return;
         animateTransition();
         updateAggregateProductStatus(productName, nextStatus, activeStatusTab);
     };
 
-    const renderRightActions = (progress, dragX) => {
-        // Acciones derechas (al deslizar a la izquierda para revelar) -> Retroceder
-        const isPendingTab = activeStatusTab === 'pending';
-        if (isPendingTab) return null;
+    const activeColor = TAB_COLORS[activeStatusTab];
 
+    const renderRightActions = () => {
+        if (activeStatusTab === 'pending') return null;
         const label = activeStatusTab === 'ready' ? 'Preparar' : 'Pendiente';
-        const color = activeStatusTab === 'ready' ? '#007AFF' : '#F2C94C';
+        const color = activeStatusTab === 'ready' ? TAB_COLORS.preparing : TAB_COLORS.pending;
         const icon = activeStatusTab === 'ready' ? 'construct-outline' : 'time-outline';
-
         return (
-            <TouchableOpacity
-                style={{ backgroundColor: color, justifyContent: 'center', alignItems: 'center', width: 80, height: '100%' }}
-                onPress={() => {}} // El trigger es por swipe completo
-            >
-                <Icon name={icon} size={24} color="#FFF" />
-                <Text style={{color: 'white', fontSize: 11, fontWeight: 'bold'}}>{label}</Text>
-            </TouchableOpacity>
+            <View style={[s.swipeAction, { backgroundColor: color }]}>
+                <Icon name={icon} size={20} color="#FFF" />
+                <Text style={s.swipeLabel}>{label}</Text>
+            </View>
         );
     };
 
-    const renderLeftActions = (progress, dragX) => {
-        // Acciones izquierdas (al deslizar a la derecha para revelar) -> Avanzar
-        const isReadyTab = activeStatusTab === 'ready';
-        if (isReadyTab) return null;
-
+    const renderLeftActions = () => {
+        if (activeStatusTab === 'ready') return null;
         const label = activeStatusTab === 'pending' ? 'Preparar' : 'Listo';
-        const color = activeStatusTab === 'pending' ? '#007AFF' : '#34C759';
+        const color = activeStatusTab === 'pending' ? TAB_COLORS.preparing : TAB_COLORS.ready;
         const icon = activeStatusTab === 'pending' ? 'construct-outline' : 'checkmark-circle-outline';
-
         return (
-            <TouchableOpacity
-                style={{ backgroundColor: color, justifyContent: 'center', alignItems: 'center', width: 80, height: '100%' }}
-                onPress={() => {}}
-            >
-                <Icon name={icon} size={24} color="#FFF" />
-                <Text style={{color: 'white', fontSize: 11, fontWeight: 'bold'}}>{label}</Text>
-            </TouchableOpacity>
-        );
-    };
-
-    const TabButton = ({ id, label, icon, color, itemsCount }) => {
-        const isActive = activeStatusTab === id;
-        return (
-            <TouchableOpacity
-                style={{
-                    flex: 1, alignItems: 'center', paddingVertical: 12, borderBottomWidth: 3,
-                    borderBottomColor: isActive ? color : 'transparent'
-                }}
-                onPress={() => setActiveStatusTab(id)}
-            >
-                <Text style={{ fontSize: 18, fontWeight: 'bold', color: isActive ? color : '#999' }}>{itemsCount}</Text>
-                <Text style={{ fontSize: 10, color: isActive ? color : '#999', textTransform: 'uppercase', fontWeight: '600', marginTop: 2 }}>{label}</Text>
-            </TouchableOpacity>
+            <View style={[s.swipeAction, { backgroundColor: color }]}>
+                <Icon name={icon} size={20} color="#FFF" />
+                <Text style={s.swipeLabel}>{label}</Text>
+            </View>
         );
     };
 
@@ -162,106 +120,149 @@ const DashboardPanel = ({ preSales, onHandoverPress }) => {
         onSwipeableRightOpen={() => activeStatusTab !== 'pending' && handleSwipeRight(item.name)}
         onSwipeableLeftOpen={() => activeStatusTab !== 'ready' && handleSwipeLeft(item.name)}
       >
-        <View style={[styles.dashboardRow, {backgroundColor: '#fff', marginBottom: 1}]}>
-          <View style={styles.rowInfo}>
-            <View style={[styles.bulletPoint, {
-              backgroundColor: activeStatusTab === 'ready' ? '#34C759' : (activeStatusTab === 'preparing' ? '#007AFF' : '#F2C94C')
-            }]} />
-            <View>
-              <Text style={styles.rowName}>{item.name}</Text>
-              {(item.regularQty > 0 || item.bonusQty > 0) && (
-                <View style={{flexDirection: 'row', marginTop: 2}}>
-                  {item.regularQty > 0 && <Text style={{fontSize: 11, color: '#43A047', marginRight: 8}}>Venta: {item.regularQty}</Text>}
-                  {item.bonusQty > 0 && <Text style={{fontSize: 11, color: '#007AFF'}}>Regalo: {item.bonusQty}</Text>}
-                </View>
-              )}
-            </View>
+        <View style={s.productRow}>
+          <View style={[s.bullet, { backgroundColor: activeColor }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.productName}>{item.name}</Text>
+            {(item.regularQty > 0 || item.bonusQty > 0) && (
+              <View style={s.qtyChips}>
+                {item.regularQty > 0 && (
+                  <View style={[s.chip, { backgroundColor: '#ECFDF5' }]}>
+                    <Text style={[s.chipText, { color: '#059669' }]}>{item.regularQty} venta</Text>
+                  </View>
+                )}
+                {item.bonusQty > 0 && (
+                  <View style={[s.chip, { backgroundColor: '#EFF6FF' }]}>
+                    <Text style={[s.chipText, { color: '#2563EB' }]}>{item.bonusQty} regalo</Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
-          <View style={styles.rowValueContainer}>
-            <Text style={styles.rowValue}>{item.totalQty}</Text>
-            <Text style={styles.rowUnit}>und</Text>
+          <View style={s.totalBubble}>
+            <Text style={s.totalNum}>{item.totalQty}</Text>
           </View>
         </View>
       </Swipeable>
     );
 
+    const totalAll = statusCounts.pending + statusCounts.preparing + statusCounts.ready;
+
     return (
         <View style={{ flex: 1 }}>
-            {/* --- PANEL DE PESTAÑAS (TABS) --- */}
-            <View style={{
-                flexDirection: 'row', backgroundColor: '#fff',
-                borderBottomWidth: 1, borderBottomColor: '#eee', elevation: 2
-            }}>
-                <TabButton id="pending" label="Pendientes" color="#F2C94C" itemsCount={statusCounts.pending} />
-                <TabButton id="preparing" label="En Proceso" color="#007AFF" itemsCount={statusCounts.preparing} />
-                <TabButton id="ready" label="Listos" color="#34C759" itemsCount={statusCounts.ready} />
+            {/* Tabs */}
+            <View style={s.tabBar}>
+                {[
+                  { id: 'pending', label: 'Pendientes', icon: 'time-outline' },
+                  { id: 'preparing', label: 'En Proceso', icon: 'construct-outline' },
+                  { id: 'ready', label: 'Listos', icon: 'checkmark-circle-outline' },
+                ].map(tab => {
+                  const active = activeStatusTab === tab.id;
+                  const color = TAB_COLORS[tab.id];
+                  return (
+                    <TouchableOpacity
+                      key={tab.id}
+                      style={[s.tab, active && { backgroundColor: color + '15', borderBottomColor: color, borderBottomWidth: 2 }]}
+                      onPress={() => setActiveStatusTab(tab.id)}
+                    >
+                      <Icon name={tab.icon} size={14} color={active ? color : '#999'} />
+                      <Text style={[s.tabCount, active && { color }]}>{statusCounts[tab.id]}</Text>
+                      <Text style={[s.tabLabel, active && { color }]}>{tab.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
             </View>
 
-            <ScrollView style={[styles.dashboardContainer, {paddingTop: 10}]} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ flex: 1, paddingHorizontal: 12 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 12, paddingBottom: 20 }}>
 
-                {/* Cabecera de totales de la pestaña actual */}
-                <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, paddingHorizontal: 4 }}>
-                    <Text style={[styles.sectionHeader, {marginTop: 0, marginBottom: 0}]}>
-                        {activeStatusTab === 'pending' ? 'Por Preparar' : (activeStatusTab === 'preparing' ? 'En Producción' : 'Listos para Entrega')}
+                {/* Summary bar */}
+                <View style={s.summaryBar}>
+                    <Text style={s.summaryTitle}>
+                        {activeStatusTab === 'pending' ? 'Por Preparar' : activeStatusTab === 'preparing' ? 'En Producción' : 'Listos para Entrega'}
                     </Text>
-                    <View style={{flexDirection: 'row'}}>
-                       <View style={{flexDirection: 'row', alignItems: 'center', marginRight: 10}}>
-                           <View style={{width: 10, height: 10, borderRadius: 5, backgroundColor: '#43A047', marginRight: 4}} />
-                           <Text style={{fontSize: 10, color: '#666'}}>Venta: <Text style={{fontWeight:'bold'}}>{totalRegular}</Text></Text>
-                       </View>
-                       <View style={{flexDirection: 'row', alignItems: 'center'}}>
-                           <View style={{width: 10, height: 10, borderRadius: 5, backgroundColor: '#007AFF', marginRight: 4}} />
-                           <Text style={{fontSize: 10, color: '#666'}}>Regalo: <Text style={{fontWeight:'bold'}}>{totalBonus}</Text></Text>
-                       </View>
+                    <View style={s.legendRow}>
+                        <View style={s.legendItem}>
+                            <View style={[s.legendDot, { backgroundColor: '#059669' }]} />
+                            <Text style={s.legendText}>{totalRegular}</Text>
+                        </View>
+                        <View style={s.legendItem}>
+                            <View style={[s.legendDot, { backgroundColor: '#2563EB' }]} />
+                            <Text style={s.legendText}>{totalBonus}</Text>
+                        </View>
                     </View>
                 </View>
 
-                {/* --- LISTA DE PRODUCTOS AGRUPADA POR CATEGORIA --- */}
+                {/* Categories */}
                 {groupedByCategory.map((section) => (
-                    <View key={`${activeStatusTab}-${section.category}`} style={{ marginBottom: 10 }}>
-                        <View style={{
-                          flexDirection: 'row',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          paddingHorizontal: 6,
-                          paddingVertical: 6,
-                          backgroundColor: '#F3F4F6',
-                          borderRadius: 8,
-                          marginBottom: 6,
-                        }}>
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#374151' }}>
-                            {section.category}
-                          </Text>
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#6B7280' }}>
-                            {section.totalQty} und
-                          </Text>
+                    <View key={`${activeStatusTab}-${section.category}`} style={s.categoryBlock}>
+                        <View style={s.categoryHeader}>
+                            <Text style={s.categoryName}>{section.category}</Text>
+                            <View style={s.categoryBadge}>
+                                <Text style={s.categoryCount}>{section.totalQty}</Text>
+                            </View>
                         </View>
-
                         {section.products.map((item) => renderProductRow(item))}
                     </View>
                 ))}
 
                 {aggregatedProducts.length === 0 && (
-                    <View style={{alignItems: 'center', marginTop: 40, opacity: 0.6}}>
-                        <Icon name="file-tray-outline" size={40} color="#ccc" />
-                        <Text style={{color: '#999', marginTop: 10}}>No hay productos en esta etapa.</Text>
+                    <View style={s.emptyState}>
+                        <Icon name="file-tray-outline" size={36} color="#D1D5DB" />
+                        <Text style={s.emptyText}>No hay productos en esta etapa</Text>
                     </View>
                 )}
-
-                <View style={{height: 40}} />
-
-                {/* Botón de Entrega (Solo visible en Listos) */}
-                {activeStatusTab === 'ready' && aggregatedProducts.length > 0 && (
-                    <TouchableOpacity style={[styles.handoverButton, {marginBottom: 30}]} onPress={onHandoverPress}>
-                        <Icon name="bicycle" size={24} color="white" />
-                        <Text style={styles.handoverButtonText}>
-                            Entregar Carga al Repartidor
-                        </Text>
-                    </TouchableOpacity>
-                )}
             </ScrollView>
+
+            {/* Fixed handover button */}
+            {activeStatusTab === 'ready' && aggregatedProducts.length > 0 && (
+                <TouchableOpacity style={[baseStyles.handoverButton, { marginHorizontal: 16, marginBottom: bottomPadding }]} onPress={onHandoverPress}>
+                    <Icon name="bicycle" size={24} color="white" />
+                    <Text style={baseStyles.handoverButtonText}>Entregar Carga al Repartidor</Text>
+                </TouchableOpacity>
+            )}
         </View>
     );
 };
+
+const s = StyleSheet.create({
+    tabBar: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+    tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 6, gap: 4 },
+    tabCount: { fontSize: 14, fontWeight: '800', color: '#999' },
+    tabLabel: { fontSize: 9, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.3 },
+
+    summaryBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+    summaryTitle: { fontSize: 14, fontWeight: '700', color: '#374151' },
+    legendRow: { flexDirection: 'row', gap: 12 },
+    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    legendDot: { width: 8, height: 8, borderRadius: 4 },
+    legendText: { fontSize: 11, fontWeight: '700', color: '#6B7280' },
+
+    categoryBlock: { marginBottom: 8 },
+    categoryHeader: {
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+        backgroundColor: '#F3F4F6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 4,
+    },
+    categoryName: { fontSize: 12, fontWeight: '700', color: '#374151' },
+    categoryBadge: { backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+    categoryCount: { fontSize: 11, fontWeight: '800', color: '#4B5563' },
+
+    productRow: {
+        flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
+        paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#F5F5F5',
+    },
+    bullet: { width: 6, height: 6, borderRadius: 3, marginRight: 10 },
+    productName: { fontSize: 13, fontWeight: '600', color: '#1F2937' },
+    qtyChips: { flexDirection: 'row', gap: 6, marginTop: 3 },
+    chip: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 },
+    chipText: { fontSize: 10, fontWeight: '700' },
+    totalBubble: { backgroundColor: '#F3F4F6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, marginLeft: 8 },
+    totalNum: { fontSize: 14, fontWeight: '800', color: '#1F2937' },
+
+    swipeAction: { justifyContent: 'center', alignItems: 'center', width: 72, gap: 2 },
+    swipeLabel: { color: '#fff', fontSize: 10, fontWeight: '700' },
+
+    emptyState: { alignItems: 'center', marginTop: 50, gap: 8 },
+    emptyText: { color: '#9CA3AF', fontSize: 13 },
+});
 
 export default DashboardPanel;
