@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, FlatList, TouchableOpacity, Text, StyleSheet, Modal, ScrollView, ActivityIndicator } from 'react-native';
 import { useProducts } from '../hooks/useProducts';
 import SearchBar from '../../../components/SearchBar';
@@ -8,6 +8,8 @@ import CreateAddButton from '../../../components/CreateAddButton';
 import globalStyles from '../../../styles/globalStyles';
 import { DEFAULT_CATEGORY_LABEL, getCategoryLabel, normalizeCategory } from '../constants/productCategories';
 import { useProductCategories } from '../hooks/useProductCategories';
+import { useRoutes } from '../hooks/useRoutes';
+import { useRoute as useRouteContext } from '../../../context/RouteContext';
 
 export default function ProductsListScreen({ navigation, route }) {
   const {
@@ -26,7 +28,35 @@ export default function ProductsListScreen({ navigation, route }) {
     clearFilters,
   } = useProducts();
   const { categories: managedCategories } = useProductCategories();
+  const { routes: availableRoutes } = useRoutes();
+  const { selectedRoute } = useRouteContext();
   const { role } = route.params ?? {};
+
+  // Filtro de ruta para admin (permite ver el precio de una ruta específica)
+  const [adminRouteFilter, setAdminRouteFilter] = useState('all');
+
+  const selectedAdminRoute = useMemo(() => {
+    if (adminRouteFilter === 'all') return null;
+    return availableRoutes.find((r) => r.id === adminRouteFilter) ?? null;
+  }, [adminRouteFilter, availableRoutes]);
+
+  /** Calcula el precio a mostrar en la tarjeta según el rol y la ruta activa */
+  const getProductDisplayInfo = (product) => {
+    const routePrices = product?.routePrices || [];
+    if (role === 'admin') {
+      if (selectedAdminRoute) {
+        const rp = routePrices.find((r) => r.routeId === selectedAdminRoute.id);
+        if (rp) return { price: rp.price, label: selectedAdminRoute.name };
+      }
+      return { price: product?.salePrice ?? '0.00', label: null };
+    }
+    // No-admin: usa la ruta seleccionada del contexto
+    if (selectedRoute) {
+      const rp = routePrices.find((r) => r.routeId === selectedRoute.id);
+      if (rp) return { price: rp.price, label: selectedRoute.name };
+    }
+    return { price: product?.salePrice ?? '0.00', label: null };
+  };
 
   const filterCategories = React.useMemo(() => {
     const merged = new Set();
@@ -41,16 +71,11 @@ export default function ProductsListScreen({ navigation, route }) {
     return Array.from(merged).sort((a, b) => a.localeCompare(b));
   }, [managedCategories, categories]);
 
-  const [selectedProduct, setSelectedProduct] = useState(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [actionsMenuVisible, setActionsMenuVisible] = useState(false);
 
   const openProductDetail = (prod) => {
-    setSelectedProduct(prod);
-  };
-
-  const closeProductDetail = () => {
-    setSelectedProduct(null);
+    navigation.navigate('ProductDetail', { product: prod, role });
   };
 
   const handleScan = (code) => {
@@ -65,6 +90,7 @@ export default function ProductsListScreen({ navigation, route }) {
   const hasActiveFilters = !!query || categoryFilter !== 'all';
 
   const renderProductItem = ({ item }) => {
+    const { price, label } = getProductDisplayInfo(item);
     if (role === 'admin') {
       return (
         <ProductCard
@@ -73,6 +99,8 @@ export default function ProductsListScreen({ navigation, route }) {
           onEdit={() => navigation.navigate('EditProduct', { product: item })}
           onAddStock={() => navigation.navigate('AddStock', { productId: item.id })}
           hideActions={false}
+          routePrice={label ? price : undefined}
+          routeLabel={label}
         />
       );
     } else {
@@ -81,6 +109,8 @@ export default function ProductsListScreen({ navigation, route }) {
           product={item}
           onPress={() => openProductDetail(item)}
           hideActions={true}
+          routePrice={label ? price : undefined}
+          routeLabel={label}
         />
       );
     }
@@ -160,6 +190,44 @@ export default function ProductsListScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Chips de ruta para admin */}
+      {role === 'admin' && availableRoutes.length > 0 && (
+        <View style={styles.routeChipsWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.routeChipsContent}>
+            <TouchableOpacity
+              onPress={() => setAdminRouteFilter('all')}
+              style={[styles.routeChip, adminRouteFilter === 'all' && styles.routeChipActive]}>
+              <Icon name="pricetag-outline" size={11} color={adminRouteFilter === 'all' ? '#fff' : '#7C3AED'} />
+              <Text style={[styles.routeChipText, adminRouteFilter === 'all' && styles.routeChipTextActive]}>
+                Precio base
+              </Text>
+            </TouchableOpacity>
+            {availableRoutes.map((r) => (
+              <TouchableOpacity
+                key={r.id}
+                onPress={() => setAdminRouteFilter(r.id)}
+                style={[styles.routeChip, adminRouteFilter === r.id && styles.routeChipActive]}>
+                <Icon name="navigate" size={11} color={adminRouteFilter === r.id ? '#fff' : '#7C3AED'} />
+                <Text style={[styles.routeChipText, adminRouteFilter === r.id && styles.routeChipTextActive]} numberOfLines={1}>
+                  {r.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Banner de ruta activa para no-admin */}
+      {role !== 'admin' && selectedRoute && (
+        <View style={styles.userRouteBanner}>
+          <Icon name="navigate" size={14} color="#7C3AED" />
+          <Text style={styles.userRouteBannerText}>Ruta activa: <Text style={{ fontWeight: '800' }}>{selectedRoute.name}</Text></Text>
+        </View>
+      )}
 
       {actionsMenuVisible && (
         <>
@@ -309,108 +377,6 @@ export default function ProductsListScreen({ navigation, route }) {
         </TouchableOpacity>
       </Modal>
 
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={!!selectedProduct}
-        onRequestClose={closeProductDetail}
-      >
-        <TouchableOpacity
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={closeProductDetail}
-        >
-            <TouchableOpacity
-                activeOpacity={1}
-                style={styles.modalContent}
-                onPress={() => {}}
-            >
-                <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>Detalle del Producto</Text>
-                    <TouchableOpacity onPress={closeProductDetail} style={styles.closeButton}>
-                        <Icon name="close" size={24} color="#666" />
-                    </TouchableOpacity>
-                </View>
-
-                <ScrollView style={{ padding: 16 }}>
-                    {selectedProduct && (
-                        <>
-                            <View style={styles.headerInfo}>
-                                <Text style={styles.largeName}>{selectedProduct.name}</Text>
-                                <Text style={styles.largePrice}>${selectedProduct.salePrice ?? '0.00'}</Text>
-                            </View>
-
-                            <View style={styles.divider} />
-
-                            <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Categoria</Text>
-                                <Text style={styles.detailValue}>{getCategoryLabel(selectedProduct)}</Text>
-                            </View>
-
-                            <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Codigo de Barras</Text>
-                                <Text style={styles.detailValue}>{selectedProduct.barcode || '---'}</Text>
-                            </View>
-
-                             <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Stock Disponible</Text>
-                                <Text style={[styles.detailValue, { color: (selectedProduct.stock ?? 0) < 5 ? '#D32F2F' : '#2E7D32', fontWeight: 'bold' }]}>
-                                    {selectedProduct.stock ?? 0} {selectedProduct.measureType === 'weight' ? 'kg/lb' : 'unidades'}
-                                </Text>
-                            </View>
-
-                            <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Costo Compra</Text>
-                                <Text style={styles.detailValue}>
-                                    {role === 'admin' ? `$${selectedProduct.purchasePrice ?? '---'}` : '***'}
-                                </Text>
-                            </View>
-
-                            {selectedProduct.description ? (
-                                <View style={styles.descriptionBox}>
-                                    <Text style={styles.detailLabel}>Descripcion</Text>
-                                    <Text style={styles.descriptionText}>{selectedProduct.description}</Text>
-                                </View>
-                            ) : null}
-
-                            {selectedProduct.wholesalePrices && selectedProduct.wholesalePrices.length > 0 && (
-                                <View style={styles.wholesaleContainer}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                                        <Icon name="pricetags-outline" size={18} color="#007AFF" style={{ marginRight: 6 }} />
-                                        <Text style={styles.wholesaleTitle}>Precios Mayorista</Text>
-                                    </View>
-                                    {selectedProduct.wholesalePrices.map((wp, idx) => (
-                                        <View key={idx} style={styles.wholesaleRow}>
-                                            <Text style={styles.wholesaleQty}>Mas de {wp.quantity} u.</Text>
-                                            <Text style={styles.wholesalePrice}>${wp.price}</Text>
-                                        </View>
-                                    ))}
-                                </View>
-                            )}
-                        </>
-                    )}
-                </ScrollView>
-
-                 <View style={styles.modalFooter}>
-                    {role === 'admin' && selectedProduct && (
-                        <TouchableOpacity
-                            style={styles.editModalBtn}
-                            onPress={() => {
-                                closeProductDetail();
-                                navigation.navigate('EditProduct', { product: selectedProduct });
-                            }}
-                        >
-                            <Text style={styles.editModalBtnText}>Editar Producto</Text>
-                        </TouchableOpacity>
-                    )}
-                    <TouchableOpacity style={styles.closeModalBtn} onPress={closeProductDetail}>
-                        <Text style={styles.closeModalBtnText}>Cerrar</Text>
-                    </TouchableOpacity>
-                </View>
-            </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
     </View>
   );
 }
@@ -479,6 +445,8 @@ const styles = StyleSheet.create({
         paddingTop: 8,
         paddingBottom: 4,
         backgroundColor: '#F7F9FC',
+        flexShrink: 0,
+        flexGrow: 0,
     },
     searchRow: {
         flexDirection: 'row',
@@ -873,5 +841,64 @@ const styles = StyleSheet.create({
     },
     listFooterSpacer: {
         height: 8,
+    },
+
+    // ── Chips de ruta (admin) ─────────────────────────────────────────────────
+    routeChipsWrapper: {
+        height: 48,
+        flexShrink: 0,
+        flexGrow: 0,
+        backgroundColor: '#F7F9FC',
+        borderBottomWidth: 1,
+        borderBottomColor: '#EBEBEB',
+        overflow: 'hidden',
+    },
+    routeChipsContent: {
+        height: 48,
+        paddingHorizontal: 12,
+        gap: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    routeChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        paddingHorizontal: 12,
+        height: 32,
+        borderRadius: 20,
+        backgroundColor: '#F5F3FF',
+        borderWidth: 1,
+        borderColor: '#DDD6FE',
+    },
+    routeChipActive: {
+        backgroundColor: '#7C3AED',
+        borderColor: '#7C3AED',
+    },
+    routeChipText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#7C3AED',
+        maxWidth: 100,
+    },
+    routeChipTextActive: {
+        color: '#fff',
+    },
+
+    // ── Banner de ruta activa (no-admin) ──────────────────────────────────────
+    userRouteBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: '#F5F3FF',
+        borderBottomWidth: 1,
+        borderBottomColor: '#DDD6FE',
+    },
+    userRouteBannerText: {
+        fontSize: 12,
+        color: '#4C1D95',
+        fontWeight: '500',
     },
 });

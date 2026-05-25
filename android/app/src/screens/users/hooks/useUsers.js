@@ -21,21 +21,8 @@ export const useUsers = () => {
   }, []);
 
   const handleAddUser = async (userData) => {
-    try {
-      const successMessage = await addUser(userData);
-      Alert.alert('Usuario creado', successMessage);
-    } catch (error) {
-      console.log('🔥 Error creando usuario:', error);
-      let errorMessage = 'Ocurrió un error inesperado.';
-      if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'El correo electrónico ya está en uso.';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'El formato del correo es inválido.';
-      } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'La contraseña debe tener al menos 6 caracteres.';
-      }
-      Alert.alert('Error al crear usuario', errorMessage);
-    }
+    const successMessage = await addUser(userData);
+    Alert.alert('✅ Usuario creado', successMessage);
   };
 
   const handleDeleteUser = (uid, email) => {
@@ -61,13 +48,8 @@ export const useUsers = () => {
   };
 
   const handleUpdateUser = async (uid, dataToUpdate) => {
-    try {
-      await updateUser(uid, dataToUpdate);
-      Alert.alert('Usuario actualizado', 'Los datos del usuario se actualizaron correctamente.');
-    } catch (error) {
-      console.log('🔥 Error actualizando usuario:', error);
-      Alert.alert('Error', error.message);
-    }
+    await updateUser(uid, dataToUpdate);
+    Alert.alert('✅ Usuario actualizado', 'Los datos del usuario se actualizaron correctamente.');
   };
 
   return { users, loading, addUser: handleAddUser, deleteUser: handleDeleteUser, updateUser: handleUpdateUser };

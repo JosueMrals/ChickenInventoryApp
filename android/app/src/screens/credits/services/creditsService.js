@@ -213,27 +213,49 @@ export const createCreditFromPreSale = async (preSale, createdBy) => {
     ? createdBy.trim()
     : (auth()?.currentUser?.email || auth()?.currentUser?.displayName || 'N/A');
 
-  const batch = firestore().batch();
-  batch.set(creditRef, {
-    preSaleId: preSale.id,
-    customerId,
-    customerName,
-    clientName: customerName,
-    total,
-    paid: 0,
-    pending: total,
-    status: 'pending',
-    createdAt: new Date(),
-    createdBy: actor,
+  // Usar transacción para validar el estado actual antes de sobreescribir
+  await firestore().runTransaction(async (tx) => {
+    const preSaleSnap = await tx.get(preSaleRef);
+
+    if (!preSaleSnap.exists) {
+      throw new Error('La pre-venta no existe o ya fue eliminada.');
+    }
+
+    const currentStatus = preSaleSnap.data()?.status;
+
+    if (currentStatus === 'paid') {
+      throw new Error('Esta pre-venta ya fue pagada. No se puede crear un crédito.');
+    }
+    if (currentStatus === 'cancelled') {
+      throw new Error('No se puede crear un crédito para una pre-venta cancelada.');
+    }
+    if (currentStatus === 'credit_pending' || currentStatus?.startsWith('credit_')) {
+      throw new Error('Esta pre-venta ya tiene un crédito asignado.');
+    }
+    if (!['pending', 'dispatched'].includes(currentStatus)) {
+      throw new Error(`Estado inválido para crear crédito: ${currentStatus}.`);
+    }
+
+    tx.set(creditRef, {
+      preSaleId: preSale.id,
+      customerId,
+      customerName,
+      clientName: customerName,
+      total,
+      paid: 0,
+      pending: total,
+      status: 'pending',
+      createdAt: new Date(),
+      createdBy: actor,
+    });
+
+    tx.update(preSaleRef, {
+      status: 'credit_pending',
+      creditId: creditRef.id,
+      updatedAt: new Date(),
+    });
   });
 
-  batch.update(preSaleRef, {
-    status: 'credit_pending',
-    creditId: creditRef.id,
-    updatedAt: new Date(),
-  });
-
-  await batch.commit();
   return creditRef.id;
 };
 

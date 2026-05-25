@@ -42,16 +42,16 @@ export function useProductCategories(options = {}) {
   );
 
   const saveCategory = useCallback(
-    async ({ id, name, activationRules = [] }) => {
+    async ({ id, name, discountTiers = [] }) => {
       const normalized = normalizeCategory(name);
       if (!normalized) throw new Error('Ingresa un nombre de categoria valido');
 
       if (id) {
-        await updateCategory(id, { name: normalized, activationRules });
+        await updateCategory(id, { name: normalized, discountTiers });
         return;
       }
 
-      await createOrActivateCategory(normalized, { activationRules });
+      await createOrActivateCategory(normalized, { discountTiers });
     },
     []
   );

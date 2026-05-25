@@ -207,7 +207,7 @@ function buildImageTestPayload(type, printer) {
 
   const init = [0x1B, 0x40];
   const raster = buildRasterImageCommand(lines, normalizeTestLine);
-  const feed = [0x1B, 0x64, 0x03];
+  const feed = [0x1B, 0x64, 0x02];
   const cut = [0x1D, 0x56, 0x42, 0x00];
 
   return [...init, ...raster, ...feed, ...cut];
@@ -237,7 +237,8 @@ function buildImageReceiptPayloadFromText(text, options = {}) {
   });
   const padded = padBitmapToWidth(textBitmap.bitmap, textBitmap.width, textBitmap.height, maxWidth);
   const raster = buildRasterImageCommandFromBitmap(padded.bitmap, padded.width, padded.height);
-  const feed = [0x1B, 0x64, 0x04];
+  // Feed 2 líneas antes del corte + corte parcial máxima compatibilidad
+  const feed = [0x1B, 0x64, 0x02];
   const cut = [0x1D, 0x56, 0x42, 0x00];
 
   return [...init, ...raster, ...feed, ...cut];
@@ -248,7 +249,8 @@ function buildImageReceiptPayloadFromBitmap(bitmap, width, height, options = {})
   const maxWidth = options.maxWidth || width;
   const padded = padBitmapToWidth(bitmap, width, height, maxWidth);
   const raster = buildRasterImageCommandFromBitmap(padded.bitmap, padded.width, padded.height);
-  const feed = [0x1B, 0x64, 0x04];
+  // Feed 2 líneas antes del corte + corte parcial máxima compatibilidad
+  const feed = [0x1B, 0x64, 0x02];
   const cut = [0x1D, 0x56, 0x42, 0x00];
 
   return [...init, ...raster, ...feed, ...cut];

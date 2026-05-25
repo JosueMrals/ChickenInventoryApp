@@ -14,10 +14,13 @@ import styles from "../quicksalesNew/styles/productEditStyles";
 import NumericKeyboard from "../../components/common/NumericKeyboard";
 import { PreSaleContext } from "./context/preSaleContext";
 import { calcPriceForProduct } from "../sales/hooks/useSalePricing";
+import { useRoute as useRouteContext } from "../../context/RouteContext";
 
 export default function ProductEditScreen({ navigation, route }) {
   const { item, onUpdate, onRemove } = route.params;
   const { customer } = useContext(PreSaleContext);
+  const { selectedRoute } = useRouteContext();
+  const activeRouteId = selectedRoute?.id || null;
 
   const [quantity, setQuantity] = useState(String(item.quantity));
   const [unitPrice, setUnitPrice] = useState(String(item.unitPrice));
@@ -38,7 +41,8 @@ export default function ProductEditScreen({ navigation, route }) {
       const { priceToUse } = calcPriceForProduct({
         product: item.product,
         qty: qty,
-        customer: customer
+        customer: customer,
+        activeRouteId,
       });
       setUnitPrice(String(priceToUse));
     }

@@ -14,12 +14,14 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import globalStyles from '../../styles/globalStyles';
 import routesService from './services/routesService';
+import { useAdaptiveBottom } from '../../hooks/useAdaptiveBottom';
 
 export default function AddRouteScreen({ navigation }) {
     const [name, setName] = useState('');
     const [startLocation, setStartLocation] = useState('');
     const [endLocation, setEndLocation] = useState('');
     const [saving, setSaving] = useState(false);
+    const { bottomPadding } = useAdaptiveBottom();
 
     const handleSave = async () => {
         if (!name.trim() || !startLocation.trim() || !endLocation.trim()) {
@@ -106,7 +108,7 @@ export default function AddRouteScreen({ navigation }) {
                 </View>
             </ScrollView>
 
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: bottomPadding }]}>
                 <TouchableOpacity
                     style={[styles.saveButton, saving && styles.saveButtonDisabled]}
                     onPress={handleSave}
@@ -182,7 +184,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderTopWidth: 1,
         borderTopColor: '#eee',
-        paddingBottom: Platform.OS === 'ios' ? 30 : 16,
     },
     saveButton: {
         backgroundColor: '#E91E63',

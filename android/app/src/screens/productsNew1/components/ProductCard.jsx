@@ -3,13 +3,26 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { getCategoryLabel } from '../constants/productCategories';
 
-export default function ProductCard({ product, onEdit, onAddStock, onPress, hideActions = false }) {
+/**
+ * @param {Object}  product
+ * @param {Function} onEdit
+ * @param {Function} onAddStock
+ * @param {Function} onPress
+ * @param {boolean}  hideActions
+ * @param {number|string|undefined} routePrice  - precio de ruta activa (anula salePrice en la tarjeta)
+ * @param {string|undefined}        routeLabel  - nombre de la ruta activa
+ */
+export default function ProductCard({ product, onEdit, onAddStock, onPress, hideActions = false, routePrice, routeLabel }) {
   const isLowStock = (product?.stock ?? 0) < 5;
+
+  // Si hay precio de ruta disponible se muestra ese, de lo contrario el precio base
+  const displayPrice = routePrice !== undefined ? routePrice : (product?.salePrice ?? '0.00');
+  const hasRoutePrice = routePrice !== undefined && String(routePrice) !== String(product?.salePrice ?? '');
 
   return (
     <TouchableOpacity 
       onPress={onPress} 
-      activeOpacity={onPress ? 0.7 : 1} // Solo efecto visual si tiene onPress
+      activeOpacity={onPress ? 0.7 : 1}
       style={styles.card}
     >
       {/* Icono / Avatar del producto */}
@@ -22,7 +35,14 @@ export default function ProductCard({ product, onEdit, onAddStock, onPress, hide
         <Text style={styles.name} numberOfLines={1}>{product?.name}</Text>
         <Text style={styles.code} numberOfLines={1}>Cat: {getCategoryLabel(product)} | Cod: {product?.barcode ?? '---'}</Text>
         <View style={styles.rowInfo}>
-            <Text style={styles.price}>${product?.salePrice ?? '0.00'}</Text>
+            <Text style={styles.price}>${displayPrice}</Text>
+            {/* Badge de ruta activa */}
+            {hasRoutePrice && routeLabel && (
+              <View style={styles.routeLabelBadge}>
+                <Icon name="navigate" size={9} color="#7C3AED" />
+                <Text style={styles.routeLabelText} numberOfLines={1}>{routeLabel}</Text>
+              </View>
+            )}
             <View style={[styles.badge, isLowStock ? styles.badgeLow : styles.badgeNormal]}>
                 <Text style={[styles.badgeText, isLowStock ? styles.textLow : styles.textNormal]}>
                     Stock: {product?.stock ?? 0}
@@ -115,6 +135,21 @@ const styles = StyleSheet.create({
   badgeLow: { backgroundColor: '#FFEBEE' },
   textNormal: { fontSize: 11, fontWeight: '700', color: '#2E7D32' },
   textLow: { fontSize: 11, fontWeight: '700', color: '#D32F2F' },
+
+  routeLabelBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#F5F3FF',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginRight: 6,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    maxWidth: 100,
+  },
+  routeLabelText: { fontSize: 9, fontWeight: '700', color: '#7C3AED', flexShrink: 1 },
 
   actions: {
     flexDirection: 'row',

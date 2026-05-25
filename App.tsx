@@ -12,6 +12,7 @@ import LoginScreen from './android/app/src/screens/LoginScreen';
 import Sidebar from './android/app/src/components/Sidebar';
 import ProfileScreen from './android/app/src/screens/ProfileScreen';
 import UserManagementScreen from './android/app/src/screens/users/UserManagementScreen';
+import UsersStack from './android/app/src/screens/users/UsersStack';
 
 import SalesScreen from './android/app/src/screens/sales/SalesScreen';
 import CustomersScreen from './android/app/src/screens/customer/CustomerListScreen';
@@ -95,10 +96,11 @@ function AppDrawer({ route }: any) {
       <Drawer.Screen name="Profile">
         {(props) => <ProfileScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
-      <Drawer.Screen 
+      <Drawer.Screen
         name="Register"
-        component={UserManagementScreen}
+        component={UsersStack}
         initialParams={{ role, user }}
+        options={{ headerShown: false, swipeEnabled: false }}
       />
       <Drawer.Screen name="Customer">
         {(props) => <CustomersScreenAny {...props} user={user} role={role} />}

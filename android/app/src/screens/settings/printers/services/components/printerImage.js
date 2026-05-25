@@ -46,7 +46,8 @@ function decodePngToMonoBitmap(base64, options = {}) {
   let data = png.data;
 
   const maxWidth = options.maxWidth || width;
-  if (width > maxWidth) {
+  // Escalar siempre al ancho objetivo (tanto reducir como ampliar para impresión)
+  if (maxWidth && width !== maxWidth) {
     const scaled = resizeRgbaNearest(data, width, height, maxWidth);
     data = scaled.data;
     width = scaled.width;
@@ -95,6 +96,46 @@ function resizeRgbaNearest(data, width, height, targetWidth) {
   return { data: scaled, width: targetWidth, height: targetHeight };
 }
 
+/**
+ * Elimina filas completamente en blanco del final del bitmap.
+ *
+ * Cuando ViewShot captura una vista, puede incluir píxeles en blanco extra al final
+ * provenientes de: padding del contenedor, DPR del dispositivo, márgenes de ScrollView, etc.
+ * Esas filas en blanco se imprimen como papel en blanco → "excedente igual al tamaño del ticket".
+ *
+ * @param {Uint8Array} bitmap   - bitmap monocromo (1=negro, 0=blanco)
+ * @param {number}     width    - ancho en píxeles
+ * @param {number}     height   - alto en filas
+ * @param {number}     [marginRows=40] - filas de margen a conservar tras el último contenido (~5mm a 203dpi)
+ */
+function trimBitmapBlankRows(bitmap, width, height, marginRows = 40) {
+  let lastContentRow = 0;
+
+  // Escanear desde la última fila hacia arriba para encontrar el último contenido
+  outer: for (let y = height - 1; y >= 0; y--) {
+    for (let x = 0; x < width; x++) {
+      if (bitmap[y * width + x]) {
+        lastContentRow = y;
+        break outer;
+      }
+    }
+  }
+
+  const newHeight = Math.min(height, lastContentRow + 1 + marginRows);
+
+  // Solo recortar cuando hay ganancia significativa (>= 80 filas ≈ 10mm a 203dpi)
+  if (height - newHeight < 80) return { bitmap, width, height };
+
+  const trimmed = new Uint8Array(width * newHeight);
+  trimmed.set(bitmap.subarray(0, width * newHeight));
+
+  console.log(
+    `[printer] bitmap recortado: ${height}px → ${newHeight}px (eliminadas ${height - newHeight} filas en blanco)`
+  );
+
+  return { bitmap: trimmed, width, height: newHeight };
+}
+
 async function sendBitmapToPrinter(deviceObj, bitmap, width, height, options = {}) {
   if (options.mode === "escstar") {
     await sendEscStarBitmap(deviceObj, bitmap, width, height);
@@ -104,9 +145,14 @@ async function sendBitmapToPrinter(deviceObj, bitmap, width, height, options = {
 }
 
 async function sendRasterBitmap(deviceObj, bitmap, width, height) {
-  const raster = buildRasterImageCommandFromBitmap(bitmap, width, height);
+  // ── Recortar filas en blanco del final (fix principal del excedente de papel) ──
+  const { bitmap: tb, width: tw, height: th } = trimBitmapBlankRows(bitmap, width, height);
+
+  const raster = buildRasterImageCommandFromBitmap(tb, tw, th);
   const init = [0x1B, 0x40];
-  const feed = [0x1B, 0x64, 0x04];
+  // Feed 2 líneas (~8mm) para facilitar el desgarre
+  const feed = [0x1B, 0x64, 0x02];
+  // GS V B 0: corte parcial, 0 líneas extra antes del corte (máxima compatibilidad)
   const cut = [0x1D, 0x56, 0x42, 0x00];
   await printRaw([...init, ...raster, ...feed, ...cut], deviceObj);
 }
@@ -122,4 +168,3 @@ export {
   decodePngToMonoBitmap,
   sendBitmapToPrinter,
 };
-

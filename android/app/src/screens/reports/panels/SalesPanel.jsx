@@ -10,7 +10,7 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
   const [isModalVisible, setIsModalVisible] = useState(false);
 
   const handleItemPress = (item) => {
-    if (item.__kind === 'sale') {
+    if (item.__kind === 'sale' || item.__kind === 'presale') {
       setSelectedSale(item);
       setIsModalVisible(true);
     }
@@ -21,7 +21,10 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
     setSelectedSale(null);
   };
   
-  const salesOperations = data.operations?.filter(op => op.__kind === 'sale');
+  // Mostrar tanto ventas rápidas como pre-ventas completadas
+  const salesOperations = data.operations?.filter(
+    op => op.__kind === 'sale' || op.__kind === 'presale'
+  );
 
   const renderHeader = () => {
     const summary = data.summary || {};

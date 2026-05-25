@@ -11,6 +11,8 @@ import EditProductScreen from '../screens/productsNew1/screens/EditProductScreen
 import AddStockScreen from '../screens/productsNew1/screens/AddStockScreen';
 import BarcodeScannerScreen from '../screens/productsNew1/screens/BarcodeScannerScreen';
 import ManageCategoriesScreen from '../screens/productsNew1/screens/ManageCategoriesScreen';
+import CategoryFormScreen from '../screens/productsNew1/screens/CategoryFormScreen';
+import ProductDetailScreen from '../screens/productsNew1/screens/ProductDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -78,9 +80,21 @@ export default function ProductsStack({route}) {
       <Stack.Screen
         name="ManageCategories"
         component={ManageCategoriesScreen}
-        options={{
-          title: 'Categorias',
-        }}
+        initialParams={{ role }}
+        options={{ title: 'Categorías' }}
+      />
+
+      <Stack.Screen
+        name="CategoryForm"
+        component={CategoryFormScreen}
+        initialParams={{ role }}
+        options={{ title: 'Categoría' }}
+      />
+
+      <Stack.Screen
+        name="ProductDetail"
+        component={ProductDetailScreen}
+        options={{ title: 'Detalle del Producto' }}
       />
     </Stack.Navigator>
   );

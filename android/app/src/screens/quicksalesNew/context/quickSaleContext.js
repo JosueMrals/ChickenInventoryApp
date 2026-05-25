@@ -1,11 +1,14 @@
 import React, { createContext, useState, useEffect, useCallback } from "react";
 import { calcPriceForProduct } from "../../sales/hooks/useSalePricing";
+import { useRoute as useRouteContext } from "../../../context/RouteContext";
 
 export const QuickSaleContext = createContext();
 
 export function QuickSaleProvider({ children }) {
   const [cart, setCart] = useState([]);
   const [customer, setCustomer] = useState(null);
+  const { selectedRoute } = useRouteContext();
+  const activeRouteId = selectedRoute?.id || null;
 
   // Helper para recalcular bonificaciones
   const applyBonuses = useCallback((currentCart) => {
@@ -56,12 +59,12 @@ export function QuickSaleProvider({ children }) {
   useEffect(() => {
     let newCart = cart.map(item => {
       if (item.isBonus) return item;
-      const { priceToUse } = calcPriceForProduct({ product: item.product, qty: item.quantity, customer });
+      const { priceToUse } = calcPriceForProduct({ product: item.product, qty: item.quantity, customer, activeRouteId });
       return { ...item, unitPrice: priceToUse, total: item.quantity * priceToUse - item.discount };
     });
     const finalCart = applyBonuses(newCart);
     setCart(finalCart);
-  }, [customer, applyBonuses]);
+  }, [customer, activeRouteId, applyBonuses]);
 
   const addItem = (product, qty = 1, customPrice = null) => {
     setCart(prevCart => {
@@ -72,7 +75,7 @@ export function QuickSaleProvider({ children }) {
       if (customPrice !== null) {
         finalPrice = Number(customPrice);
       } else {
-        const { priceToUse } = calcPriceForProduct({ product, qty: totalQty, customer });
+        const { priceToUse } = calcPriceForProduct({ product, qty: totalQty, customer, activeRouteId });
         finalPrice = priceToUse;
       }
       
@@ -111,7 +114,7 @@ export function QuickSaleProvider({ children }) {
 
         // Recalculate price if only quantity is changing
         if (data.quantity !== undefined && data.unitPrice === undefined) {
-          const { priceToUse } = calcPriceForProduct({ product: p.product, qty: data.quantity, customer });
+          const { priceToUse } = calcPriceForProduct({ product: p.product, qty: data.quantity, customer, activeRouteId });
           pendingUpdate.unitPrice = priceToUse;
         }
 

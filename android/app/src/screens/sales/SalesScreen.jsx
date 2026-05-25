@@ -11,6 +11,7 @@ import { calcPriceForProduct } from './hooks/useSalePricing';
 import CustomerInfoCard from './components/CustomerInfoCard';
 import SearchBar from './components/SearchBar';
 import styles from './styles/salesScreenStyles';
+import { useRoute as useRouteContext } from '../../context/RouteContext';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -34,6 +35,8 @@ export default function SalesScreen({ route }) {
     const [cartOpen, setCartOpen] = useState(false);
 
     const { items, customer, setCustomer, addItem, updateQty, removeItem, clear, totals } = useCart(initialCustomer);
+    const { selectedRoute } = useRouteContext();
+    const activeRouteId = selectedRoute?.id || null;
 
     // inicializar customer si viene en params
     useEffect(() => {
@@ -66,20 +69,19 @@ export default function SalesScreen({ route }) {
 
     // callbacks for product actions
     const onAddOne = (product) => {
-        const pricing = calcPriceForProduct({ product, qty: 1, customer });
+        const pricing = calcPriceForProduct({ product, qty: 1, customer, activeRouteId });
         addItem(product, 1, pricing);
     };
 
     const onAddWithQty = (product, qty) => {
-        const pricing = calcPriceForProduct({ product, qty, customer });
+        const pricing = calcPriceForProduct({ product, qty, customer, activeRouteId });
         addItem(product, qty, pricing);
     };
 
     const onUpdateQty = (productId, qty) => {
-        // find product to recalc pricing
         const item = items.find((it) => it.productId === productId);
         if (!item) return;
-        const pricing = calcPriceForProduct({ product: item.product, qty, customer });
+        const pricing = calcPriceForProduct({ product: item.product, qty, customer, activeRouteId });
         updateQty(productId, qty, pricing);
     };
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import ImageResizer from '@bam.tech/react-native-image-resizer';
 import RNFS from 'react-native-fs';
 import globalStyles from '../../../styles/globalStyles';
+import SaleReceipt from '../../sales/components/SaleReceipt';
 import {
   DEFAULT_TICKET_SETTINGS,
   getTicketCustomizationSettings,
@@ -21,12 +22,35 @@ import {
   saveTicketCustomizationSettings,
 } from './ticketCustomizationService';
 
+// ── Constantes ────────────────────────────────────────────────────────────────
+
 const FONT_OPTIONS = [
   { label: 'Sistema', value: 'System' },
   { label: 'Sans', value: 'sans-serif' },
   { label: 'Serif', value: 'serif' },
   { label: 'Mono', value: 'monospace' },
 ];
+
+/** Datos de demostración para la vista previa real del recibo */
+const MOCK_SALE = {
+  id: 'preview',
+  receiptNumber: '0001',
+  createdAt: null,
+  customerName: 'Cliente Ejemplo',
+  paymentMethod: 'cash',
+  cashierName: 'Vendedor Demo',
+  subtotal: 165.0,
+  totalDiscount: 0,
+  categoryDiscountTotal: 0,
+  total: 165.0,
+  items: [
+    { productName: 'Pollo Entero', quantity: 2, unitPrice: 60.0, discount: 0, total: 120.0, pricingSource: 'regular' },
+    { productName: 'Muslos x kg', quantity: 1, unitPrice: 45.0, discount: 0, total: 45.0, pricingSource: 'wholesale' },
+  ],
+  bonuses: [],
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -38,13 +62,15 @@ const normalizePreviewUri = (uri) => {
 
 const normalizeFileUriForRead = (uri) => {
   if (!uri) return uri;
-  if (uri.startsWith('file://')) return uri.replace('file://', '');
-  return uri;
+  return uri.startsWith('file://') ? uri.replace('file://', '') : uri;
 };
 
-const getImageSize = (uri) => new Promise((resolve, reject) => {
-  Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
-});
+const getImageSize = (uri) =>
+  new Promise((resolve, reject) => {
+    Image.getSize(uri, (width, height) => resolve({ width, height }), reject);
+  });
+
+// ── Componente ────────────────────────────────────────────────────────────────
 
 export default function TicketCustomizationScreen({ navigation }) {
   const [settings, setSettings] = useState(DEFAULT_TICKET_SETTINGS);
@@ -53,17 +79,10 @@ export default function TicketCustomizationScreen({ navigation }) {
 
   useEffect(() => {
     let isMounted = true;
-    const load = async () => {
-      const stored = await getTicketCustomizationSettings();
-      if (isMounted) {
-        setSettings(stored);
-        setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      isMounted = false;
-    };
+    getTicketCustomizationSettings()
+      .then((stored) => { if (isMounted) { setSettings(stored); setLoading(false); } })
+      .catch(() => { if (isMounted) setLoading(false); });
+    return () => { isMounted = false; };
   }, []);
 
   const previewWidth = useMemo(() => {
@@ -73,11 +92,9 @@ export default function TicketCustomizationScreen({ navigation }) {
     return Math.round(minPx + (maxPx - minPx) * clamp(ratio, 0, 1));
   }, [settings.paperWidthMm]);
 
-  const previewUri = useMemo(() => normalizePreviewUri(settings.headerImageUri), [settings.headerImageUri]);
-
-  const updateSetting = (key, value) => {
+  const updateSetting = useCallback((key, value) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
-  };
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -92,14 +109,14 @@ export default function TicketCustomizationScreen({ navigation }) {
       Alert.alert('Listo', 'Se guardaron los cambios.');
     } catch (error) {
       console.log('Save ticket settings error:', error);
-      Alert.alert('Error', 'No se pudo guardar la configuracion.');
+      Alert.alert('Error', 'No se pudo guardar la configuración.');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleReset = async () => {
-    Alert.alert('Restablecer', 'Deseas volver a la configuracion por defecto?', [
+  const handleReset = () => {
+    Alert.alert('Restablecer', '¿Deseas volver a la configuración por defecto?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Restablecer',
@@ -111,6 +128,53 @@ export default function TicketCustomizationScreen({ navigation }) {
       },
     ]);
   };
+
+  const handlePickImage = async () => {
+    try {
+      const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1, quality: 0.9 });
+      if (result.didCancel) return;
+      if (result.errorCode) {
+        Alert.alert('Error', 'No se pudo abrir la galería.');
+        return;
+      }
+
+      const asset = result.assets?.[0] ?? null;
+      const uri = asset?.uri || '';
+      if (!uri) { Alert.alert('Aviso', 'No se seleccionó ninguna imagen.'); return; }
+
+      const size = asset?.width && asset?.height
+        ? { width: asset.width, height: asset.height }
+        : await getImageSize(uri);
+
+      const maxDim = 1200;
+      const resized = await ImageResizer.createResizedImage(
+        uri,
+        Math.min(size.width || maxDim, maxDim),
+        Math.min(size.height || maxDim, maxDim),
+        'PNG',
+        100,
+        0,
+      );
+
+      const normalizedUri = resized?.uri || resized?.path || '';
+      if (!normalizedUri) { Alert.alert('Error', 'No se pudo convertir la imagen.'); return; }
+
+      const base64 = await RNFS.readFile(normalizeFileUriForRead(normalizedUri), 'base64');
+      updateSetting('headerImageUri', normalizedUri);
+      updateSetting('headerImageBase64', base64 || '');
+    } catch (error) {
+      console.log('Image picker exception:', error);
+      Alert.alert('Error', 'Ocurrió un error al seleccionar la imagen.');
+    }
+  };
+
+  const incrementFont = useCallback((delta) => {
+    updateSetting('fontSize', clamp((Number(settings.fontSize) || 14) + delta, 10, 24));
+  }, [settings.fontSize, updateSetting]);
+
+  const incrementPaper = useCallback((delta) => {
+    updateSetting('paperWidthMm', clamp((Number(settings.paperWidthMm) || 58) + delta, 58, 80));
+  }, [settings.paperWidthMm, updateSetting]);
 
   const renderFontOption = (option) => {
     const isActive = settings.fontFamily === option.value;
@@ -125,123 +189,52 @@ export default function TicketCustomizationScreen({ navigation }) {
     );
   };
 
-  const incrementFont = (delta) => {
-    const next = clamp((Number(settings.fontSize) || 14) + delta, 10, 24);
-    updateSetting('fontSize', next);
-  };
-
-  const incrementPaper = (delta) => {
-    const next = clamp((Number(settings.paperWidthMm) || 58) + delta, 58, 80);
-    updateSetting('paperWidthMm', next);
-  };
-
-  const handlePickImage = async () => {
-    try {
-      const result = await launchImageLibrary({
-        mediaType: 'photo',
-        selectionLimit: 1,
-        quality: 0.9,
-      });
-
-      if (result.didCancel) return;
-      if (result.errorCode) {
-        console.log('Image picker error:', result.errorCode, result.errorMessage);
-        Alert.alert('Error', 'No se pudo abrir la galeria.');
-        return;
-      }
-
-      const asset = result.assets && result.assets[0] ? result.assets[0] : null;
-      const uri = asset?.uri || '';
-      if (!uri) {
-        Alert.alert('Aviso', 'No se selecciono ninguna imagen.');
-        return;
-      }
-
-      const size = asset?.width && asset?.height ? { width: asset.width, height: asset.height } : await getImageSize(uri);
-      const maxWidth = 1200;
-      const maxHeight = 1200;
-      const targetWidth = Math.min(size.width || maxWidth, maxWidth);
-      const targetHeight = Math.min(size.height || maxHeight, maxHeight);
-
-      const resized = await ImageResizer.createResizedImage(
-        uri,
-        targetWidth,
-        targetHeight,
-        'PNG',
-        100,
-        0
-      );
-
-      const normalizedUri = resized?.uri || resized?.path || '';
-      if (!normalizedUri) {
-        Alert.alert('Error', 'No se pudo convertir la imagen.');
-        return;
-      }
-
-      const base64 = await RNFS.readFile(normalizeFileUriForRead(normalizedUri), 'base64');
-      updateSetting('headerImageUri', normalizedUri);
-      updateSetting('headerImageBase64', base64 || '');
-    } catch (error) {
-      console.log('Image picker exception:', error);
-      Alert.alert('Error', 'Ocurrio un error al seleccionar la imagen.');
-    }
-  };
-
   return (
     <SafeAreaView style={globalStyles.container}>
       <View style={globalStyles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="chevron-back" size={28} color="#FFF" />
         </TouchableOpacity>
-        <Text style={globalStyles.title}>Personalizacion de ticket</Text>
+        <Text style={globalStyles.title}>Personalización de ticket</Text>
         <View style={{ width: 28 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+
+        {/* ── Vista previa real con SaleReceipt ────────────────────────────── */}
         <Text style={styles.sectionHeader}>Vista previa</Text>
         <View style={styles.previewWrapper}>
-          <View style={[styles.ticketPreview, { width: previewWidth }]}
-          >
-            {settings.headerImageUri ? (
-              <Image
-                source={{ uri: previewUri }}
-                style={styles.headerImage}
-                resizeMode="contain"
-              />
-            ) : (
-              <View style={styles.headerPlaceholder}>
-                <Icon name="image-outline" size={26} color="#A0A4A8" />
-                <Text style={styles.placeholderText}>Sin imagen</Text>
-              </View>
-            )}
-            <Text style={[styles.previewTitle, { fontFamily: settings.fontFamily, fontSize: settings.fontSize + 2 }]}
-            >
-              TICKET DE VENTA
-            </Text>
-            <Text style={[styles.previewText, { fontFamily: settings.fontFamily, fontSize: settings.fontSize }]}
-            >
-              Producto A   2   120.00
-            </Text>
-            <Text style={[styles.previewText, { fontFamily: settings.fontFamily, fontSize: settings.fontSize }]}
-            >
-              Producto B   1    45.00
-            </Text>
-            <Text style={[styles.previewTotal, { fontFamily: settings.fontFamily, fontSize: settings.fontSize + 1 }]}
-            >
-              TOTAL: 165.00
-            </Text>
+          <View style={[styles.ticketPreview, { width: previewWidth }]}>
+            <SaleReceipt
+              sale={MOCK_SALE}
+              bonuses={[]}
+              ticketSettings={settings}
+            />
           </View>
         </View>
 
+        {/* ── Cabecera ─────────────────────────────────────────────────────── */}
         <Text style={styles.sectionHeader}>Cabecera</Text>
         <View style={styles.card}>
           <Text style={styles.label}>Imagen en cabecera</Text>
+          {settings.headerImageUri ? (
+            <Image
+              source={{ uri: normalizePreviewUri(settings.headerImageUri) }}
+              style={styles.headerPreviewImage}
+              resizeMode="contain"
+            />
+          ) : (
+            <View style={styles.headerPlaceholder}>
+              <Icon name="image-outline" size={26} color="#A0A4A8" />
+              <Text style={styles.placeholderText}>Sin imagen</Text>
+            </View>
+          )}
           <View style={styles.row}>
             <TouchableOpacity
               style={[styles.actionButton, styles.outlineButton, styles.halfButton]}
               onPress={handlePickImage}
             >
-              <Text style={styles.outlineButtonText}>Seleccionar de galeria</Text>
+              <Text style={styles.outlineButtonText}>Seleccionar de galería</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionButton, styles.outlineButton, styles.halfButton]}
@@ -255,15 +248,16 @@ export default function TicketCustomizationScreen({ navigation }) {
           </View>
         </View>
 
-        <Text style={styles.sectionHeader}>Tipografia</Text>
+        {/* ── Tipografía ───────────────────────────────────────────────────── */}
+        <Text style={styles.sectionHeader}>Tipografía</Text>
         <View style={styles.card}>
           <Text style={styles.label}>Fuente</Text>
           <View style={styles.pillRow}>{FONT_OPTIONS.map(renderFontOption)}</View>
 
-          <Text style={[styles.label, { marginTop: 16 }]}>Tamano de letra</Text>
+          <Text style={[styles.label, { marginTop: 16 }]}>Tamaño de letra</Text>
           <View style={styles.stepperRow}>
             <TouchableOpacity style={styles.stepperButton} onPress={() => incrementFont(-1)}>
-              <Text style={styles.stepperText}>-</Text>
+              <Text style={styles.stepperText}>−</Text>
             </TouchableOpacity>
             <Text style={styles.stepperValue}>{settings.fontSize} pt</Text>
             <TouchableOpacity style={styles.stepperButton} onPress={() => incrementFont(1)}>
@@ -272,7 +266,8 @@ export default function TicketCustomizationScreen({ navigation }) {
           </View>
         </View>
 
-        <Text style={styles.sectionHeader}>Tamano de impresion</Text>
+        {/* ── Tamaño de impresión ──────────────────────────────────────────── */}
+        <Text style={styles.sectionHeader}>Tamaño de impresión</Text>
         <View style={styles.card}>
           <Text style={styles.label}>Ancho del papel</Text>
           <View style={styles.pillRow}>
@@ -292,7 +287,7 @@ export default function TicketCustomizationScreen({ navigation }) {
 
           <View style={styles.stepperRow}>
             <TouchableOpacity style={styles.stepperButton} onPress={() => incrementPaper(-1)}>
-              <Text style={styles.stepperText}>-</Text>
+              <Text style={styles.stepperText}>−</Text>
             </TouchableOpacity>
             <Text style={styles.stepperValue}>{settings.paperWidthMm} mm</Text>
             <TouchableOpacity style={styles.stepperButton} onPress={() => incrementPaper(1)}>
@@ -302,23 +297,31 @@ export default function TicketCustomizationScreen({ navigation }) {
           <Text style={styles.helperText}>Rango permitido: 58 mm a 80 mm</Text>
         </View>
 
+        {/* ── Acciones ─────────────────────────────────────────────────────── */}
         <View style={styles.actionsRow}>
           <TouchableOpacity style={[styles.actionButton, styles.outlineButton]} onPress={handleReset}>
             <Text style={styles.outlineButtonText}>Restablecer</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.primaryButton} onPress={handleSave} disabled={saving || loading}>
-            <Text style={styles.primaryButtonText}>{saving ? 'Guardando...' : 'Guardar cambios'}</Text>
+          <TouchableOpacity
+            style={[styles.primaryButton, (saving || loading) && styles.btnDisabled]}
+            onPress={handleSave}
+            disabled={saving || loading}
+          >
+            <Text style={styles.primaryButtonText}>
+              {saving ? 'Guardando...' : 'Guardar cambios'}
+            </Text>
           </TouchableOpacity>
         </View>
+
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+// ── Estilos ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  content: {
-    padding: 16,
-  },
+  content: { padding: 16 },
   sectionHeader: {
     fontSize: 14,
     fontWeight: '600',
@@ -328,24 +331,26 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     textTransform: 'uppercase',
   },
-  previewWrapper: {
-    alignItems: 'center',
-  },
+
+  // Vista previa
+  previewWrapper: { alignItems: 'center' },
   ticketPreview: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 3,
   },
-  headerImage: {
+
+  // Imagen cabecera
+  headerPreviewImage: {
     width: '100%',
     height: 70,
-    marginBottom: 12,
+    marginBottom: 8,
+    borderRadius: 8,
   },
   headerPlaceholder: {
     width: '100%',
@@ -356,24 +361,12 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
-  },
-  placeholderText: {
-    fontSize: 12,
-    color: '#A0A4A8',
-    marginTop: 4,
-  },
-  previewTitle: {
-    fontWeight: '700',
     marginBottom: 8,
+    backgroundColor: '#FAFAFA',
   },
-  previewText: {
-    color: '#333',
-  },
-  previewTotal: {
-    marginTop: 8,
-    fontWeight: '700',
-  },
+  placeholderText: { fontSize: 12, color: '#A0A4A8', marginTop: 4 },
+
+  // Card
   card: {
     backgroundColor: '#FFFFFF',
     padding: 16,
@@ -385,54 +378,18 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#E1E3E6',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 14,
-    color: '#1F1F1F',
-    backgroundColor: '#F9FAFB',
-  },
-  row: {
-    flexDirection: 'row',
-    marginTop: 12,
-    gap: 12,
-  },
-  pillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  pill: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: '#F0F3F7',
-  },
-  pillActive: {
-    backgroundColor: '#1A73E8',
-  },
-  pillText: {
-    fontSize: 13,
-    color: '#4B4F56',
-    fontWeight: '600',
-  },
-  pillTextActive: {
-    color: '#FFFFFF',
-  },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    gap: 12,
-  },
+  label: { fontSize: 13, fontWeight: '600', color: '#333', marginBottom: 8 },
+
+  // Row / Pills
+  row: { flexDirection: 'row', marginTop: 8, gap: 12 },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pill: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: '#F0F3F7' },
+  pillActive: { backgroundColor: '#1A73E8' },
+  pillText: { fontSize: 13, color: '#4B4F56', fontWeight: '600' },
+  pillTextActive: { color: '#FFFFFF' },
+
+  // Stepper
+  stepperRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 12 },
   stepperButton: {
     width: 36,
     height: 36,
@@ -441,54 +398,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepperText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#2E2E2E',
-  },
-  stepperValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  helperText: {
-    marginTop: 8,
-    fontSize: 12,
-    color: '#8A8F96',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 16,
-    marginBottom: 24,
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  outlineButton: {
-    borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
-  },
-  outlineButtonText: {
-    color: '#1F2937',
-    fontWeight: '600',
-  },
-  halfButton: {
-    flex: 1,
-  },
+  stepperText: { fontSize: 18, fontWeight: '700', color: '#2E2E2E' },
+  stepperValue: { fontSize: 14, fontWeight: '600', color: '#333' },
+  helperText: { marginTop: 8, fontSize: 12, color: '#8A8F96' },
+
+  // Actions
+  actionsRow: { flexDirection: 'row', gap: 12, marginTop: 16, marginBottom: 24 },
+  actionButton: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  outlineButton: { borderWidth: 1, borderColor: '#D0D5DD', backgroundColor: '#FFFFFF' },
+  outlineButtonText: { color: '#1F2937', fontWeight: '600' },
+  halfButton: { flex: 1 },
   primaryButton: {
     flex: 1,
     backgroundColor: '#1A73E8',
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 12,
   },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
+  primaryButtonText: { color: '#FFFFFF', fontWeight: '700' },
+  btnDisabled: { opacity: 0.6 },
 });
+

@@ -3,6 +3,7 @@ import { firestore, auth, functions } from '../../../services/firebaseConfig';
 // Escuchar cambios en la colección de usuarios en tiempo real
 export const onUsersSnapshot = (callback) => {
   return firestore().collection('users')
+    .orderBy('createdAt', 'desc')
     .onSnapshot(
       (snapshot) => {
         const usersList = snapshot.docs.map(doc => ({
@@ -13,12 +14,15 @@ export const onUsersSnapshot = (callback) => {
       },
       (error) => {
         console.error("Error fetching users:", error);
-        // Opcional: callback([]) o manejar el error en la UI
+        callback([]);
       }
     );
 };
 
-// Agregar un nuevo usuario mediante Cloud Function (para no cerrar la sesión del admin)
+/**
+ * Crear usuario via Cloud Function.
+ * La función crea Auth + Firestore atómicamente (con rollback en caso de fallo).
+ */
 export const addUser = async (userData) => {
   try {
     const createUserFn = functions().httpsCallable('createUser');
@@ -26,12 +30,15 @@ export const addUser = async (userData) => {
     return result.data.message || 'Usuario creado exitosamente.';
   } catch (error) {
     console.error("Error calling createUser function:", error);
-    // Lanzar el error para que el hook lo maneje y muestre la alerta
-    throw error;
+    // Firebase Functions wraps el mensaje en error.message
+    const msg = error?.message || 'No se pudo crear el usuario.';
+    throw new Error(msg);
   }
 };
 
-// Eliminar usuario mediante Cloud Function
+/**
+ * Eliminar usuario via Cloud Function (elimina Auth + Firestore).
+ */
 export const deleteUser = async (uid) => {
   try {
     const deleteUserFn = functions().httpsCallable('deleteUser');
@@ -39,45 +46,66 @@ export const deleteUser = async (uid) => {
     return true;
   } catch (error) {
     console.error("Error calling deleteUser function:", error);
-    throw new Error(error.message || "No se pudo eliminar el usuario.");
+    throw new Error(error?.message || "No se pudo eliminar el usuario.");
   }
 };
 
-// Actualizar un usuario en Firestore y opcionalmente su contraseña
+/**
+ * Actualizar perfil del usuario en Firestore.
+ * Si se provee password, también actualiza Firebase Authentication via Cloud Function.
+ *
+ * Campos opcionales (cedula, telefono): si llegan vacíos se eliminan de Firestore.
+ */
 export const updateUser = async (uid, dataToUpdate) => {
   const currentUser = auth().currentUser;
 
   if (!currentUser) {
-    throw new Error("Tu sesión ha expirado. Por favor, reinicia la sesión.");
+    throw new Error("Tu sesión ha expirado. Por favor, inicia sesión nuevamente.");
   }
 
-  const { nombre, apellido, user, role, password } = dataToUpdate;
+  const { nombre, apellido, user, role, password, cedula, telefono } = dataToUpdate;
 
-  if (!nombre || !apellido || !user || !role) {
-    throw new Error('Nombre, apellido, usuario y rol son obligatorios.');
-  }
+  // Validación de campos obligatorios
+  if (!nombre?.trim()) throw new Error('El nombre es obligatorio.');
+  if (!apellido?.trim()) throw new Error('El apellido es obligatorio.');
+  if (!user?.trim()) throw new Error('El nombre de usuario es obligatorio.');
+  if (!role?.trim()) throw new Error('El rol es obligatorio.');
 
-  // Actualizar datos básicos en Firestore directamente
-  await firestore().collection('users').doc(uid).update({
-    nombre: nombre.trim(),
-    apellido: apellido.trim(),
-    user: user.trim(),
-    role: role.trim().toLowerCase(),
-  });
+  // Construir payload para Firestore
+  const updateData = {
+    nombre:    nombre.trim(),
+    apellido:  apellido.trim(),
+    user:      user.trim(),
+    role:      role.trim().toLowerCase(),
+    updatedAt: firestore.FieldValue.serverTimestamp(),
+  };
 
-  // Si hay contraseña, actualizarla mediante Cloud Function
-  if (password && password.trim().length > 0) {
-    try {
-      // Refrescar token para asegurar permisos
-      await currentUser.getIdToken(true);
+  // Campos opcionales: guardar valor o eliminar el campo si está vacío
+  updateData.cedula   = cedula?.trim()   || firestore.FieldValue.delete();
+  updateData.telefono = telefono?.trim() || firestore.FieldValue.delete();
 
-      const updateUserPassword = functions().httpsCallable('updateUserPassword');
-      const result = await updateUserPassword({ data: { uid, password } });
-      
-      console.log('✅ Resultado cambio pass:', result.data.message);
-    } catch (error) {
-      console.error("🔥 Error cambio pass:", error);
-      throw new Error(error.message || 'Datos actualizados, pero falló el cambio de contraseña.');
+  // 1. Actualizar Firestore
+  await firestore().collection('users').doc(uid).update(updateData);
+
+  // 2. Actualizar displayName en Auth (refleja nombre completo)
+  try {
+    // Solo actualizamos si el usuario editado es el mismo admin o usamos Admin SDK via CF
+    // Por ahora sincronizamos al menos el displayName si es el mismo usuario logueado
+    if (currentUser.uid === uid) {
+      await currentUser.updateProfile({ displayName: `${nombre.trim()} ${apellido.trim()}` });
     }
+  } catch (profileErr) {
+    // No bloqueante: el perfil de Auth es secundario
+    console.warn('No se pudo actualizar displayName en Auth:', profileErr);
+  }
+
+  // 3. Si hay nueva contraseña, actualizarla en Authentication via Cloud Function
+  if (password && password.trim().length > 0) {
+    // Refrescar token para garantizar permisos de admin
+    await currentUser.getIdToken(true);
+
+    const updateUserPassword = functions().httpsCallable('updateUserPassword');
+    const result = await updateUserPassword({ data: { uid, password: password.trim() } });
+    console.log('✅ Contraseña actualizada en Auth:', result.data.message);
   }
 };

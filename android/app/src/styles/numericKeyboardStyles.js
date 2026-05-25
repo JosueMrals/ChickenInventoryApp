@@ -5,27 +5,27 @@ export default StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    paddingHorizontal: 10,
-    marginTop: 10,
+    paddingHorizontal: 8,
+    marginTop: 6,
   },
 
   keyWrapper: {
     width: "32%",
-    aspectRatio: 1,
-    marginVertical: 8,
+    aspectRatio: 1.8,
+    marginVertical: 4,
   },
 
   key: {
     flex: 1,
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
-    elevation: 4,
+    elevation: 2,
     shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
   },
 
   keyConfirm: {
@@ -33,8 +33,14 @@ export default StyleSheet.create({
   },
 
   keyText: {
-    fontSize: 26,
+    fontSize: 20,
     fontWeight: "700",
     color: "#111",
+  },
+
+  keyDeleteText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#DC2626",
   },
 });

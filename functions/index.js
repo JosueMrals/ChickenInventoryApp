@@ -67,31 +67,65 @@ exports.createUser = functions.https.onCall(async (reqData, context) => {
     const data = getPayload(reqData);
     await ensureAdmin(context, data);
 
-    const { email, password, nombre, apellido, role, user } = data;
+    const { email, password, nombre, apellido, role, user, cedula, telefono } = data;
+
+    // Validaciones básicas
+    if (!email || !password || !nombre || !apellido || !role || !user) {
+        throw new functions.https.HttpsError('invalid-argument', 'Faltan campos obligatorios: email, contraseña, nombre, apellido, rol y usuario.');
+    }
+    if (password.length < 6) {
+        throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+    }
+
+    let userRecord = null;
 
     try {
-        // 1. Crear usuario en Auth
-        const userRecord = await admin.auth().createUser({
-            email,
+        // 1. Crear usuario en Firebase Authentication
+        userRecord = await admin.auth().createUser({
+            email: email.trim().toLowerCase(),
             password,
-            displayName: `${nombre} ${apellido}`,
+            displayName: `${nombre.trim()} ${apellido.trim()}`,
+            emailVerified: true, // Admin crea usuarios pre-verificados
         });
 
-        // 2. Crear documento en Firestore
-        await db.collection('users').doc(userRecord.uid).set({
-            email,
-            nombre,
-            apellido,
-            role,
-            user, // username
+        // 2. Construir payload Firestore (solo guarda opcionales si tienen valor)
+        const firestoreData = {
+            email:     email.trim().toLowerCase(),
+            nombre:    nombre.trim(),
+            apellido:  apellido.trim(),
+            user:      user.trim(),
+            role:      role.trim().toLowerCase(),
+            verified:  true,        // Pre-verificado por el admin
+            uid:       userRecord.uid,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            uid: userRecord.uid
-        });
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
 
-        return { success: true, message: 'Usuario creado exitosamente.' };
+        if (cedula  && typeof cedula  === 'string' && cedula.trim())  firestoreData.cedula  = cedula.trim();
+        if (telefono && typeof telefono === 'string' && telefono.trim()) firestoreData.telefono = telefono.trim();
+
+        // 3. Crear documento en Firestore usando el UID como ID
+        await db.collection('users').doc(userRecord.uid).set(firestoreData);
+
+        return { success: true, message: `Usuario ${email} creado exitosamente.`, uid: userRecord.uid };
+
     } catch (error) {
         console.error("Error creando usuario:", error);
-        throw new functions.https.HttpsError('invalid-argument', error.message);
+
+        // Rollback: si ya se creó el usuario en Auth pero falló Firestore, eliminarlo
+        if (userRecord && userRecord.uid) {
+            await admin.auth().deleteUser(userRecord.uid).catch((deleteErr) => {
+                console.error("Error en rollback de Auth:", deleteErr);
+            });
+        }
+
+        // Mapear errores de Auth a mensajes amigables
+        let message = error.message;
+        if (error.code === 'auth/email-already-exists') message = 'El correo electrónico ya está en uso.';
+        else if (error.code === 'auth/invalid-email')   message = 'El formato del correo es inválido.';
+        else if (error.code === 'auth/weak-password')   message = 'La contraseña es muy débil (mínimo 6 caracteres).';
+
+        throw new functions.https.HttpsError('invalid-argument', message);
     }
 });
 
@@ -119,12 +153,29 @@ exports.updateUserPassword = functions.https.onCall(async (reqData, context) => 
 
     const { uid, password } = data;
 
+    if (!uid || !password) {
+        throw new functions.https.HttpsError('invalid-argument', 'UID y contraseña son obligatorios.');
+    }
+    if (password.length < 6) {
+        throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+    }
+
     try {
+        // 1. Actualizar contraseña en Firebase Authentication
         await admin.auth().updateUser(uid, { password });
-        return { success: true, message: 'Contraseña actualizada.' };
+
+        // 2. Registrar timestamp del cambio en Firestore (sin exponer la contraseña)
+        await db.collection('users').doc(uid).update({
+            passwordChangedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt:         admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        return { success: true, message: 'Contraseña actualizada en Authentication y registrada en Firestore.' };
     } catch (error) {
         console.error("Error actualizando contraseña:", error);
-        throw new functions.https.HttpsError('internal', error.message);
+        let message = error.message;
+        if (error.code === 'auth/user-not-found') message = 'Usuario no encontrado en Authentication.';
+        throw new functions.https.HttpsError('internal', message);
     }
 });
 
@@ -191,18 +242,44 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
 
     const preSaleRef = db.collection('presales').doc(safePreSaleId);
 
+    // Estados que bloquean el cobro definitivamente
+    const TERMINAL_BLOCKING = new Set(['paid', 'cancelled', 'delivered']);
+
     await db.runTransaction(async (t) => {
         const doc = await t.get(preSaleRef);
-        if (!doc.exists) throw new functions.https.HttpsError('not-found', 'No existe');
+        if (!doc.exists) throw new functions.https.HttpsError('not-found', 'Pre-venta no encontrada');
+
         const pData = doc.data();
-        if (pData.entregadorId !== uid) throw new functions.https.HttpsError('permission-denied', 'No asignado');
-        if (pData.status !== 'dispatched') throw new functions.https.HttpsError('failed-precondition', 'Estado incorrecto');
+
+        // Validar estado terminal
+        if (TERMINAL_BLOCKING.has(pData.status)) {
+            throw new functions.https.HttpsError(
+                'failed-precondition',
+                `No se puede cobrar una pre-venta en estado: ${pData.status}`
+            );
+        }
+
+        if (pData.entregadorId !== uid) {
+            throw new functions.https.HttpsError('permission-denied', 'No asignado a esta entrega');
+        }
+
+        if (pData.status !== 'dispatched') {
+            throw new functions.https.HttpsError(
+                'failed-precondition',
+                `Estado incorrecto para cobrar: ${pData.status}. Se requiere 'dispatched'.`
+            );
+        }
 
         const total = Number(pData.total || 0);
-        const isCredit = pData.paymentMethod === 'credit' || String(pData.status || '').startsWith('credit_');
+
+        // isCredit: basado SOLO en paymentMethod para evitar falsos positivos por estado
+        const isCredit = pData.paymentMethod === 'credit';
 
         if (!isCredit && paidAmount < total) {
-            throw new functions.https.HttpsError('failed-precondition', 'Pago incompleto');
+            throw new functions.https.HttpsError(
+                'failed-precondition',
+                `Pago insuficiente. Total: ${total.toFixed(2)}, Recibido: ${paidAmount.toFixed(2)}`
+            );
         }
 
         let nextStatus = 'paid';
@@ -211,10 +288,12 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
         let creditDoc = null;
 
         if (isCredit) {
+            // Buscar el crédito asociado
             creditRef = creditId ? db.collection('credits').doc(creditId) : null;
             creditDoc = creditRef ? await t.get(creditRef) : null;
 
             if (!creditDoc || !creditDoc.exists) {
+                // Fallback: buscar por preSaleId
                 const creditQuery = await t.get(
                     db.collection('credits').where('preSaleId', '==', safePreSaleId).limit(1)
                 );
@@ -229,12 +308,14 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
         if (isCredit) {
             const applyAmount = Math.min(paidAmount, total);
 
-            if (!creditRef) {
+            if (!creditRef || !creditDoc || !creditDoc.exists) {
+                // Crear crédito si no existe (caso edge: entregador cobra sin crédito previo)
                 creditRef = db.collection('credits').doc();
                 creditId = creditRef.id;
-                const pending = Math.max(total - applyAmount, 0);
-                const status = pending <= 0 ? 'paid' : 'pending';
-                const nextCreditStatus = status === 'paid' ? 'paid' : 'credit_pending';
+                const newPending = Math.max(total - applyAmount, 0);
+                const creditStatus = newPending <= 0 ? 'paid' : 'pending';
+                nextStatus = newPending <= 0 ? 'paid' : 'credit_pending';
+
                 t.set(creditRef, {
                     preSaleId: safePreSaleId,
                     customerId: pData.customerId || pData.customer?.id || null,
@@ -242,61 +323,61 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
                     clientName: buildCustomerName(pData),
                     total,
                     paid: applyAmount,
-                    pending,
-                    status,
+                    pending: newPending,
+                    status: creditStatus,
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                     createdBy: pData.createdBy || userEmail,
-                    payments: applyAmount > 0 ? [{ amount: applyAmount, date: admin.firestore.Timestamp.now(), by: userEmail }] : [],
+                    payments: applyAmount > 0
+                        ? [{ amount: applyAmount, date: admin.firestore.Timestamp.now(), by: userEmail }]
+                        : [],
                 });
-                nextStatus = nextCreditStatus;
             } else {
                 const creditData = creditDoc.data() || {};
                 const currentPaid = Number(creditData.paid || 0);
-                const currentPending = Number(creditData.pending || total);
+                const currentPending = Number(creditData.pending ?? total);
                 const toApply = Math.min(paidAmount, currentPending);
                 const newPaid = currentPaid + toApply;
                 const newPending = Math.max(currentPending - toApply, 0);
-                const status = newPending <= 0 ? 'paid' : 'pending';
-                const nextCreditStatus = status === 'paid' ? 'paid' : 'credit_pending';
+                const creditStatus = newPending <= 0 ? 'paid' : 'pending';
+                nextStatus = newPending <= 0 ? 'paid' : 'credit_pending';
 
-                const updatePayload = {
+                const creditUpdate = {
                     paid: newPaid,
                     pending: newPending,
-                    status,
+                    status: creditStatus,
                     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                 };
 
                 if (toApply > 0) {
-                    updatePayload.payments = admin.firestore.FieldValue.arrayUnion({
+                    creditUpdate.payments = admin.firestore.FieldValue.arrayUnion({
                         amount: toApply,
                         date: admin.firestore.Timestamp.now(),
                         by: userEmail,
                     });
                 }
 
-                t.update(creditRef, updatePayload);
-                nextStatus = nextCreditStatus;
+                t.update(creditRef, creditUpdate);
             }
         }
 
         const preSaleUpdate = {
             status: nextStatus,
-            creditId: creditId || sanitizeDocId(pData.creditId) || null,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             amountPaid: paidAmount,
             change: Math.max(paidAmount - total, 0),
-            // El inventario se descuenta al crear/editar la pre-venta, no al entregar.
             inventoryDeducted: true,
             inventoryDeductedAt: pData.inventoryDeductedAt || admin.firestore.FieldValue.serverTimestamp(),
-            inventoryDeductedBy: pData.inventoryDeductedBy || (pData.createdBy || userEmail),
+            inventoryDeductedBy: pData.inventoryDeductedBy || pData.createdBy || userEmail,
         };
 
+        if (creditId) preSaleUpdate.creditId = creditId;
         if (nextStatus === 'paid') {
             preSaleUpdate.fechaPago = admin.firestore.FieldValue.serverTimestamp();
         }
 
         t.update(preSaleRef, preSaleUpdate);
     });
+
     return { success: true };
 });
 

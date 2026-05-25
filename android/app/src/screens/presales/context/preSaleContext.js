@@ -19,25 +19,22 @@ function getCategoryActivationMap(rows = []) {
     const key = normalizeCategory(row?.name).toLowerCase();
     if (!key || !row?.active) return acc;
 
-    const directMinQty = Math.max(1, Math.floor(Number(row?.activationMinQty || 0)));
-    const activationRules = Array.isArray(row?.activationRules)
-      ? row.activationRules
-          .map((rule) => ({
-            minQty: Math.max(1, Math.floor(Number(rule?.minQty || 0))),
-            active: rule?.active !== false,
+    // Leer discountTiers (nuevo modelo) — ya normalizados por sanitizeCategoryRow
+    const discountTiers = Array.isArray(row?.discountTiers)
+      ? row.discountTiers
+          .map((tier) => ({
+            minQty: Math.max(1, Math.floor(Number(tier?.minQty || 0))),
+            discountType: String(tier?.discountType || 'percent').toLowerCase(),
+            discountValue: Number(tier?.discountValue || 0),
+            active: tier?.active !== false,
           }))
-          .filter((rule) => rule.active && rule.minQty > 0)
+          .filter((tier) => tier.active && tier.minQty > 0 && tier.discountValue > 0)
           .sort((a, b) => a.minQty - b.minQty)
       : [];
 
-    const activationMinQty = directMinQty || activationRules[0]?.minQty || 0;
-    if (!activationMinQty) return acc;
+    if (!discountTiers.length) return acc;
 
-    acc[key] = {
-      activationMinQty,
-      activationRules,
-      hasActivationRules: true,
-    };
+    acc[key] = { discountTiers };
     return acc;
   }, {});
 }
@@ -59,6 +56,7 @@ function getPricingFields(pricing = {}, quantity = 0) {
     fields.categoryDiscountType = pricing.appliedDiscountType || null;
     fields.categoryDiscountValue = Number(pricing.appliedDiscountValue || 0);
     fields.categoryDiscountMinQty = Number(pricing.appliedCategoryMinQty || 0) || null;
+    fields.categoryDiscountTiersCount = Number(pricing.appliedTiersCount || 1);
   }
 
   if (fields.pricingSource === 'customer') {
@@ -67,6 +65,10 @@ function getPricingFields(pricing = {}, quantity = 0) {
 
   if (fields.pricingSource === 'wholesale') {
     fields.usedWholesale = true;
+  }
+
+  if (fields.pricingSource === 'route' || fields.pricingSource === 'route+customer') {
+    fields.usedRoutePrice = true;
   }
 
   fields.lineBaseTotal = Number((fields.baseUnitPrice * safeQuantity).toFixed(2));
@@ -162,11 +164,11 @@ export function PreSaleProvider({ children }) {
   const recalculateSoldItems = useCallback((items = []) => {
     const soldItems = items.filter((item) => !item.isBonus);
 
-    // Cuenta ítems distintos por categoría (no unidades).
+    // Contar UNIDADES TOTALES por categoría (no ítems distintos)
     const categoryQtyMap = soldItems.reduce((acc, item) => {
       const categoryKey = normalizeCategory(item?.product?.category).toLowerCase();
       if (!categoryKey) return acc;
-      acc[categoryKey] = (acc[categoryKey] || 0) + 1;
+      acc[categoryKey] = (acc[categoryKey] || 0) + Number(item.quantity || 0);
       return acc;
     }, {});
 
@@ -183,6 +185,7 @@ export function PreSaleProvider({ children }) {
         enableCategoryDiscount: !hasManualDiscount,
         categoryActivation: getCategoryActivationForProduct(item.product),
         categoryQty,
+        activeRouteId: selectedRoute?.id || null,
       });
 
       const lineTotal = roundTo2(Number(item.quantity || 0) * Number(pricing.priceToUse || 0));

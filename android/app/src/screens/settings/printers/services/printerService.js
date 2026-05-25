@@ -185,14 +185,55 @@ export async function printTest(printer, type = "standard") {
   await printRaw(payload, deviceObj);
 }
 
-export async function printPreSaleReceiptImage(sale, bonuses = []) {
+/**
+ * Imprime el recibo de una pre-venta pagada directamente desde los datos de Firestore.
+ * No usa captura de pantalla — genera el texto del ticket para la impresora térmica.
+ *
+ * @param {object} sale    - Documento de venta desde Firestore
+ * @param {Array}  bonuses - Bonificaciones desde inventoryMovements
+ */
+export async function printPreSaleDoneReceipt(sale, bonuses = []) {
   const device = await loadPrinter();
   if (!device) throw new Error("No hay impresora seleccionada.");
 
   const settings = await getTicketCustomizationSettings();
   const maxWidth = resolveRasterWidth(settings.paperWidthMm);
   const scale = resolveFontScale(settings.fontSize);
-  const text = buildPreSaleReceiptText(sale, bonuses, {
+
+  // Normalizar nombre del cliente (puede venir como objeto {firstName, lastName})
+  const customerName =
+    sale?.customer?.firstName
+      ? `${sale.customer.firstName} ${sale.customer.lastName || ""}`.trim()
+      : sale?.customerName || "Cliente General";
+
+  // Normalizar operador
+  const userName =
+    sale?.cashierName ||
+    sale?.operatorName ||
+    sale?.createdBy ||
+    sale?.userEmail ||
+    "---";
+
+  // Combinar bonos del documento + inventoryMovements sin duplicar
+  const saleBonuses = Array.isArray(sale?.bonuses) ? sale.bonuses : [];
+  const allBonuses = [...saleBonuses];
+  const seen = new Set(saleBonuses.map((b) => `${b.productName || b.name}_${b.quantity}`));
+  bonuses.forEach((b) => {
+    const key = `${b.productName || b.name}_${b.quantity}`;
+    if (!seen.has(key)) { seen.add(key); allBonuses.push(b); }
+  });
+
+  const normalizedSale = {
+    ...sale,
+    customerName,
+    userName,
+    date: sale?.createdAt,          // getFormattedDate soporta Firestore Timestamp
+    bonusesAwarded: allBonuses,
+    discountAmount: sale?.totalDiscount ?? 0,
+    paidAmount: sale?.amountPaid,
+  };
+
+  const text = buildPreSaleReceiptText(normalizedSale, allBonuses, {
     maxWidth,
     scale,
     fontFamily: settings.fontFamily,
@@ -243,8 +284,12 @@ export async function printPngImageFromBase64(base64, options = {}) {
     throw new Error("No se pudo leer la imagen del ticket");
   }
 
+  // Respetar la configuración de ancho de papel del usuario para escalar la impresión
+  const settings = await getTicketCustomizationSettings();
+  const maxWidth = resolveRasterWidth(settings.paperWidthMm);
+
   const { bitmap, width, height } = decodePngToMonoBitmap(normalized, {
-    maxWidth: RASTER_MAX_WIDTH_58MM,
+    maxWidth,
     threshold: options.threshold,
     invert: options.invert,
   });
@@ -258,7 +303,8 @@ export async function printPngImageFromBase64(base64, options = {}) {
 }
 
 /**
- * Función para imprimir el ticket de entrega
+ * Impresión de texto del ticket de entrega (fallback cuando no hay ViewShot).
+ * Para WYSIWYG, usar printPngImageFromBase64 con captura de DeliveryTicket.
  */
 export async function printDeliveryTicket(sale) {
   const device = await loadPrinter();
@@ -267,8 +313,7 @@ export async function printDeliveryTicket(sale) {
   const settings = await getTicketCustomizationSettings();
   const maxWidth = resolveRasterWidth(settings.paperWidthMm);
   const scale = resolveFontScale(settings.fontSize);
-  const preSaleId = sale.id ? sale.id.substring(0, 8).toUpperCase() : "---";
-  const text = `TICKET DE ENTREGA\nPre-Venta #${preSaleId}\n${buildDeliveryReceiptText(sale, {
+  const text = `TICKET DE ENTREGA\n${buildDeliveryReceiptText(sale, {
     maxWidth,
     scale,
     fontFamily: settings.fontFamily,
@@ -286,40 +331,186 @@ export async function printDeliveryTicket(sale) {
 }
 
 function buildDeliveryReceiptText(sale, layout = {}) {
-  const line = "--------------------------------\n";
+  const SEP = "--------------------------------";
   const maxChars = resolveCharsPerLine(layout.maxWidth || RASTER_MAX_WIDTH_58MM, layout.scale || 1, layout.fontFamily);
   const columns = resolveColumns(maxChars);
-  let text = "\n";
-  text += line;
+  let text = "";
 
-  const dateStr = getFormattedDate(sale.date || sale.fechaPago);
-  text += `Cliente: ${sanitize(sale.customerName || "Cliente General")}\n`;
-  text += `Fecha: ${dateStr}\n`;
-  text += line;
+  // ── Cabecera ──────────────────────────────────────────────────────────────
+  const receiptRef = sale.receiptNumber || sale.saleNumber || sale.preSaleNumber || null;
+  const shortId = sale.id ? sale.id.substring(0, 8).toUpperCase() : "---";
+  text += receiptRef ? `TICKET #${receiptRef}\n` : `PRE-VENTA #${shortId}\n`;
+  text += SEP + "\n";
 
-  text += `[[B]]${formatHeaderLine(columns)}\n`;
-  const itemLines = buildItemsWithBonusesBlock(sale.items || [], sale.bonusesAwarded || sale.bonuses || [], columns, {
-    currency: "C$",
-    sanitize,
+  // Operador: entregador > cobrador > createdBy > email
+  const operator =
+    sale.deliveredBy || sale.collectedBy || sale.paidBy ||
+    sale.createdBy || sale.cashierEmail || null;
+
+  const isCredit =
+    sale.paymentMethod === "credit" ||
+    String(sale.status || "").startsWith("credit_");
+  const paymentLabel = isCredit
+    ? "Credito"
+    : ({
+        cash: "Efectivo",
+        card: "Tarjeta",
+        transfer: "Transferencia",
+        mixed: "Mixto",
+      }[String(sale.paymentMethod || "").toLowerCase()] ||
+        sale.paymentMethod ||
+        "Contado");
+
+  text += `Cliente:    ${sanitize(sale.customerName || "Cliente General")}\n`;
+  text += `Fecha:      ${getFormattedDate(sale.fechaPago || sale.date || sale.createdAt)}\n`;
+  text += `Pago:       ${sanitize(paymentLabel)}\n`;
+  if (operator) {
+    text += `Entregador: ${sanitize(operator)}\n`;
+  }
+  text += SEP + "\n";
+
+  // ── Ítems con descuentos compactos ───────────────────────────────────────
+  text += `[[B]]${formatHeaderLine(columns, { name: "Producto", total: "Total" })}\n`;
+
+  const items = sale.items || [];
+  const bonuses = sale.bonusesAwarded || sale.bonuses || [];
+
+  // Índice de bonos por item key para vincularlos
+  const bonusByKey = new Map();
+  const unlinkedBonuses = [];
+  bonuses.forEach((b) => {
+    const key =
+      b.linkedTo || b.linkedToId || b.linkedItemId || b.linkedProductId || "";
+    if (key) {
+      const list = bonusByKey.get(key) || [];
+      list.push(b);
+      bonusByKey.set(key, list);
+    } else {
+      unlinkedBonuses.push(b);
+    }
   });
-  itemLines.forEach((lineText) => {
-    text += `${lineText}\n`;
+
+  items.forEach((item) => {
+    // Nombre y total
+    const rawName = sanitize(item.productName || item.name || "Item");
+    const qty = Number(item.quantity || item.qty || 0);
+    const unitPrice = Number(item.unitPrice || item.price || 0);
+    const total = Number(item.total || unitPrice * qty);
+    const totalStr = `C$${total.toFixed(2)}`.padStart(columns.totalWidth);
+    const nameFirst = rawName.substring(0, columns.nameWidth).padEnd(columns.nameWidth);
+    text += `${nameFirst} ${totalStr}\n`;
+
+    // Segunda línea: cantidad × precio unitario
+    const detailLine = `${qty} x C$${unitPrice.toFixed(2)}`;
+    text += `  ${detailLine}\n`;
+
+    // Descuento por ítem (compacto)
+    const manualDisc = Number(item.discount || 0);
+    const autoDisc = Number(item.autoDiscountTotal || 0);
+    const totalSaving = manualDisc + autoDisc;
+    if (totalSaving > 0) {
+      const src = String(item.pricingSource || "").toLowerCase();
+      const tag =
+        src === "category"
+          ? "Cat"
+          : src === "wholesale"
+          ? "Mayor"
+          : src === "customer"
+          ? "Cliente"
+          : "Desc";
+      text += `  [${tag}] Ahorro: -C$${totalSaving.toFixed(2)}\n`;
+    }
+
+    // Bonos vinculados a este ítem
+    const itemKey = item.id || item.productId || item.product?.id || "";
+    if (itemKey) {
+      const linked = bonusByKey.get(itemKey) || [];
+      // Agregar por nombre para deduplicar
+      const aggMap = new Map();
+      linked.forEach((b) => {
+        const bName = sanitize(b.productName || b.name || "Bonif");
+        const bQty = Number(b.quantity || b.qty || b.bonusQty || 0);
+        const existing = aggMap.get(bName) || 0;
+        aggMap.set(bName, existing + bQty);
+      });
+      aggMap.forEach((bQty, bName) => {
+        text += `  Regalo: +${bQty} ${bName.substring(0, columns.maxChars - 14)}\n`;
+      });
+    }
+
+    text += "\n"; // separador entre ítems
   });
 
-  text += line;
+  // Bonos sin vínculo
+  if (unlinkedBonuses.length > 0) {
+    text += "Bonificaciones adicionales:\n";
+    const aggMap = new Map();
+    unlinkedBonuses.forEach((b) => {
+      const bName = sanitize(b.productName || b.name || "Bonif");
+      const bQty = Number(b.quantity || b.qty || b.bonusQty || 0);
+      aggMap.set(bName, (aggMap.get(bName) || 0) + bQty);
+    });
+    aggMap.forEach((bQty, bName) => {
+      text += `  +${bQty} ${bName.substring(0, columns.maxChars - 6)}\n`;
+    });
+    text += "\n";
+  }
+
+  text += SEP + "\n";
+
+  // ── Resumen financiero ───────────────────────────────────────────────────
+  const subtotalNoDisc = items.reduce((sum, item) => {
+    const qty = Number(item?.quantity || 0);
+    const base =
+      Number(item?.lineBaseTotal || 0) ||
+      Number(item?.baseUnitPrice || 0) * qty ||
+      Number(item?.unitPrice || 0) * qty;
+    return sum + base;
+  }, 0);
+  const categoryDiscount = items.reduce(
+    (sum, item) =>
+      String(item?.pricingSource || "").toLowerCase() === "category"
+        ? sum + Number(item?.autoDiscountTotal || 0)
+        : sum,
+    0,
+  );
+  const customerDiscount = items.reduce(
+    (sum, item) =>
+      String(item?.pricingSource || "").toLowerCase() === "customer"
+        ? sum + Number(item?.autoDiscountTotal || 0)
+        : sum,
+    0,
+  );
+  const manualDiscount = items.reduce(
+    (sum, item) => sum + Number(item?.discount || 0),
+    0,
+  );
+  const discountsTotal = categoryDiscount + customerDiscount + manualDiscount;
+
+  if (discountsTotal > 0) {
+    text += `Subtotal:         C$${subtotalNoDisc.toFixed(2)}\n`;
+    if (manualDiscount > 0)
+      text += `Desc. manual:    -C$${manualDiscount.toFixed(2)}\n`;
+    if (categoryDiscount > 0)
+      text += `Desc. categoria: -C$${categoryDiscount.toFixed(2)}\n`;
+    if (customerDiscount > 0)
+      text += `Desc. cliente:   -C$${customerDiscount.toFixed(2)}\n`;
+    text += `Total ahorrado:  -C$${discountsTotal.toFixed(2)}\n`;
+  }
 
   const total = (sale.total || 0).toFixed(2);
   const paid = (sale.amountPaid || sale.total || 0).toFixed(2);
   const change = (sale.change || 0).toFixed(2);
 
-  text += `[[B]]TOTAL A PAGAR:     C$${total}\n`;
-  text += `Pagado:            C$${paid}\n`;
+  text += `[[B]]TOTAL A PAGAR:    C$${total}\n`;
+  text += `Pagado:           C$${paid}\n`;
   if (Number(change) > 0) {
-    text += `Cambio:            C$${change}\n`;
+    text += `Cambio:           C$${change}\n`;
   }
 
-  text += line;
-  text += "     ¡Gracias por su compra!\n";
+  text += SEP + "\n";
+  if (operator) text += `Entregador: ${sanitize(operator)}\n`;
+  text += "     Gracias por su compra\n";
 
   return text;
 }

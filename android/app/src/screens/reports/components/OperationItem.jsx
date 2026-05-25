@@ -6,9 +6,26 @@ const OperationItem = ({ item, onPress }) => {
   const renderSummary = () => {
     switch (item.__kind) {
       case 'sale':
-        return <Text style={styles.summary}>Venta por un total de ${item.total?.toFixed(2)}</Text>;
+        return <Text style={styles.summary}>Venta rápida — Total: C${item.total?.toFixed(2)}</Text>;
+      case 'presale': {
+        const statusLabels = {
+          paid: 'Cobrada',
+          delivered: 'Entregada',
+          credit_pending: 'Crédito pendiente',
+          credit_preparing: 'Crédito en preparación',
+          credit_ready_for_delivery: 'Crédito listo para entregar',
+        };
+        const statusLabel = statusLabels[item.status] || item.status || '';
+        const customer = item.customerName || 'Cliente';
+        return (
+          <Text style={styles.summary}>
+            Pre-venta · {customer} · C${item.total?.toFixed(2)}
+            {statusLabel ? ` · ${statusLabel}` : ''}
+          </Text>
+        );
+      }
       case 'financial':
-        return <Text style={styles.summary}>{item.type === 'income' ? 'Ingreso' : 'Gasto'} de ${item.amount?.toFixed(2)}</Text>;
+        return <Text style={styles.summary}>{item.type === 'income' ? 'Ingreso' : 'Gasto'} de C${item.amount?.toFixed(2)}</Text>;
       case 'inventory':
         return <Text style={styles.summary}>{`Movimiento de inventario: ${item.type}`}</Text>;
       case 'product_activity':

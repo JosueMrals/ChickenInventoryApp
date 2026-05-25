@@ -187,6 +187,13 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
   const user = auth().currentUser;
   const preSaleRef = presalesCollection.doc(preSaleId);
 
+  // Verificar que el estado actual permite edición (guard del lado del servidor)
+  const TERMINAL_STATUSES = new Set(['paid', 'cancelled', 'dispatched', 'delivered']);
+  const currentStatusCheck = oldPreSaleData.status || 'pending';
+  if (TERMINAL_STATUSES.has(currentStatusCheck)) {
+    throw new Error(`No se puede editar una pre-venta en estado: ${currentStatusCheck}.`);
+  }
+
   const route = newPreSaleData.route || oldPreSaleData.route || null;
   const routeId = newPreSaleData.route?.id || oldPreSaleData.routeId || null;
 
@@ -194,16 +201,33 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
   const customerName = buildCustomerName(newPreSaleData.customer, "Cliente sin nombre");
   const paymentMethod = newPreSaleData.paymentMethod || oldPreSaleData.paymentMethod || 'cash';
   const isCredit = paymentMethod === 'credit';
+
+  // Mapa de conversión de estados normales → crédito
   const creditStatusMap = {
     pending: 'credit_pending',
     preparing: 'credit_preparing',
-    ready_for_delivery: 'credit_ready_for_delivery'
+    ready_for_delivery: 'credit_ready_for_delivery',
   };
-  const creditStatuses = new Set(['credit_pending', 'credit_preparing', 'credit_ready_for_delivery']);
+  // Mapa inverso: crédito → normal
+  const normalStatusMap = {
+    credit_pending: 'pending',
+    credit_preparing: 'preparing',
+    credit_ready_for_delivery: 'ready_for_delivery',
+  };
+  const creditStatuses = new Set(Object.keys(normalStatusMap));
+  const editableStatuses = new Set([...Object.keys(creditStatusMap), ...creditStatuses]);
+
   const baseStatus = oldPreSaleData.status || 'pending';
-  const normalizedStatus = isCredit
-    ? (creditStatuses.has(baseStatus) ? baseStatus : (creditStatusMap[baseStatus] || 'credit_pending'))
-    : (creditStatuses.has(baseStatus) ? 'pending' : baseStatus);
+
+  // Solo transformar estados editables; nunca modificar terminales
+  let normalizedStatus = baseStatus;
+  if (editableStatuses.has(baseStatus)) {
+    if (isCredit) {
+      normalizedStatus = creditStatuses.has(baseStatus) ? baseStatus : (creditStatusMap[baseStatus] || 'credit_pending');
+    } else {
+      normalizedStatus = creditStatuses.has(baseStatus) ? (normalStatusMap[baseStatus] || 'pending') : baseStatus;
+    }
+  }
 
   const items = mapItemsToPayload(newPreSaleData.cart.filter(item => !item.isBonus));
   const bonuses = mapItemsToPayload(newPreSaleData.cart.filter(item => item.isBonus));
@@ -277,51 +301,119 @@ export const getPreSaleById = async (preSaleId) => {
 };
 
 export const convertPreSaleToSale = async (preSale, paymentDetails) => {
-  // ... (existing code remains the same)
+  if (!preSale?.id) throw new Error('Pre-venta inválida: id requerido.');
+
+  const user = auth().currentUser;
+  const saleNumber = await getNextSaleNumber();
+
+  const preSaleRef = presalesCollection.doc(preSale.id);
+  const saleRef = salesCollection.doc();
+  const historyRef = preSaleRef.collection('history').doc();
+
+  const salePayload = {
+    preSaleId: preSale.id,
+    preSaleNumber: preSale.preSaleNumber || null,
+    saleNumber,
+    customer: preSale.customer || null,
+    customerId: preSale.customerId || null,
+    customerName: preSale.customerName || null,
+    items: preSale.items || [],
+    bonuses: preSale.bonuses || [],
+    subtotal: Number(preSale.subtotal) || 0,
+    totalDiscount: Number(preSale.totalDiscount) || 0,
+    categoryDiscountTotal: Number(preSale.categoryDiscountTotal) || 0,
+    total: Number(preSale.total) || 0,
+    paymentMethod: paymentDetails?.paymentMethod || preSale.paymentMethod || 'cash',
+    amountPaid: Number(paymentDetails?.amountPaid) || Number(preSale.total) || 0,
+    change: Number(paymentDetails?.change) || 0,
+    route: preSale.route || null,
+    routeId: preSale.routeId || null,
+    createdAt: firestore.FieldValue.serverTimestamp(),
+    createdBy: user?.email || 'N/A',
+    originalCreatedBy: preSale.createdBy || null,
+    inventoryDeducted: true,
+  };
+
+  await firestore().runTransaction(async (tx) => {
+    const preSaleSnap = await tx.get(preSaleRef);
+
+    if (!preSaleSnap.exists) {
+      throw new Error('La pre-venta no existe o ya fue eliminada.');
+    }
+
+    const currentStatus = preSaleSnap.data()?.status;
+    if (currentStatus === 'paid') {
+      throw new Error('Esta pre-venta ya fue pagada.');
+    }
+    if (currentStatus === 'cancelled') {
+      throw new Error('No se puede cobrar una pre-venta cancelada.');
+    }
+    if (!['pending', 'dispatched'].includes(currentStatus)) {
+      throw new Error(`Estado inválido para cobrar: ${currentStatus}.`);
+    }
+
+    tx.set(saleRef, salePayload);
+
+    tx.update(preSaleRef, {
+      status: 'paid',
+      saleId: saleRef.id,
+      fechaPago: firestore.FieldValue.serverTimestamp(),
+      amountPaid: salePayload.amountPaid,
+      change: salePayload.change,
+      paymentMethod: salePayload.paymentMethod,
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+      updatedBy: user?.email || 'N/A',
+    });
+
+    tx.set(historyRef, {
+      timestamp: firestore.FieldValue.serverTimestamp(),
+      user: user?.email || 'N/A',
+      action: 'PAID',
+      details: `Pre-venta cobrada. Monto: ${salePayload.amountPaid.toFixed(2)}, Método: ${salePayload.paymentMethod}. Venta #${saleNumber}`,
+    });
+  });
+
+  return saleRef.id;
 };
 
 export const updateAggregateProductStatus = async (productName, newStatus, fromStatus = null) => {
   const user = auth().currentUser;
   const batch = firestore().batch();
 
-  // Buscar todas las órdenes activas que contengan este producto
-  // Nota: Buscamos órdenes no finalizadas. 'dispatched', 'delivered' y 'cancelled' se ignoran.
   const activeStatuses = ['pending', 'credit_pending', 'credit_preparing', 'credit_ready_for_delivery', 'preparing', 'ready_for_delivery'];
   const snapshot = await presalesCollection.where('status', 'in', activeStatuses).get();
+
+  // Estados terminales que NUNCA deben ser regresados automáticamente
+  const TERMINAL_STATUSES = new Set(['paid', 'cancelled', 'dispatched', 'delivered']);
 
   let updateCount = 0;
 
   snapshot.docs.forEach(doc => {
     const data = doc.data();
+
+    // Doble guarda: si el documento ya está en estado terminal, lo omitimos
+    if (TERMINAL_STATUSES.has(data.status)) return;
+
     let madeChange = false;
 
-    // Función para actualizar estado de un item individual si coincide el nombre
-    // Se asume que item.status undefined = 'pending'
     const updateItemStatus = (item) => {
       const currentStatus = item.status || 'pending';
       const name = item.productName || item.name;
 
-      // Filtro por nombre
       if (name !== productName) return false;
-
-      // Filtro por estado origen (si se especifica)
       if (fromStatus && currentStatus !== fromStatus) return false;
-
-      // Evitar actualización redundante
       if (currentStatus === newStatus) return false;
 
       item.status = newStatus;
       return true;
     };
 
-    // Procesar items normales
     const items = (data.items || []).map(item => {
       const changed = updateItemStatus(item);
       if (changed) madeChange = true;
       return item;
     });
 
-    // Procesar bonificaciones
     const bonuses = (data.bonuses || []).map(item => {
       const changed = updateItemStatus(item);
       if (changed) madeChange = true;
@@ -330,21 +422,30 @@ export const updateAggregateProductStatus = async (productName, newStatus, fromS
 
     if (madeChange) {
       updateCount++;
-      // --- Lógica de Promoción de Estado de la Orden ---
-      // Verificar el estado global de todos los items de la orden
-      const allItems = [...items, ...bonuses];
-      const allReady = allItems.every(i => i.status === 'ready');
-      const allPending = allItems.every(i => !i.status || i.status === 'pending');
 
+      const allItems = [...items, ...bonuses];
+
+      // Guarda: si no hay ítems, no calcular nuevo estado (evitar vacuously-true)
       let nextOrderStatus = data.status;
 
-      if (allReady) {
-        nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery';
-      } else if (allPending) {
-        nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_pending' : 'pending';
-      } else {
-        // Estado mixto: al menos uno en proceso o listo, pero no todos
-        nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing';
+      if (allItems.length > 0) {
+        const allReady = allItems.every(i => i.status === 'ready');
+        const allPending = allItems.every(i => !i.status || i.status === 'pending');
+
+        if (allReady) {
+          nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery';
+        } else if (allPending) {
+          // Solo regresar a pending si la preventa estaba en preparing (retroceso válido de bodega)
+          // No regresar desde ready_for_delivery o estados superiores sin validación explícita
+          const canRegress = data.status === 'preparing' || data.status === 'credit_preparing';
+          if (canRegress) {
+            nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_pending' : 'pending';
+          }
+          // Si no puede regresar, mantener el estado actual (nextOrderStatus = data.status)
+        } else {
+          // Estado mixto
+          nextOrderStatus = data.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing';
+        }
       }
 
       batch.update(doc.ref, {
@@ -352,7 +453,7 @@ export const updateAggregateProductStatus = async (productName, newStatus, fromS
         bonuses,
         status: nextOrderStatus,
         updatedAt: firestore.FieldValue.serverTimestamp(),
-        lastWorker: user?.email || 'N/A'
+        lastWorker: user?.email || 'N/A',
       });
     }
   });

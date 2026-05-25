@@ -4,7 +4,9 @@ import { serverTimestamp } from '@react-native-firebase/firestore';
 import { PRODUCT_CATEGORIES, normalizeCategory } from '../constants/productCategories';
 
 const COLLECTION = 'productCategories';
-const MAX_ACTIVATION_RULES = 5;
+const MAX_DISCOUNT_TIERS = 5;
+
+const VALID_DISCOUNT_TYPES = new Set(['percent', 'amount']);
 
 function normalizeName(value) {
   return normalizeCategory(value).replace(/\s+/g, ' ').trim();
@@ -16,61 +18,85 @@ function normalizeMinQty(value) {
   return Math.max(1, Math.floor(parsed));
 }
 
-function sanitizeActivationRules(rules = []) {
-  if (!Array.isArray(rules)) return [];
+function normalizeDiscountValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Number(parsed.toFixed(4)) : 0;
+}
+
+function normalizeDiscountType(value) {
+  const str = String(value || '').toLowerCase();
+  return VALID_DISCOUNT_TYPES.has(str) ? str : 'percent';
+}
+
+/** Normaliza y depura el array de discount tiers; máximo MAX_DISCOUNT_TIERS */
+function sanitizeDiscountTiers(tiers = []) {
+  if (!Array.isArray(tiers)) return [];
 
   const uniqueByQty = new Map();
-  rules.forEach((rule) => {
-    const minQty = normalizeMinQty(rule?.minQty);
+  tiers.forEach((tier) => {
+    const minQty = normalizeMinQty(tier?.minQty);
     if (!minQty) return;
     uniqueByQty.set(minQty, {
       minQty,
-      active: rule?.active !== false,
+      discountType: normalizeDiscountType(tier?.discountType),
+      discountValue: normalizeDiscountValue(tier?.discountValue),
+      active: tier?.active !== false,
     });
   });
 
   return Array.from(uniqueByQty.values())
     .sort((a, b) => a.minQty - b.minQty)
-    .slice(0, MAX_ACTIVATION_RULES);
+    .slice(0, MAX_DISCOUNT_TIERS);
 }
 
-function buildLegacyActivationRules(input = {}) {
-  const discountRules = Array.isArray(input?.discountRules) ? input.discountRules : [];
-  const fromRules = discountRules
-    .map((rule) => ({ minQty: normalizeMinQty(rule?.minQty), active: rule?.active !== false }))
-    .filter((rule) => rule.minQty > 0);
-
-  if (fromRules.length > 0) {
-    return sanitizeActivationRules(fromRules);
-  }
-
-  const hasLegacySingleDiscount = Number(input?.discountValue || 0) > 0;
-  if (hasLegacySingleDiscount) {
-    return [{ minQty: 1, active: true }];
-  }
-
-  return [];
+/**
+ * Migra activationRules legacy (solo minQty) a discountTiers con valores por defecto.
+ * Usado para backward-compat al leer documentos viejos.
+ */
+function migrateActivationRulesToTiers(rules = []) {
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .map((rule) => ({
+      minQty: normalizeMinQty(rule?.minQty),
+      discountType: normalizeDiscountType(rule?.discountType),
+      discountValue: normalizeDiscountValue(rule?.discountValue),
+      active: rule?.active !== false,
+    }))
+    .filter((t) => t.minQty > 0);
 }
 
-function buildActivationPayload(input = {}) {
-  const activationRules = sanitizeActivationRules(input.activationRules);
-  const normalizedRules = activationRules.length > 0 ? activationRules : buildLegacyActivationRules(input);
+function buildDiscountTiersPayload(input = {}) {
+  // Prioridad: discountTiers nuevo → activationRules legacy → campo raíz de compatibilidad
+  let tiers = [];
+  if (Array.isArray(input?.discountTiers) && input.discountTiers.length > 0) {
+    tiers = sanitizeDiscountTiers(input.discountTiers);
+  } else if (Array.isArray(input?.activationRules) && input.activationRules.length > 0) {
+    tiers = sanitizeDiscountTiers(migrateActivationRulesToTiers(input.activationRules));
+  }
   return {
-    activationRules: normalizedRules,
-    hasActivationRules: normalizedRules.length > 0,
+    discountTiers: tiers,
+    // Mantener activationRules sincronizados para backward-compat con componentes no migrados
+    activationRules: tiers.map(({ minQty, active }) => ({ minQty, active })),
+    hasActivationRules: tiers.length > 0,
   };
 }
 
-function sanitizeCategoryRow(row = {}) {
+export function sanitizeCategoryRow(row = {}) {
   const name = normalizeName(row?.name);
-  const activationRules = sanitizeActivationRules(row?.activationRules);
-  const normalizedRules = activationRules.length > 0 ? activationRules : buildLegacyActivationRules(row);
+  // Leer discountTiers primero; si no existe, migrar desde activationRules
+  const rawTiers = Array.isArray(row?.discountTiers) && row.discountTiers.length > 0
+    ? row.discountTiers
+    : migrateActivationRulesToTiers(row?.activationRules || []);
+
+  const discountTiers = sanitizeDiscountTiers(rawTiers);
 
   return {
     ...row,
     name,
-    activationRules: normalizedRules,
-    hasActivationRules: normalizedRules.length > 0,
+    discountTiers,
+    // Backward compat
+    activationRules: discountTiers.map(({ minQty, active }) => ({ minQty, active })),
+    hasActivationRules: discountTiers.length > 0,
     active: row?.active !== false,
   };
 }
@@ -94,6 +120,7 @@ async function seedDefaultCategoriesIfEmpty() {
       name: normalized,
       name_lower: normalized.toLowerCase(),
       active: true,
+      discountTiers: [],
       activationRules: [],
       hasActivationRules: false,
       createdAt: serverTimestamp(),
@@ -108,7 +135,7 @@ export async function createOrActivateCategory(name, options = {}) {
   if (!normalized) throw new Error('Nombre de categoria requerido');
 
   const lower = normalized.toLowerCase();
-  const activationPayload = buildActivationPayload(options);
+  const tiersPayload = buildDiscountTiersPayload(options);
   const snap = await db.collection(COLLECTION).where('name_lower', '==', lower).limit(1).get();
 
   if (!snap.empty) {
@@ -116,7 +143,7 @@ export async function createOrActivateCategory(name, options = {}) {
     await doc.ref.update({
       name: normalized,
       active: true,
-      ...activationPayload,
+      ...tiersPayload,
       updatedAt: serverTimestamp(),
     });
     return doc.id;
@@ -127,7 +154,7 @@ export async function createOrActivateCategory(name, options = {}) {
     name: normalized,
     name_lower: lower,
     active: true,
-    ...activationPayload,
+    ...tiersPayload,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -137,9 +164,7 @@ export async function createOrActivateCategory(name, options = {}) {
 export async function updateCategory(categoryId, updates = {}) {
   if (!categoryId) throw new Error('categoryId requerido');
 
-  const payload = {
-    updatedAt: serverTimestamp(),
-  };
+  const payload = { updatedAt: serverTimestamp() };
 
   if (Object.prototype.hasOwnProperty.call(updates, 'name')) {
     const normalized = normalizeName(updates.name);
@@ -148,13 +173,12 @@ export async function updateCategory(categoryId, updates = {}) {
     payload.name_lower = normalized.toLowerCase();
   }
 
-  if (
-    Object.prototype.hasOwnProperty.call(updates, 'activationRules') ||
-    Object.prototype.hasOwnProperty.call(updates, 'discountRules') ||
-    Object.prototype.hasOwnProperty.call(updates, 'discountType') ||
-    Object.prototype.hasOwnProperty.call(updates, 'discountValue')
-  ) {
-    Object.assign(payload, buildActivationPayload(updates));
+  const hasDiscountUpdate =
+    Object.prototype.hasOwnProperty.call(updates, 'discountTiers') ||
+    Object.prototype.hasOwnProperty.call(updates, 'activationRules');
+
+  if (hasDiscountUpdate) {
+    Object.assign(payload, buildDiscountTiersPayload(updates));
   }
 
   if (Object.prototype.hasOwnProperty.call(updates, 'active')) {
@@ -185,15 +209,11 @@ export async function listCategories({ activeOnly = false } = {}) {
   try {
     await seedDefaultCategoriesIfEmpty();
   } catch (err) {
-    if (!isPermissionDeniedError(err)) {
-      throw err;
-    }
+    if (!isPermissionDeniedError(err)) throw err;
   }
 
   let query = db.collection(COLLECTION);
-  if (activeOnly) {
-    query = query.where('active', '==', true);
-  }
+  if (activeOnly) query = query.where('active', '==', true);
 
   const snap = await query.get();
   return snap.docs
@@ -210,16 +230,11 @@ export function subscribeCategories(onUpdate, { activeOnly = false } = {}) {
   let unsubscribe = () => {};
   let permissionDeniedLogged = false;
 
-  const stopSubscription = () => {
-    unsubscribe();
-    unsubscribe = () => {};
-  };
+  const stopSubscription = () => { unsubscribe(); unsubscribe = () => {}; };
 
   const startSubscription = () => {
     let query = db.collection(COLLECTION);
-    if (activeOnly) {
-      query = query.where('active', '==', true);
-    }
+    if (activeOnly) query = query.where('active', '==', true);
 
     unsubscribe = query.onSnapshot(
       (snapshot) => {
@@ -234,7 +249,7 @@ export function subscribeCategories(onUpdate, { activeOnly = false } = {}) {
         if (isPermissionDeniedError(err)) {
           if (!permissionDeniedLogged) {
             permissionDeniedLogged = true;
-            console.warn('subscribeCategories permission denied:', err?.code || err?.message || err);
+            console.warn('subscribeCategories permission denied:', err?.code || err?.message);
           }
         } else {
           console.error('subscribeCategories error:', err);
@@ -246,27 +261,13 @@ export function subscribeCategories(onUpdate, { activeOnly = false } = {}) {
 
   const authUnsubscribe = auth().onAuthStateChanged((user) => {
     stopSubscription();
-
-    if (!user) {
-      onUpdate([]);
-      return;
-    }
-
+    if (!user) { onUpdate([]); return; }
     seedDefaultCategoriesIfEmpty()
-      .catch((err) => {
-        if (!isPermissionDeniedError(err)) {
-          console.error('seedDefaultCategoriesIfEmpty error:', err);
-        }
-      })
-      .finally(() => {
-        startSubscription();
-      });
+      .catch((err) => { if (!isPermissionDeniedError(err)) console.error('seedDefaultCategoriesIfEmpty error:', err); })
+      .finally(() => { startSubscription(); });
   });
 
-  return () => {
-    stopSubscription();
-    authUnsubscribe();
-  };
+  return () => { stopSubscription(); authUnsubscribe(); };
 }
 
 export function subscribeActiveCategories(onUpdate) {

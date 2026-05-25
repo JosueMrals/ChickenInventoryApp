@@ -3,10 +3,11 @@ import { View, Text, FlatList, TouchableOpacity, SafeAreaView, ActivityIndicator
 import { PreSaleContext } from "./context/preSaleContext";
 import Icon from "react-native-vector-icons/Ionicons";
 import firestore from "@react-native-firebase/firestore";
-import { calcPriceForProduct } from "../../screens/sales/hooks/useSalePricing"; // Import pricing logic
+import { calcPriceForProduct } from "../../screens/sales/hooks/useSalePricing";
 import styles from "../quicksalesNew/styles/quickProductsStyles";
 import SearchBar from '../../components/SearchBar';
 import { useFocusEffect } from "@react-navigation/native";
+import { useRoute as useRouteContext } from "../../context/RouteContext";
 
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 
@@ -15,6 +16,8 @@ export default function PreSaleProductsScreen({ navigation }) {
     cart, addItem, customer, setCustomer, resetPreSale,
     editingPreSale, editCart, addItemToEditCart 
   } = useContext(PreSaleContext);
+
+  const { selectedRoute } = useRouteContext();
 
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -70,7 +73,13 @@ export default function PreSaleProductsScreen({ navigation }) {
   };
 
   const renderProductCard = ({ item }) => {
-    const { priceToUse } = calcPriceForProduct({ product: item, qty: 1, customer });
+    const { priceToUse, pricingSource, routePrice } = calcPriceForProduct({
+      product: item,
+      qty: 1,
+      customer,
+      activeRouteId: selectedRoute?.id || null,
+    });
+    const isRoutePriced = pricingSource === 'route' || pricingSource === 'route+customer';
     const bonuses = Array.isArray(item.bonuses) ? item.bonuses : (item.bonus ? [item.bonus] : []);
     const hasBonus = bonuses.some(b => b && b.enabled);
     const rawStock = item.stock ?? item.availableStock ?? item.inventory;
@@ -88,7 +97,16 @@ export default function PreSaleProductsScreen({ navigation }) {
       >
         <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
         <View style={localStyles.priceRow}>
-          <Text style={styles.cardPrice}>{formatCurrency(priceToUse)}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.cardPrice, isRoutePriced && { color: '#7C3AED' }]}>
+              {formatCurrency(priceToUse)}
+            </Text>
+            {isRoutePriced && (
+              <Text style={localStyles.regularPriceStrike}>
+                C${(Number(item.salePrice) || 0).toFixed(2)}
+              </Text>
+            )}
+          </View>
           <View
             style={[
               localStyles.stockBadge,
@@ -107,10 +125,17 @@ export default function PreSaleProductsScreen({ navigation }) {
             </Text>
           </View>
         </View>
-        {(item.wholesalePrices?.length > 0 || hasBonus) && (
+        {(item.wholesalePrices?.length > 0 || hasBonus || isRoutePriced) && (
           <View style={localStyles.tagContainer}>
+{/*             {isRoutePriced && ( */}
+{/*               <View style={localStyles.routeTag}> */}
+{/*                 <Icon name="navigate" size={9} color="#7C3AED" /> */}
+{/*                 <Text style={localStyles.routeTagText}>Precio Ruta</Text> */}
+{/*               </View> */}
+{/*             )} */}
             {item.wholesalePrices?.length > 0 && <Text style={localStyles.tag}>Mayoreo</Text>}
-            {hasBonus && <Text style={[localStyles.tag, localStyles.bonusTag]}>Bonificacion</Text>}
+            <Icon name="gift" size={11} color="#1565C0" />
+{/*             {hasBonus && <Text style={[localStyles.tag, localStyles.bonusTag]}>Bonificacion</Text>} */}
           </View>
         )}
       </TouchableOpacity>
@@ -242,5 +267,28 @@ const localStyles = StyleSheet.create({
   bonusTag: {
     backgroundColor: '#D4EFDF',
     color: '#1E8449',
+  },
+  routeTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#F5F3FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginRight: 4,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+  },
+  routeTagText: {
+    fontSize: 9,
+    color: '#7C3AED',
+    fontWeight: '700',
+  },
+  regularPriceStrike: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+    marginTop: 1,
   },
 });
