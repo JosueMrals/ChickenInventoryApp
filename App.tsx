@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
-import { View, Alert } from 'react-native';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import React, { useEffect, useRef } from 'react';
+import { View, Alert, BackHandler } from 'react-native';
+import { NavigationContainer, createNavigationContainerRef, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -45,7 +45,7 @@ import ProductsStack from './android/app/src/navigation/ProductsStack';
 import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen';
 import TicketCustomizationScreen from './android/app/src/screens/settings/ticketCustomization/TicketCustomizationScreen';
 import SettingsScreen from './android/app/src/screens/settings/SettingsScreen'; // Nuevo Import
-import RoutesScreen from './android/app/src/screens/routes/RoutesScreen';
+import RoutesScreen from './android/app/src/screens/routes/RoutesScreen.tsx';
 import AddRouteScreen from './android/app/src/screens/routes/AddRouteScreen';
 import RouteSelectionScreen from './android/app/src/screens/routes/RouteSelectionScreen';
 
@@ -75,12 +75,59 @@ const CreditsScreenAny = CreditsScreen as React.ComponentType<any>;
 const CreditsHistoryScreenAny = CreditsHistoryScreen as React.ComponentType<any>;
 const MyDeliveriesScreenAny = MyDeliveriesScreen as React.ComponentType<any>;
 
-function AppDrawer({ route }: any) {
+function AppDrawer({ route, navigation }: any) {
   const { role, user } = route?.params || {};
+
+  // ── Obtener el nombre de la ruta activa del Drawer ──────────────────────
+  const activeDrawerRoute = useNavigationState(
+    (state) => state?.routes?.[state?.index ?? 0]?.name ?? 'DashboardScreen'
+  );
+
+  // ── BackHandler centralizado: evita que el botón/gesto de volver cierre la app ──
+  const backPressedOnce = useRef(false);
+
+  useEffect(() => {
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Si no estamos en el Dashboard → navegar al Dashboard
+      if (activeDrawerRoute !== 'DashboardScreen') {
+        navigation.navigate('DashboardScreen');
+        return true; // consumir el evento
+      }
+
+      // Estamos en el Dashboard → pedir confirmación antes de salir
+      if (backPressedOnce.current) {
+        BackHandler.exitApp();
+        return true;
+      }
+
+      backPressedOnce.current = true;
+      Alert.alert(
+        'Salir de la app',
+        '¿Deseas salir de ChickenInventory?',
+        [
+          {
+            text: 'Cancelar',
+            style: 'cancel',
+            onPress: () => { backPressedOnce.current = false; },
+          },
+          {
+            text: 'Salir',
+            style: 'destructive',
+            onPress: () => BackHandler.exitApp(),
+          },
+        ],
+        { cancelable: true, onDismiss: () => { backPressedOnce.current = false; } }
+      );
+      return true; // consumir el evento en todos los casos
+    });
+
+    return () => handler.remove();
+  }, [activeDrawerRoute, navigation]);
 
   return (
     <Drawer.Navigator
       initialRouteName="DashboardScreen"
+      backBehavior="firstRoute"
       drawerContent={(props) => <Sidebar {...props} role={role} user={user} />}
       screenOptions={{ headerShown: false }}
     >
@@ -215,13 +262,15 @@ function AppDrawer({ route }: any) {
 	  />
 
       {/* ROUTES MODULE */}
-      <Drawer.Screen name="Routes"
+      <Drawer.Screen
+        name="Routes"
         component={RoutesScreen}
-        options={{ title: "Rutas de Entrega" }}
+        options={{ headerShown: false, drawerLabel: 'Rutas de Entrega' }}
       />
-      <Drawer.Screen name="AddRouteScreen"
+      <Drawer.Screen
+        name="AddRouteScreen"
         component={AddRouteScreen}
-        options={{ title: "Nueva Ruta" }}
+        options={{ headerShown: false, drawerLabel: 'Nueva Ruta' }}
       />
 
     </Drawer.Navigator>

@@ -34,11 +34,23 @@ export default function ProductQuantityScreen({ navigation, route }) {
   // Preview de precio en tiempo real
   const pricePreview = useMemo(() => {
     const n = Number(qty);
+    const categoryActivation = categoryTiers.length > 0 ? { discountTiers: categoryTiers } : null;
+
     if (!n || n <= 0) {
-      const base = calcPriceForProduct({ product, qty: 1, activeRouteId });
+      const base = calcPriceForProduct({
+        product, qty: 1, activeRouteId,
+        enableCategoryDiscount: !!categoryActivation,
+        categoryActivation,
+        categoryQty: 1,
+      });
       return { qty: 0, unitPrice: base.priceToUse, total: 0, source: base.pricingSource, saved: 0 };
     }
-    const pricing = calcPriceForProduct({ product, qty: n, activeRouteId });
+    const pricing = calcPriceForProduct({
+      product, qty: n, activeRouteId,
+      enableCategoryDiscount: !!categoryActivation,
+      categoryActivation,
+      categoryQty: n,
+    });
     const effectiveBase = pricing.basePrice || Number(product?.salePrice ?? product?.price ?? 0);
     const saved = Math.max(0, (effectiveBase - pricing.priceToUse) * n + Number(pricing.autoDiscountTotal || 0));
     return {
@@ -48,7 +60,7 @@ export default function ProductQuantityScreen({ navigation, route }) {
       source: pricing.pricingSource,
       saved: Number(saved.toFixed(2)),
     };
-  }, [qty, product, activeRouteId]);
+  }, [qty, product, activeRouteId, categoryTiers]);
 
   const sourceLabel = {
     wholesale:       { label: 'Precio mayorista', color: '#F57F17', bg: '#FFF8E1', icon: 'pricetag' },

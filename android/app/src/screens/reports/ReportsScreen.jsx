@@ -6,6 +6,7 @@ import {
 } from "react-native";
 import DateTimePickerModal from "react-native-modal-datetime-picker";
 import Icon from "react-native-vector-icons/Ionicons";
+import { useNavigation } from "@react-navigation/native";
 import globalStyles from "../../styles/globalStyles";
 import { getQuickRange, makeRange } from "./utils/dateRanges";
 import { useReportsData } from "./hooks/useReportsData";
@@ -147,6 +148,7 @@ function FilterOptionsModal({
 
 // ── Pantalla principal ──────────────────────────────────────────────────────
 export default function ReportsScreen() {
+  const navigation = useNavigation();
   const [activeTab, setActiveTab]     = useState("dashboard");
   const [loadedTabs, setLoadedTabs]   = useState(["dashboard"]);
   const [activeRange, setActiveRange] = useState("today");
@@ -156,7 +158,6 @@ export default function ReportsScreen() {
   const [dateFrom, setDateFrom] = useState(initialDates.from);
   const [dateTo,   setDateTo]   = useState(initialDates.to);
 
-  // Estado de fechas para el picker personalizado
   const [customFrom, setCustomFrom] = useState(null);
   const [customTo,   setCustomTo]   = useState(null);
 
@@ -213,6 +214,10 @@ export default function ReportsScreen() {
     });
   }, []);
 
+  const handleBack = useCallback(() => {
+    navigation.navigate("DashboardScreen");
+  }, [navigation]);
+
   const renderPanel = (id) => {
     if (!loadedTabs.includes(id)) {
       return (
@@ -227,10 +232,10 @@ export default function ReportsScreen() {
       case "sales":
         return (
           <SalesPanel
-            data={{ summary, operations }}
-            loading={loading || loadingMore}
-            loadMore={loadMoreOperations}
-            hasMore={hasMore}
+            data={{ summary }}
+            loading={loading}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
           />
         );
       case "financial":
@@ -256,10 +261,13 @@ export default function ReportsScreen() {
 
       {/* ── Header (globalStyles) ─────────────────────────────────────── */}
       <View style={[globalStyles.header, s.headerOverride]}>
-        <Icon name="analytics" size={22} color="#fff" />
-        <View style={s.headerCenter}>
-          <Text style={globalStyles.title}>Informes & Análisis</Text>
-        </View>
+        <TouchableOpacity
+          onPress={handleBack}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Icon name="chevron-back" size={28} color="#fff" />
+        </TouchableOpacity>
+        <Text style={globalStyles.title}>Informes & Análisis</Text>
         <TouchableOpacity
           style={s.dotsBtn}
           onPress={() => setShowOptions(true)}
@@ -334,11 +342,9 @@ export default function ReportsScreen() {
 
 // ── Estilos principales ─────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  screen:        { flex: 1, backgroundColor: "#F5F6FA" },
-  headerOverride:{ marginBottom: 0 }, // globalStyles.header añade 10, aquí lo anulamos
-  headerCenter:  { flex: 1 }, // globalStyles.title ya trae paddingLeft:10
-  headerSub:     { fontSize: 11, color: "rgba(255,255,255,0.75)", marginTop: 1 },
-  dotsBtn:       { padding: 4 },
+  screen:         { flex: 1, backgroundColor: "#F5F6FA" },
+  headerOverride: { marginBottom: 0 },
+  dotsBtn:        { padding: 4 },
 
   // Tabs
   tabsBar:     { backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#E5E7EB" },

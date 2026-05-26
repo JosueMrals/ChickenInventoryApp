@@ -438,21 +438,75 @@ export async function getSalesByUserInRange({ from, to }) {
   }
 }
 
+/**
+ * Consulta dedicada para el panel de ventas:
+ * obtiene únicamente documentos de `sales` y `presales` completadas,
+ * con paginación independiente por colección.
+ * Cada colección tiene su propio try/catch para que un fallo no afecte a la otra.
+ */
+export async function getSalesPage({ cursors = {}, from, to, limit = 20 }) {
+  const results = [];
+  let newCursors = { ...cursors };
+
+  const collections = [
+    { col: "sales",    kind: "sale"    },
+    { col: "presales", kind: "presale" },
+  ];
+
+  for (const c of collections) {
+    try {
+      let q = col(c.col)
+        .orderBy("createdAt", "desc")
+        .limit(limit);
+      if (from) q = q.where("createdAt", ">=", toTs(from));
+      if (to)   q = q.where("createdAt", "<=", toTs(to));
+      if (cursors[c.col]) q = q.startAfter(cursors[c.col]);
+
+      const snap = await q.get();
+      if (!snap.empty) {
+        newCursors[c.col] = snap.docs[snap.docs.length - 1];
+        snap.docs.forEach((doc) => {
+          const data = doc.data();
+          // Para presales, solo las completadas
+          if (c.col === "presales" && !COMPLETED_PRESALE_STATUSES.has(data.status)) {
+            return;
+          }
+          results.push({
+            id: doc.id,
+            ...data,
+            __kind: c.kind,
+            _uid: `${c.kind}_${doc.id}`,
+          });
+        });
+      }
+    } catch (e) {
+      // Un fallo en una colección no bloquea la otra
+      console.error(`ERROR getSalesPage [${c.col}]:`, e);
+    }
+  }
+
+  results.sort(
+    (a, b) =>
+      (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
+  );
+
+  return { items: results, cursors: newCursors };
+}
+
 export async function getActivityFeedPage({ cursors = {}, from, to, limit = 10 }) {
-  try {
-    const results = [];
+  const results = [];
 
-    // Colecciones a consultar: se añaden presales como fuente de actividad
-    const collections = [
-      { col: "sales",              kind: "sale"      },
-      { col: "presales",           kind: "presale"   },
-      { col: "inventoryMovements", kind: "inventory" },
-      { col: "financials",         kind: "financial" },
-    ];
+  const collections = [
+    { col: "sales",              kind: "sale"      },
+    { col: "presales",           kind: "presale"   },
+    { col: "inventoryMovements", kind: "inventory" },
+    { col: "financials",         kind: "financial" },
+  ];
 
-    let newCursors = { ...cursors };
+  let newCursors = { ...cursors };
 
-    for (const c of collections) {
+  for (const c of collections) {
+    try {
       let q = col(c.col).orderBy("createdAt", "desc").limit(limit);
       if (from) q = q.where("createdAt", ">=", toTs(from));
       if (to)   q = q.where("createdAt", "<=", toTs(to));
@@ -463,12 +517,9 @@ export async function getActivityFeedPage({ cursors = {}, from, to, limit = 10 }
         newCursors[c.col] = snap.docs[snap.docs.length - 1];
         snap.docs.forEach((doc) => {
           const data = doc.data();
-
-          // Para presales, solo incluir las completadas en el feed de actividad
           if (c.col === "presales" && !COMPLETED_PRESALE_STATUSES.has(data.status)) {
             return;
           }
-
           results.push({
             id: doc.id,
             ...data,
@@ -477,18 +528,18 @@ export async function getActivityFeedPage({ cursors = {}, from, to, limit = 10 }
           });
         });
       }
+    } catch (e) {
+      // Un fallo en una colección no bloquea las demás
+      console.error(`ERROR getActivityFeedPage [${c.col}]:`, e);
     }
-
-    results.sort(
-      (a, b) =>
-        (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
-    );
-
-    return { items: results.slice(0, limit), cursors: newCursors };
-  } catch (e) {
-    console.error("ERROR getActivityFeedPage:", e);
-    return { items: [], cursors };
   }
+
+  results.sort(
+    (a, b) =>
+      (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
+  );
+
+  return { items: results.slice(0, limit), cursors: newCursors };
 }
 
 // ─── Caché de reporte de clientes ────────────────────────────────────────────

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   getSalesSummaryOptimized,
   getActivityFeedPage,
+  getSalesPage,
   subscribeUsersActivity,
   getSalesByUserInRange,
 } from '../services/reportsService';
@@ -106,4 +107,58 @@ export const useUsersMonitor = (dateFrom, dateTo) => {
   }).sort((a, b) => b.salesTotal - a.salesTotal);
 
   return { usersWithStats, loadingUsers };
+};
+
+/**
+ * Hook dedicado para el panel de ventas.
+ * Usa getSalesPage (solo sales + presales) para evitar que fallos en otras
+ * colecciones (inventoryMovements, financials) oculten las ventas.
+ */
+export const useSalesData = (dateFrom, dateTo) => {
+  const [sales, setSales]         = useState([]);
+  const [cursors, setCursors]     = useState({});
+  const [hasMore, setHasMore]     = useState(true);
+  const [loading, setLoading]     = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const lastRangeRef = useRef(null);
+
+  useEffect(() => {
+    const fromKey  = dateFrom?.getTime?.() ?? null;
+    const toKey    = dateTo?.getTime?.()   ?? null;
+    const rangeKey = `${fromKey}_${toKey}`;
+
+    if (lastRangeRef.current === rangeKey) return;
+    lastRangeRef.current = rangeKey;
+
+    const load = async () => {
+      setLoading(true);
+      setSales([]);
+      setCursors({});
+      setHasMore(true);
+
+      const result = await getSalesPage({ from: dateFrom, to: dateTo, limit: 20 });
+      setSales(result.items);
+      setCursors(result.cursors);
+      setHasMore(result.items.length >= 20);
+      setLoading(false);
+    };
+
+    load();
+  }, [dateFrom, dateTo]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const result = await getSalesPage({ from: dateFrom, to: dateTo, cursors, limit: 20 });
+    if (result.items.length > 0) {
+      setSales((prev) => [...prev, ...result.items]);
+      setCursors(result.cursors);
+      setHasMore(result.items.length >= 20);
+    } else {
+      setHasMore(false);
+    }
+    setLoadingMore(false);
+  }, [loadingMore, hasMore, dateFrom, dateTo, cursors]);
+
+  return { sales, loading, loadingMore, loadMore, hasMore };
 };

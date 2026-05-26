@@ -4,10 +4,22 @@ import OperationItem from '../components/OperationItem';
 import SaleReceiptModal from '../components/SaleReceiptModal';
 import LineChart from "../components/LineChartPRO";
 import salesPanelStyles from "../styles/salesPanelStyles";
+import { useSalesData } from "../hooks/useReportsData";
 
-const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
+const SalesPanel = ({ data, loading: loadingSummary, dateFrom, dateTo }) => {
   const [selectedSale, setSelectedSale] = useState(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
+
+  // Hook dedicado: solo consulta sales + presales, independiente del feed general
+  const {
+    sales,
+    loading: loadingSales,
+    loadingMore,
+    loadMore,
+    hasMore,
+  } = useSalesData(dateFrom, dateTo);
+
+  const loading = loadingSummary || loadingSales;
 
   const handleItemPress = (item) => {
     if (item.__kind === 'sale' || item.__kind === 'presale') {
@@ -20,11 +32,6 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
     setIsModalVisible(false);
     setSelectedSale(null);
   };
-  
-  // Mostrar tanto ventas rápidas como pre-ventas completadas
-  const salesOperations = data.operations?.filter(
-    op => op.__kind === 'sale' || op.__kind === 'presale'
-  );
 
   const renderHeader = () => {
     const summary = data.summary || {};
@@ -35,10 +42,10 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
         avgPerSale: Number(summary.avgPerSale ?? 0),
         timeseries: Array.isArray(summary.timeseries) ? summary.timeseries : [],
     };
-    
+
     const noData = safe.timeseries.length === 0 || isNaN(safe.totalIncome) || isNaN(safe.profit);
 
-    if (loading && !data?.operations?.length) {
+    if (loadingSummary && !sales.length) {
         return (
           <View style={salesPanelStyles.loadingContainer}>
             <View style={salesPanelStyles.skeletonCard} />
@@ -47,10 +54,8 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
           </View>
         );
     }
-      
-    if (noData) {
-        return null; // No mostrar nada si no hay datos
-    }
+
+    if (noData) return null;
 
     return (
       <View style={{padding: 10}}>
@@ -59,12 +64,12 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
     
             <View style={salesPanelStyles.card}>
               <Text style={salesPanelStyles.cardLabel}>Ingresos</Text>
-              <Text style={salesPanelStyles.cardValue}>${safe.totalIncome.toFixed(2)}</Text>
+              <Text style={salesPanelStyles.cardValue}>C${safe.totalIncome.toFixed(2)}</Text>
             </View>
     
             <View style={salesPanelStyles.card}>
               <Text style={salesPanelStyles.cardLabel}>Ganancia</Text>
-              <Text style={salesPanelStyles.cardValue}>${safe.profit.toFixed(2)}</Text>
+              <Text style={salesPanelStyles.cardValue}>C${safe.profit.toFixed(2)}</Text>
             </View>
     
           </View>
@@ -79,38 +84,49 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
     
             <View style={salesPanelStyles.card}>
               <Text style={salesPanelStyles.cardLabel}>Promedio</Text>
-              <Text style={salesPanelStyles.cardValue}>${safe.avgPerSale.toFixed(2)}</Text>
+              <Text style={salesPanelStyles.cardValue}>C${safe.avgPerSale.toFixed(2)}</Text>
             </View>
     
           </View>
     
           {/* ===================== GRÁFICA ===================== */}
-          <View style={salesPanelStyles.chartBox}>
-            <Text style={salesPanelStyles.chartTitle}>Tendencia de ventas</Text>
-            <LineChart data={safe.timeseries} />
-          </View>
+          {safe.timeseries.length > 0 && (
+            <View style={salesPanelStyles.chartBox}>
+              <Text style={salesPanelStyles.chartTitle}>Tendencia de ventas</Text>
+              <LineChart data={safe.timeseries} />
+            </View>
+          )}
           <Text style={styles.listHeader}>Registro de Ventas</Text>
       </View>
     );
   };
 
-  if (loading && !salesOperations?.length) {
-    return <ActivityIndicator style={{ marginTop: 20 }} size="large" color="#0000ff" />;
+  // Estado de carga inicial
+  if (loadingSales && !sales.length) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Cargando ventas...</Text>
+      </View>
+    );
   }
-  
-  if (!salesOperations?.length) {
+
+  if (!sales.length) {
     return (
         <View style={{padding: 10}}>
             {renderHeader()}
-            <Text style={styles.emptyText}>No hay ventas en este rango.</Text>
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No hay ventas en este rango.</Text>
+              <Text style={styles.emptySubText}>Prueba seleccionando otro período en el filtro.</Text>
+            </View>
         </View>
-    )
+    );
   }
 
   return (
     <View style={{flex: 1}}>
         <FlatList
-            data={salesOperations}
+            data={sales}
             ListHeaderComponent={renderHeader}
             renderItem={({ item }) => (
                 <View style={{paddingHorizontal: 10}}>
@@ -123,7 +139,11 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
             keyExtractor={item => item._uid}
             onEndReached={() => hasMore && loadMore ? loadMore() : null}
             onEndReachedThreshold={0.5}
-            ListFooterComponent={loading && hasMore ? <ActivityIndicator style={{ marginVertical: 20 }} /> : null}
+            ListFooterComponent={
+              loadingMore
+                ? <ActivityIndicator style={{ marginVertical: 20 }} color="#007AFF" />
+                : null
+            }
         />
         <SaleReceiptModal
             sale={selectedSale}
@@ -135,11 +155,33 @@ const SalesPanel = ({ data, loading, loadMore, hasMore }) => {
 };
 
 const styles = StyleSheet.create({
+    center: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingTop: 60,
+        gap: 10,
+    },
+    loadingText: {
+        fontSize: 14,
+        color: '#9CA3AF',
+    },
+    emptyContainer: {
+        alignItems: 'center',
+        paddingTop: 40,
+        paddingHorizontal: 24,
+    },
     emptyText: {
         textAlign: 'center',
-        padding: 20,
-        color: '#777',
-        marginTop: 10,
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#374151',
+        marginBottom: 6,
+    },
+    emptySubText: {
+        textAlign: 'center',
+        fontSize: 13,
+        color: '#9CA3AF',
     },
     listHeader: {
         fontSize: 18,

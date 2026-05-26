@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "./styles/printerStyles";
+import globalStyles from "../../../styles/globalStyles";
 import {
   savePrinter,
   loadPrinter,
@@ -27,7 +28,7 @@ import { getBondedDevices } from "../../../helpers/getBondedDevices";
 import EditPrinterNameModal from "./EditPrinterNameModal";
 import PrinterTestModal from "./PrinterTestModal"; // Use simpler modal
 
-export default function PrintersScreen() {
+export default function PrintersScreen({ navigation }) {
   const [bondedDevices, setBondedDevices] = useState([]);
   const [savedPrinters, setSavedPrinters] = useState([]);
   const [selectedPrinter, setSelectedPrinter] = useState(null);
@@ -187,10 +188,13 @@ export default function PrintersScreen() {
   return (
     <View style={styles.container}>
 
-      <View style={styles.rowBetween}>
-        <Text style={styles.header}>Impresoras</Text>
+      <View style={globalStyles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Icon name="chevron-back" size={26} color="#fff" />
+        </TouchableOpacity>
+        <Text style={globalStyles.title}>Impresoras</Text>
         <TouchableOpacity onPress={() => { scan(); refreshSavedPrinters(); }}>
-          <Icon name="refresh" size={24} color="#007AFF" />
+          <Icon name="refresh" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
 

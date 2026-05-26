@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import auth from '@react-native-firebase/auth';
 import { useNavigation } from '@react-navigation/native';
-import { navigationRef } from 'C:/ChickenInventoryApp/App';
+import { navigationRef } from '../../../../../../App';
 import styles from '../styles/DashboardHeaderStyles';
 import { useRoute } from '../../../context/RouteContext';
 
