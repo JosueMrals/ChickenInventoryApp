@@ -86,3 +86,4 @@ ios/**/GoogleService-Info.plist
 .env.*
 !.env.example
 android/gradle.local.properties
+android/.github

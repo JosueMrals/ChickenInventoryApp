@@ -376,12 +376,19 @@ export const convertPreSaleToSale = async (preSale, paymentDetails) => {
   return saleRef.id;
 };
 
-export const updateAggregateProductStatus = async (productName, newStatus, fromStatus = null) => {
+export const updateAggregateProductStatus = async (productName, newStatus, fromStatus = null, filters = {}) => {
   const user = auth().currentUser;
   const batch = firestore().batch();
+  const normalize = (value) => String(value || '').trim().toLowerCase();
+  const targetName = normalize(productName);
+  const targetCategory = normalize(filters?.productCategory);
 
   const activeStatuses = ['pending', 'credit_pending', 'credit_preparing', 'credit_ready_for_delivery', 'preparing', 'ready_for_delivery'];
-  const snapshot = await presalesCollection.where('status', 'in', activeStatuses).get();
+  let query = presalesCollection.where('status', 'in', activeStatuses);
+  if (filters?.routeId) {
+    query = query.where('routeId', '==', filters.routeId);
+  }
+  const snapshot = await query.get();
 
   // Estados terminales que NUNCA deben ser regresados automáticamente
   const TERMINAL_STATUSES = new Set(['paid', 'cancelled', 'dispatched', 'delivered']);
@@ -398,9 +405,11 @@ export const updateAggregateProductStatus = async (productName, newStatus, fromS
 
     const updateItemStatus = (item) => {
       const currentStatus = item.status || 'pending';
-      const name = item.productName || item.name;
+      const name = item.productName || item.name || item.product?.name;
+      const category = item.category || item.productCategory || item.categoryName || item.product?.category;
 
-      if (name !== productName) return false;
+      if (normalize(name) !== targetName) return false;
+      if (targetCategory && normalize(category) !== targetCategory) return false;
       if (fromStatus && currentStatus !== fromStatus) return false;
       if (currentStatus === newStatus) return false;
 

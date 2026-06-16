@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { View, Text, Image, StyleSheet } from "react-native";
+import { resolveUserDisplayName } from "../../../utils/userUtils";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const fmt = (val) => `C$${(Number(val) || 0).toFixed(2)}`;
@@ -11,13 +12,26 @@ function getCustomerName(sale) {
   return (sale?.customerName || "VENTA RÁPIDA").toUpperCase();
 }
 
-function getOperator(sale) {
+/** Vendedor: quien generó la pre-venta originalmente */
+function getSeller(sale) {
   return (
+    sale?.preSaleCreatedBy ||
+    sale?.originalCreatedBy ||
     sale?.cashierName ||
     sale?.operatorName ||
     sale?.createdBy ||
     sale?.userEmail ||
     sale?.cashierEmail ||
+    null
+  );
+}
+
+/** Entregador: quien realizó la entrega/cobro */
+function getDeliverer(sale) {
+  return (
+    sale?.deliveredBy ||
+    sale?.collectedBy ||
+    sale?.paidBy ||
     null
   );
 }
@@ -41,7 +55,7 @@ const Separator = ({ dashed = false }) => (
 );
 
 // ── Componente principal ──────────────────────────────────────────────────────
-export default function SaleReceipt({ sale, bonuses = [], ticketSettings }) {
+export default function SaleReceipt({ sale, bonuses = [], ticketSettings, usersById = {} }) {
   if (!sale) return null;
 
   const ticketHeaderUri = ticketSettings?.headerImageUri
@@ -96,7 +110,8 @@ export default function SaleReceipt({ sale, bonuses = [], ticketSettings }) {
   const amountPaid = Number(sale?.amountPaid || 0);
   const change = Number(sale?.change || 0);
 
-  const operator = getOperator(sale);
+  const seller = sale?.sellerDisplayName || resolveUserDisplayName(getSeller(sale), usersById);
+  const deliverer = sale?.delivererDisplayName || resolveUserDisplayName(getDeliverer(sale), usersById);
   const receiptNumber =
     sale.receiptNumber || sale.saleNumber || sale.preSaleNumber || "N/A";
 
@@ -127,15 +142,15 @@ export default function SaleReceipt({ sale, bonuses = [], ticketSettings }) {
         <Text style={styles.metaValue}>{getCustomerName(sale)}</Text>
       </View>
       <View style={styles.metaRow}>
+        <Text style={styles.metaLabel}>DIRECCIÓN:</Text>
+        <Text style={styles.metaValue}>
+          {(sale?.customer?.address || sale?.customerAddress || '').toUpperCase() || 'N/A'}
+        </Text>
+      </View>
+      <View style={styles.metaRow}>
         <Text style={styles.metaLabel}>FECHA:</Text>
         <Text style={styles.metaValue}>{formattedDateTime}</Text>
       </View>
-      {operator && (
-        <View style={styles.metaRow}>
-          <Text style={styles.metaLabel}>VENDEDOR:</Text>
-          <Text style={styles.metaValue}>{String(operator).toUpperCase()}</Text>
-        </View>
-      )}
 
       <Separator dashed />
 
@@ -215,6 +230,24 @@ export default function SaleReceipt({ sale, bonuses = [], ticketSettings }) {
       )}
 
       <Separator dashed />
+
+      {/* ── Vendedor / Entregador — solo en pie ──────────────────────── */}
+      {(seller || deliverer) && (
+        <View style={styles.staffRow}>
+          {seller ? (
+            <View style={styles.staffItem}>
+              <Text style={styles.staffLabel}>VENDEDOR</Text>
+              <Text style={styles.staffValue}>{seller.toUpperCase()}</Text>
+            </View>
+          ) : null}
+          {deliverer ? (
+            <View style={[styles.staffItem, seller ? styles.staffRight : null]}>
+              <Text style={styles.staffLabel}>ENTREGADOR</Text>
+              <Text style={styles.staffValue}>{deliverer.toUpperCase()}</Text>
+            </View>
+          ) : null}
+        </View>
+      )}
 
       {/* ── Pie ──────────────────────────────────────────────────────── */}
       <Text style={styles.footer}>GRACIAS POR SU COMPRA</Text>
@@ -378,6 +411,37 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
     letterSpacing: 1,
+  },
+
+  // Staff (vendedor / entregador) — solo en pie
+  staffRow: {
+    flexDirection: "row",
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+  },
+  staffItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  staffRight: {
+    borderLeftWidth: 1,
+    borderLeftColor: "#E5E7EB",
+  },
+  staffLabel: {
+    fontFamily: "monospace",
+    fontSize: 9,
+    color: "#9CA3AF",
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  staffValue: {
+    fontFamily: "monospace",
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#374151",
+    textAlign: "center",
   },
 });
 

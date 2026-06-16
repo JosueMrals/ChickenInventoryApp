@@ -23,19 +23,27 @@ function resolveBonusLinkKeys(bonus) {
   return Array.from(new Set(keys));
 }
 
-/** Resuelve el nombre/email del vendedor (quien creó la pre-venta) */
+/** Resuelve el nombre/email del vendedor (quien creó la pre-venta originalmente).
+ *  Prefiere el campo pre-resuelto sellerDisplayName si está disponible. */
 function getSeller(sale) {
-  return sale?.originalCreatedBy || null;
+  return (
+    sale?.sellerDisplayName ||
+    sale?.preSaleCreatedBy ||
+    sale?.originalCreatedBy ||
+    sale?.cashierName ||
+    sale?.operatorName ||
+    null
+  );
 }
 
-/** Resuelve el nombre/email del entregador/cobrador */
+/** Resuelve el nombre/email del entregador/cobrador.
+ *  Prefiere el campo pre-resuelto delivererDisplayName si está disponible. */
 function getOperator(sale) {
   return (
+    sale?.delivererDisplayName ||
     sale?.deliveredBy ||
     sale?.collectedBy ||
     sale?.paidBy ||
-    sale?.createdBy ||
-    sale?.cashierEmail ||
     null
   );
 }
@@ -212,6 +220,11 @@ const DeliveryTicket = ({ sale, settings }) => {
         {sale.customerName || 'Cliente General'}
       </Text>
 
+      <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Dirección:</Text>
+      <Text style={[styles.value, { fontFamily, fontSize: baseFontSize }]}>
+        {sale.customerAddress || (sale.customer?.address) || 'N/A'}
+      </Text>
+
       <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Fecha Pago:</Text>
       <Text style={[styles.value, { fontFamily, fontSize: baseFontSize + 2 }]}>
         {getFormattedDate(sale.fechaPago || sale.createdAt)}
@@ -224,30 +237,6 @@ const DeliveryTicket = ({ sale, settings }) => {
             {getPaymentLabel(sale)}
           </Text>
         </View>
-      </View>
-
-      {/* Vendedor y Entregador */}
-      <View style={styles.infoRow}>
-        {seller ? (
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Vendedor:</Text>
-            <Text
-              style={[styles.operatorValue, { fontFamily, fontSize: baseFontSize, color: '#16A34A' }]}
-              numberOfLines={1}>
-              {seller}
-            </Text>
-          </View>
-        ) : null}
-        {operator ? (
-          <View style={{ flex: 1, marginLeft: seller ? 12 : 0 }}>
-            <Text style={[styles.label, { fontFamily, fontSize: baseFontSize - 2 }]}>Entregador:</Text>
-            <Text
-              style={[styles.operatorValue, { fontFamily, fontSize: baseFontSize }]}
-              numberOfLines={1}>
-              {operator}
-            </Text>
-          </View>
-        ) : null}
       </View>
 
       {/* Banner bonificaciones */}
@@ -393,15 +382,31 @@ const DeliveryTicket = ({ sale, settings }) => {
       <Text style={[styles.footer, { fontFamily, fontSize: baseFontSize - 2 }]}>
         ¡Gracias por su compra!
       </Text>
-      {seller && (
-        <Text style={[styles.footerOperator, { fontFamily, fontSize: baseFontSize - 3 }]}>
-          Vendedor: {seller}
-        </Text>
-      )}
-      {operator && (
-        <Text style={[styles.footerOperator, { fontFamily, fontSize: baseFontSize - 3 }]}>
-          Entregador: {operator}
-        </Text>
+
+      {/* Vendedor y Entregador — solo en el pie del ticket */}
+      {(seller || operator) && (
+        <View style={styles.footerStaffRow}>
+          {seller ? (
+            <View style={styles.footerStaffItem}>
+              <Text style={[styles.footerStaffLabel, { fontFamily, fontSize: baseFontSize - 3 }]}>
+                Vendedor
+              </Text>
+              <Text style={[styles.footerStaffValue, { fontFamily, fontSize: baseFontSize - 2 }]}>
+                {seller}
+              </Text>
+            </View>
+          ) : null}
+          {operator ? (
+            <View style={[styles.footerStaffItem, seller ? styles.footerStaffRight : null]}>
+              <Text style={[styles.footerStaffLabel, { fontFamily, fontSize: baseFontSize - 3 }]}>
+                Entregador
+              </Text>
+              <Text style={[styles.footerStaffValue, { fontFamily, fontSize: baseFontSize - 2 }]}>
+                {operator}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       )}
     </View>
   );
@@ -506,6 +511,34 @@ const styles = StyleSheet.create({
   // Footer
   footer: { marginTop: 16, textAlign: 'center', fontSize: 12, color: '#6B7280', fontStyle: 'italic' },
   footerOperator: { textAlign: 'center', marginTop: 3, color: '#9CA3AF' },
+  footerStaffRow: {
+    flexDirection: 'row',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  footerStaffItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  footerStaffRight: {
+    borderLeftWidth: 1,
+    borderLeftColor: '#F1F5F9',
+  },
+  footerStaffLabel: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  footerStaffValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#374151',
+    textAlign: 'center',
+  },
 });
 
 export default DeliveryTicket;

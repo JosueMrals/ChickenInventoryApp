@@ -59,8 +59,8 @@ export const groupItemsByProduct = (preSales, filterStatus = null, productCatego
       // Si se especificó un filtro de estado y no coincide, saltamos este item
       if (filterStatus && itemStatus !== filterStatus) return;
 
-      // Normalizar nombre
-      const productName = item.name || item.productName || item.product?.name || 'Item Desconocido';
+      // Normalizar nombre (misma prioridad que updateAggregateProductStatus en preSaleService)
+      const productName = item.productName || item.name || item.product?.name || 'Item Desconocido';
       const categoryName = resolveCategoryName(item, productCategoryById);
       const isBonus = !!(item.isBonus || (item.unitPrice === 0 && item.total === 0));
       const productKey = `${categoryName}::${productName}`;

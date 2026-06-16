@@ -12,11 +12,15 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import DeliveryTicket from '../components/DeliveryTicket';
 import ViewShot from 'react-native-view-shot';
-import { printPngImageFromBase64 } from '../../settings/printers/services/printerService';
+import {
+  printPngImageFromBase64,
+  printDeliveryTicket,
+} from '../../settings/printers/services/printerService';
 import Share from 'react-native-share';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 import { resolveCustomerName } from '../../../utils/customerUtils';
+import { buildUsersByEmailMap, resolveUserDisplayName } from '../../../utils/userUtils';
 import {
   getTicketCustomizationSettings,
   DEFAULT_TICKET_SETTINGS,
@@ -28,6 +32,7 @@ export default function DeliveryDoneScreen({ navigation, route }) {
   const [printing, setPrinting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [customersById, setCustomersById] = useState({});
+  const [usersByEmail, setUsersByEmail] = useState({});
   const [ticketSettings, setTicketSettings] = useState(DEFAULT_TICKET_SETTINGS);
   const [bonusMovements, setBonusMovements] = useState([]);
 
@@ -38,15 +43,10 @@ export default function DeliveryDoneScreen({ navigation, route }) {
   const embeddedBonuses = routeSale?.bonusesAwarded || routeSale?.bonuses || [];
   const allBonuses = bonusMovements.length > 0 ? bonusMovements : embeddedBonuses;
 
-  // Sale enriquecida con fallback de operador
-  const sale = {
-    ...routeSale,
-    createdBy:
-      routeSale?.createdBy ||
-      routeSale?.deliveredBy ||
-      currentUser?.email ||
-      null,
-  };
+  // Usamos routeSale directamente sin mezclar deliveredBy en createdBy.
+  // El override previo causaba que createdBy contuviera el email del entregador,
+  // lo que hacía que el entregador apareciera como vendedor.
+  const sale = { ...routeSale };
 
   useEffect(() => {
     // Escuchar clientes
@@ -65,6 +65,23 @@ export default function DeliveryDoneScreen({ navigation, route }) {
         (err) => {
           console.error('[DeliveryDone] customers:', err);
           setCustomersById({});
+        },
+      );
+
+    // Escuchar usuarios (para resolver nombres de vendedor/entregador)
+    const unsubUsers = firestore()
+      .collection('users')
+      .onSnapshot(
+        (snap) => {
+          if (!snap) { setUsersByEmail({}); return; }
+          const map = buildUsersByEmailMap(
+            snap.docs.map((d) => ({ id: d.id, ...d.data() })),
+          );
+          setUsersByEmail(map);
+        },
+        (err) => {
+          console.error('[DeliveryDone] users:', err);
+          setUsersByEmail({});
         },
       );
 
@@ -88,14 +105,61 @@ export default function DeliveryDoneScreen({ navigation, route }) {
 
     return () => {
       unsubCustomers();
+      unsubUsers();
       unsubBonuses();
       mounted = false;
     };
   }, [routeSale?.id]);
 
   const customerName = resolveCustomerName(sale, customersById, 'Cliente General');
-  // Incluir bonuses combinados en ticketSale para que DeliveryTicket los muestre
-  const ticketSale = { ...sale, customerName, bonuses: allBonuses };
+  // Extraer dirección del cliente desde el objeto embebido o desde customersById
+  const customerId = sale.customerId || sale.customer?.id;
+  const customerAddress =
+    customersById[customerId]?.address ||
+    sale.customer?.address ||
+    sale.customerAddress ||
+    null;
+
+  // ── Vendedor ──────────────────────────────────────────────────────────────
+  // En el doc de pre-venta, `createdBy` = email del vendedor original.
+  // Cuando el Cloud Function crea el doc de venta, mapea ese campo a `originalCreatedBy`.
+  // Aquí recibimos el objeto pre-venta directamente (DeliveryPaymentScreen pasa delivery,
+  // no espera la respuesta de la cloud function), así que `originalCreatedBy` puede no existir.
+  // Por eso mapeamos explícitamente: sale.createdBy → originalCreatedBy para que
+  // getSeller() en DeliveryTicket y printerService lo encuentre.
+  const resolvedSeller =
+    sale.originalCreatedBy ||
+    sale.preSaleCreatedBy ||
+    sale.cashierName ||
+    sale.operatorName ||
+    sale.createdBy ||         // en doc pre-venta, createdBy = el vendedor
+    null;
+
+  // ── Entregador ────────────────────────────────────────────────────────────
+  // deliveredBy con fallback al usuario actual.
+  // Se mantiene separado de createdBy para no confundir roles.
+  const resolvedDeliveredBy =
+    sale.deliveredBy ||
+    sale.collectedBy ||
+    sale.paidBy ||
+    currentUser?.email ||
+    null;
+
+  // ── Nombres para mostrar (resueltos desde la colección `users`) ───────────
+  const sellerDisplayName = resolveUserDisplayName(resolvedSeller, usersByEmail);
+  const delivererDisplayName = resolveUserDisplayName(resolvedDeliveredBy, usersByEmail);
+
+  // Incluir bonuses combinados, dirección, vendedor y entregador en ticketSale
+  const ticketSale = {
+    ...sale,
+    customerName,
+    customerAddress,
+    bonuses: allBonuses,
+    originalCreatedBy: resolvedSeller,       // vendedor (email) — usado por getSeller()
+    deliveredBy: resolvedDeliveredBy,        // entregador (email) — usado por getOperator()
+    sellerDisplayName,                       // nombre completo del vendedor
+    delivererDisplayName,                    // nombre completo del entregador
+  };
 
   const handleFinish = () => navigation.popToTop();
 
@@ -104,14 +168,16 @@ export default function DeliveryDoneScreen({ navigation, route }) {
     try {
       setSharing(true);
       const uri = await viewShotRef.current.capture();
+      // ViewShot con result:'tmpfile' devuelve un path sin prefijo en algunos casos
+      const fileUri = uri.startsWith('file://') || uri.startsWith('content://') ? uri : `file://${uri}`;
       await Share.open({
         title: `Ticket Entrega #${(routeSale?.id || '').substring(0, 6)}`,
-        url: uri,
+        url: fileUri,
         type: 'image/png',
         failOnCancel: false,
       });
     } catch (error) {
-      if (error?.message?.includes('User did not share')) return;
+      if (error?.message?.includes('User did not share') || error?.message?.includes('userDidNotShare')) return;
       console.error('[DeliveryDone] share:', error);
       Alert.alert('Error', 'No se pudo compartir el ticket.');
     } finally {
@@ -119,13 +185,12 @@ export default function DeliveryDoneScreen({ navigation, route }) {
     }
   };
 
-  // Impresión por imagen (igual que PreSaleDoneScreen)
+  // Impresión por texto nativo (igual que PreSaleDoneScreen — no usa captura de pantalla)
   const handlePrint = async () => {
     if (printing) return;
     try {
       setPrinting(true);
-      const base64 = await viewShotRef.current.capture();
-      await printPngImageFromBase64(base64, { threshold: 170, mode: 'escstar' });
+      await printDeliveryTicket(ticketSale);
     } catch (error) {
       console.error('[DeliveryDone] print:', error);
       Alert.alert(
@@ -156,7 +221,7 @@ export default function DeliveryDoneScreen({ navigation, route }) {
         showsVerticalScrollIndicator={false}>
         <ViewShot
           ref={viewShotRef}
-          options={{ format: 'png', quality: 1, result: 'base64' }}
+          options={{ format: 'png', quality: 1, result: 'tmpfile' }}
           collapsable={false}
           style={[styles.ticketShot, { width: ticketWidth }]}>
           <DeliveryTicket sale={ticketSale} settings={ticketSettings} />

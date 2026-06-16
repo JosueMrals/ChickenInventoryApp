@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,19 @@ import DashboardPanel from '../components/DashboardPanel';
 import PreSaleItem from '../components/PreSaleItem';
 import { useRoute } from '../../../context/RouteContext';
 import { resolveCustomerName } from '../../../utils/customerUtils';
-import { Swipeable } from 'react-native-gesture-handler';
+import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import { updateAggregateProductStatus } from '../../../services/preSaleService';
+
+// ── Habilitar caché offline de Firestore para carga inmediata al abrir la pantalla
+// (persistencia habilitada por defecto en React Native Firebase, configuramos tamaño)
+try {
+  firestore().settings({
+    cacheSizeBytes: firestore.CACHE_SIZE_UNLIMITED,
+    persistence: true,
+  });
+} catch (_) {
+  // Ignorar si ya fue configurado (solo puede llamarse una vez)
+}
 
 export default function WarehouseDashboardScreen({ navigation }) {
   const [preSales, setPreSales] = useState([]);
@@ -154,6 +166,57 @@ export default function WarehouseDashboardScreen({ navigation }) {
       navigation.navigate('WarehouseOrderDetail', { presale });
   };
 
+  /**
+   * handleProductStatusChange — Actualización optimista del estado de un producto.
+   *
+   * 1. Actualiza el estado local (setPreSales) inmediatamente → UI responde al instante.
+   * 2. Dispara la escritura en Firestore en segundo plano → garantiza persistencia.
+   * 3. Si Firestore falla, el próximo onSnapshot reconcilia el estado real automáticamente.
+   */
+  const handleProductStatusChange = useCallback((productName, fromStatus, toStatus) => {
+    const selectedRouteId = selectedRoute?.id || null;
+    // Paso 1: Actualización optimista — reflejo inmediato en la UI
+    setPreSales(prev => prev.map(sale => {
+      if (selectedRouteId && sale.routeId !== selectedRouteId) return sale;
+
+      const updateItem = (item) => {
+        const name = item.productName || item.name;
+        const itemStatus = item.status || 'pending';
+        if (name === productName && itemStatus === fromStatus) {
+          return { ...item, status: toStatus };
+        }
+        return item;
+      };
+
+      const items   = (sale.items   || []).map(updateItem);
+      const bonuses = (sale.bonuses || []).map(updateItem);
+
+      // Recalcular estado de la orden para reflejar progreso correcto
+      const allItems = [...items, ...bonuses];
+      let nextOrderStatus = sale.status;
+      if (allItems.length > 0) {
+        const allReady   = allItems.every(i => i.status === 'ready');
+        const allPending = allItems.every(i => !i.status || i.status === 'pending');
+        if (allReady) {
+          nextOrderStatus = sale.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery';
+        } else if (allPending) {
+          const canRegress = sale.status === 'preparing' || sale.status === 'credit_preparing';
+          if (canRegress) nextOrderStatus = sale.paymentMethod === 'credit' ? 'credit_pending' : 'pending';
+        } else {
+          nextOrderStatus = sale.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing';
+        }
+      }
+
+      return { ...sale, items, bonuses, status: nextOrderStatus };
+    }));
+
+    // Paso 2: Sincronización con Firestore en segundo plano
+    updateAggregateProductStatus(productName, toStatus, fromStatus, {
+      routeId: selectedRouteId,
+    })
+      .catch(err => console.error('[Warehouse] Error sincronizando estado de producto:', err));
+  }, [selectedRoute?.id]);
+
   const handleHandoverPress = () => {
       // Filter orders that are ready_for_delivery OR preparing (to allow forced partial handover with warning)
       const accessibleOrders = preSales.filter(s => ['ready_for_delivery', 'credit_ready_for_delivery', 'preparing', 'credit_preparing'].includes(s.status));
@@ -167,11 +230,7 @@ export default function WarehouseDashboardScreen({ navigation }) {
   };
 
   const renderSwipeableItem = ({ item }) => {
-      const renderRightActions = (progress, dragX) => {
-          const trans = dragX.interpolate({
-              inputRange: [0, 50, 100, 101],
-              outputRange: [-20, 0, 0, 1],
-          });
+      const renderRightActions = () => {
 
           let nextStatus = '';
           let label = '';
@@ -203,11 +262,7 @@ export default function WarehouseDashboardScreen({ navigation }) {
           );
       };
 
-      const renderLeftActions = (progress, dragX) => {
-          const trans = dragX.interpolate({
-              inputRange: [0, 50, 100, 101],
-              outputRange: [-20, 0, 0, 1],
-          });
+      const renderLeftActions = () => {
 
           let prevStatus = '';
           let label = '';
@@ -240,19 +295,19 @@ export default function WarehouseDashboardScreen({ navigation }) {
       };
 
       return (
-          <Swipeable
-              renderRightActions={renderRightActions}
-              renderLeftActions={renderLeftActions}
-              onSwipeableRightOpen={() => {
-                  // Opcional: Auto-trigger al deslizar completo
-                  if (item.status === 'pending' || item.status === 'credit_pending') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing');
-                  else if (item.status === 'preparing' || item.status === 'credit_preparing') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery');
-              }}
-              onSwipeableLeftOpen={() => {
-                  if (item.status === 'preparing' || item.status === 'credit_preparing') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_pending' : 'pending');
-                  else if (item.status === 'ready_for_delivery' || item.status === 'credit_ready_for_delivery') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing');
-              }}
-          >
+           <Swipeable
+               renderRightActions={renderRightActions}
+               renderLeftActions={renderLeftActions}
+               onSwipeableOpen={(direction) => {
+                   if (direction === 'right') {
+                       if (item.status === 'pending' || item.status === 'credit_pending') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing');
+                       else if (item.status === 'preparing' || item.status === 'credit_preparing') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_ready_for_delivery' : 'ready_for_delivery');
+                   } else if (direction === 'left') {
+                       if (item.status === 'preparing' || item.status === 'credit_preparing') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_pending' : 'pending');
+                       else if (item.status === 'ready_for_delivery' || item.status === 'credit_ready_for_delivery') handleUpdateStatus(item.id, item.paymentMethod === 'credit' ? 'credit_preparing' : 'preparing');
+                   }
+               }}
+           >
               <PreSaleItem
                 item={item}
                 onSelect={handleSelectPreSale}
@@ -334,25 +389,18 @@ export default function WarehouseDashboardScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      {/* Ambas vistas siempre montadas; se ocultan con display:'none' para evitar re-montaje
+          y mantener los listeners de Firestore activos → cambio de pestaña instantáneo */}
       <View style={styles.contentContainer}>
-        {activeTab === 'dashboard' ? (
-          <>
-            <View style={styles.delivererStats}>
-{/*               <View style={styles.statCard}> */}
-{/*                 <Text style={styles.statLabel}>Cobrado hoy</Text> */}
-{/*                 <Text style={styles.statValue}>${todayPaidTotal.toFixed(2)}</Text> */}
-{/*               </View> */}
-{/*               <View style={styles.statCard}> */}
-{/*                 <Text style={styles.statLabel}>Entregas hoy</Text> */}
-{/*                 <Text style={styles.statValue}>{todayAssignedCount}</Text> */}
-{/*               </View> */}
-            </View>
-            <DashboardPanel
-              preSales={preSales}
-              onHandoverPress={handleHandoverPress}
-            />
-          </>
-        ) : (
+        <View style={{ flex: 1, display: activeTab === 'dashboard' ? 'flex' : 'none' }}>
+          <DashboardPanel
+            preSales={preSales}
+            onHandoverPress={handleHandoverPress}
+            onStatusChange={handleProductStatusChange}
+          />
+        </View>
+
+        <View style={{ flex: 1, display: activeTab === 'list' ? 'flex' : 'none' }}>
           <FlatList
             data={preSales}
             keyExtractor={item => item.id}
@@ -366,7 +414,7 @@ export default function WarehouseDashboardScreen({ navigation }) {
             }
             contentContainerStyle={{ paddingBottom: 20 }}
           />
-        )}
+        </View>
       </View>
     </View>
   );

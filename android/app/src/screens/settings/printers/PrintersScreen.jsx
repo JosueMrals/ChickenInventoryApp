@@ -186,7 +186,7 @@ export default function PrintersScreen({ navigation }) {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={globalStyles.container}>
 
       <View style={globalStyles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>

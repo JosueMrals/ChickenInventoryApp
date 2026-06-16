@@ -141,7 +141,14 @@ export function build58mmReceipt(sale, layout = {}) {
   text += "       TICKET DE VENTA\n";
   text += line;
 
-  text += `Cliente: ${sanitize(sale.customerName || "Genérico")}\n`;
+  const customerName58mm = sanitize(sale.customerName || "Generico");
+  buildWrappedLabelLines("Cliente", customerName58mm || "Generico", maxChars).forEach((lineText) => {
+    text += `${lineText}\n`;
+  });
+  const address58mm = sanitize(sale.customer?.address || sale.customerAddress || "");
+  buildWrappedLabelLines("Direccion", address58mm || "N/A", maxChars).forEach((lineText) => {
+    text += `${lineText}\n`;
+  });
   text += `Usuario: ${sanitize(sale.userName || "---")}\n`;
   text += `Fecha: ${new Date(sale.date).toLocaleString()}\n`;
   text += line;
@@ -159,7 +166,6 @@ export function build58mmReceipt(sale, layout = {}) {
   text += line;
 
   text += `Subtotal:  C$${(sale.subtotal ?? 0).toFixed(2)}\n`;
-  text += `Descuento: C$${(sale.discountAmount ?? 0).toFixed(2)}\n`;
   text += `TOTAL:     C$${(sale.total ?? 0).toFixed(2)}\n`;
   if (sale.paidAmount !== undefined)
     text += `Pagado:    C$${(sale.paidAmount ?? 0).toFixed(2)}\n`;
@@ -226,6 +232,7 @@ export async function printPreSaleDoneReceipt(sale, bonuses = []) {
   const normalizedSale = {
     ...sale,
     customerName,
+    customerAddress: sale?.customer?.address || sale?.customerAddress || null,
     userName,
     date: sale?.createdAt,          // getFormattedDate soporta Firestore Timestamp
     bonusesAwarded: allBonuses,
@@ -342,10 +349,19 @@ function buildDeliveryReceiptText(sale, layout = {}) {
   text += receiptRef ? `TICKET #${receiptRef}\n` : `PRE-VENTA #${shortId}\n`;
   text += SEP + "\n";
 
-  // Operador: entregador > cobrador > createdBy > email
+  // Entregador: quien realizó la entrega/cobro
+  // Usa el nombre resuelto si está disponible, fallback al email
   const operator =
-    sale.deliveredBy || sale.collectedBy || sale.paidBy ||
-    sale.createdBy || sale.cashierEmail || null;
+    sale.delivererDisplayName ||
+    sale.deliveredBy || sale.collectedBy || sale.paidBy || null;
+
+  // Vendedor: quien generó la pre-venta originalmente.
+  // Usa el nombre resuelto si está disponible, fallback al email/campo original.
+  const seller =
+    sale.sellerDisplayName ||
+    sale.originalCreatedBy || sale.preSaleCreatedBy ||
+    sale.cashierName || sale.operatorName ||
+    sale.createdBy || null;
 
   const isCredit =
     sale.paymentMethod === "credit" ||
@@ -361,12 +377,18 @@ function buildDeliveryReceiptText(sale, layout = {}) {
         sale.paymentMethod ||
         "Contado");
 
-  text += `Cliente:    ${sanitize(sale.customerName || "Cliente General")}\n`;
+  const customerName = sanitize(sale.customerName || "Cliente General");
+  buildWrappedLabelLines("Cliente", customerName || "Cliente General", maxChars).forEach((lineText) => {
+    text += `${lineText}\n`;
+  });
+  const deliveryAddress = sanitize(
+    sale.customer?.address || sale.customerAddress || ""
+  );
+  buildWrappedLabelLines("Direccion", deliveryAddress || "N/A", maxChars).forEach((lineText) => {
+    text += `${lineText}\n`;
+  });
   text += `Fecha:      ${getFormattedDate(sale.fechaPago || sale.date || sale.createdAt)}\n`;
   text += `Pago:       ${sanitize(paymentLabel)}\n`;
-  if (operator) {
-    text += `Entregador: ${sanitize(operator)}\n`;
-  }
   text += SEP + "\n";
 
   // ── Ítems con descuentos compactos ───────────────────────────────────────
@@ -404,22 +426,6 @@ function buildDeliveryReceiptText(sale, layout = {}) {
     const detailLine = `${qty} x C$${unitPrice.toFixed(2)}`;
     text += `  ${detailLine}\n`;
 
-    // Descuento por ítem (compacto)
-    const manualDisc = Number(item.discount || 0);
-    const autoDisc = Number(item.autoDiscountTotal || 0);
-    const totalSaving = manualDisc + autoDisc;
-    if (totalSaving > 0) {
-      const src = String(item.pricingSource || "").toLowerCase();
-      const tag =
-        src === "category"
-          ? "Cat"
-          : src === "wholesale"
-          ? "Mayor"
-          : src === "customer"
-          ? "Cliente"
-          : "Desc";
-      text += `  [${tag}] Ahorro: -C$${totalSaving.toFixed(2)}\n`;
-    }
 
     // Bonos vinculados a este ítem
     const itemKey = item.id || item.productId || item.product?.id || "";
@@ -458,57 +464,18 @@ function buildDeliveryReceiptText(sale, layout = {}) {
 
   text += SEP + "\n";
 
-  // ── Resumen financiero ───────────────────────────────────────────────────
-  const subtotalNoDisc = items.reduce((sum, item) => {
-    const qty = Number(item?.quantity || 0);
-    const base =
-      Number(item?.lineBaseTotal || 0) ||
-      Number(item?.baseUnitPrice || 0) * qty ||
-      Number(item?.unitPrice || 0) * qty;
-    return sum + base;
-  }, 0);
-  const categoryDiscount = items.reduce(
-    (sum, item) =>
-      String(item?.pricingSource || "").toLowerCase() === "category"
-        ? sum + Number(item?.autoDiscountTotal || 0)
-        : sum,
-    0,
-  );
-  const customerDiscount = items.reduce(
-    (sum, item) =>
-      String(item?.pricingSource || "").toLowerCase() === "customer"
-        ? sum + Number(item?.autoDiscountTotal || 0)
-        : sum,
-    0,
-  );
-  const manualDiscount = items.reduce(
-    (sum, item) => sum + Number(item?.discount || 0),
-    0,
-  );
-  const discountsTotal = categoryDiscount + customerDiscount + manualDiscount;
-
-  if (discountsTotal > 0) {
-    text += `Subtotal:         C$${subtotalNoDisc.toFixed(2)}\n`;
-    if (manualDiscount > 0)
-      text += `Desc. manual:    -C$${manualDiscount.toFixed(2)}\n`;
-    if (categoryDiscount > 0)
-      text += `Desc. categoria: -C$${categoryDiscount.toFixed(2)}\n`;
-    if (customerDiscount > 0)
-      text += `Desc. cliente:   -C$${customerDiscount.toFixed(2)}\n`;
-    text += `Total ahorrado:  -C$${discountsTotal.toFixed(2)}\n`;
-  }
-
   const total = (sale.total || 0).toFixed(2);
   const paid = (sale.amountPaid || sale.total || 0).toFixed(2);
   const change = (sale.change || 0).toFixed(2);
 
-  text += `[[B]]TOTAL A PAGAR:    C$${total}\n`;
-  text += `Pagado:           C$${paid}\n`;
+  text += `[[B]]TOTAL A PAGAR:     C$${total}\n`;
+  text += `Pagado:            C$${paid}\n`;
   if (Number(change) > 0) {
-    text += `Cambio:           C$${change}\n`;
+    text += `Cambio:            C$${change}\n`;
   }
 
   text += SEP + "\n";
+  if (seller) text += `Vendedor:   ${sanitize(seller)}\n`;
   if (operator) text += `Entregador: ${sanitize(operator)}\n`;
   text += "     Gracias por su compra\n";
 
@@ -524,7 +491,28 @@ function buildPreSaleReceiptText(sale, bonuses, layout = {}) {
   text += line + "\n";
 
   const dateStr = getFormattedDate(sale.date || sale.fechaPago);
-  text += `Cliente: ${sanitize(sale.customerName || "Cliente General")}\n`;
+  const customerAddress = sanitize(
+    sale.customer?.address || sale.customerAddress || ""
+  );
+  // Vendedor: usar nombre resuelto si está disponible, fallback a campos de email
+  const vendedor = sanitize(
+    sale.sellerDisplayName ||
+    sale.preSaleCreatedBy || sale.originalCreatedBy || sale.userName || "---"
+  );
+  // Entregador: usar nombre resuelto si está disponible
+  const entregador = sanitize(
+    sale.delivererDisplayName ||
+    sale.deliveredBy || sale.collectedBy || sale.paidBy || ""
+  );
+  const preSaleCustomerName = sanitize(sale.customerName || "Cliente General");
+  buildWrappedLabelLines("Cliente", preSaleCustomerName || "Cliente General", maxChars).forEach((lineText) => {
+    text += `${lineText}\n`;
+  });
+  buildWrappedLabelLines("Direccion", customerAddress || "N/A", maxChars).forEach((lineText) => {
+    text += `${lineText}\n`;
+  });
+  text += `Vendedor: ${vendedor}\n`;
+  if (entregador) text += `Entregador: ${entregador}\n`;
   text += `Fecha:   ${dateStr}\n`;
   text += line + "\n";
 
@@ -543,6 +531,7 @@ function buildPreSaleReceiptText(sale, bonuses, layout = {}) {
   const total = (sale.total || 0).toFixed(2);
   const paid = (sale.amountPaid || sale.total || 0).toFixed(2);
   const change = (sale.change || 0).toFixed(2);
+
 
   text += `TOTAL A PAGAR:     C$${total}\n`;
   text += `Pagado:            C$${paid}\n`;
@@ -564,6 +553,55 @@ function getFormattedDate(date) {
     } catch (e) {
         return "---";
     }
+}
+
+function splitTextByWidth(value, width) {
+  const maxWidth = Math.max(1, Number(width) || 1);
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [""];
+
+  const lines = [];
+  let current = "";
+
+  words.forEach((word) => {
+    let rest = word;
+
+    while (rest.length > maxWidth) {
+      if (current) {
+        lines.push(current);
+        current = "";
+      }
+      lines.push(rest.slice(0, maxWidth));
+      rest = rest.slice(maxWidth);
+    }
+
+    if (!rest) return;
+    if (!current) {
+      current = rest;
+      return;
+    }
+
+    const candidate = `${current} ${rest}`;
+    if (candidate.length <= maxWidth) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = rest;
+    }
+  });
+
+  if (current) lines.push(current);
+  return lines.length ? lines : [""];
+}
+
+function buildWrappedLabelLines(label, value, maxChars) {
+  const safeLabel = sanitize(label || "");
+  const prefix = `${safeLabel}: `;
+  const available = Math.max(1, (Number(maxChars) || 32) - prefix.length);
+  const wrapped = splitTextByWidth(sanitize(value || ""), available);
+  const indent = " ".repeat(prefix.length);
+
+  return wrapped.map((line, index) => (index === 0 ? `${prefix}${line}` : `${indent}${line}`));
 }
 
 function sanitize(str) {

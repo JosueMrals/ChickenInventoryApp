@@ -4,6 +4,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import firestore from "@react-native-firebase/firestore";
 import styles from "./styles/doneReceiptStyles";
 import SaleReceipt from "../../screens/sales/components/SaleReceipt";
+import { buildUsersByEmailMap } from "../../utils/userUtils";
 
 import { QuickSaleContext } from "./context/quickSaleContext";
 
@@ -13,7 +14,8 @@ export default function QuickSaleDoneScreen({ navigation, route }) {
   const { saleId } = route.params;
 
   const [sale, setSale] = useState(null);
-  const [bonuses, setBonuses] = useState([]); // State for bonus items
+  const [bonuses, setBonuses] = useState([]);
+  const [usersById, setUsersById] = useState({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -40,10 +42,19 @@ export default function QuickSaleDoneScreen({ navigation, route }) {
         setBonuses(bonusItems);
       });
 
+    // 3. Cargar usuarios para resolver nombres de vendedor/entregador
+    const unsubUsers = firestore()
+      .collection("users")
+      .onSnapshot((snap) => {
+        const map = buildUsersByEmailMap(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setUsersById(map);
+      }, () => setUsersById({}));
+
     // Cleanup subscriptions on unmount
     return () => {
       unsubSale();
       unsubBonuses();
+      unsubUsers();
     };
   }, [saleId]);
 
@@ -71,7 +82,7 @@ export default function QuickSaleDoneScreen({ navigation, route }) {
       </View>
 
       {/* Pass both sale and bonuses to the receipt component */}
-      <SaleReceipt sale={sale} bonuses={bonuses} />
+      <SaleReceipt sale={sale} bonuses={bonuses} usersById={usersById} />
 
       <TouchableOpacity style={styles.shareButton}>
         <Icon name="print-outline" size={20} color="#fff" />
