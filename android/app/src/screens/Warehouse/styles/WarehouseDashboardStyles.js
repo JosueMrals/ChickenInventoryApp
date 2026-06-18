@@ -74,4 +74,21 @@ export default StyleSheet.create({
     color: '#999',
     marginTop: 10,
   },
+  returnBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -8,
+    backgroundColor: '#EF4444',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  returnBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+  },
 });

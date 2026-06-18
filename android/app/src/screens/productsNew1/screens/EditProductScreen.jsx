@@ -125,13 +125,22 @@ export default function EditProductScreen() {
       })),
     };
     loadedValues.wholesalePrices.forEach((wp) => {
-      if (wp.price && loadedValues.purchasePrice)
-        wp.margin = calculateMarginFromSalePrice(loadedValues.purchasePrice, wp.price);
+      const wholesaleBase = Number(loadedValues.salePrice || loadedValues.purchasePrice || 0);
+      if (wp.price && wholesaleBase)
+        wp.margin = calculateMarginFromSalePrice(wholesaleBase, wp.price);
     });
     setValues(loadedValues);
     initialRef.current = JSON.stringify(loadedValues);
     setLoading(false);
   }, [initialProduct]);
+
+  const getWholesaleBasePrice = useCallback((salePrice, purchasePrice = '') => {
+    const sale = Number(salePrice);
+    if (Number.isFinite(sale) && sale > 0) return sale;
+    const cost = Number(purchasePrice);
+    if (Number.isFinite(cost) && cost > 0) return cost;
+    return null;
+  }, []);
 
   // ── Price helpers ─────────────────────────────────────────────────────────────
   const calculateSalePriceFromMargin = (cost, margin) => {
@@ -150,16 +159,22 @@ export default function EditProductScreen() {
   const handlePriceChange = (field, text) => {
     setValues((prev) => {
       const nv = { ...prev, [field]: text };
+      const updateWholesaleMargins = (basePrice) => {
+        nv.wholesalePrices = prev.wholesalePrices.map((wp) => (
+          wp.price && basePrice ? { ...wp, margin: calculateMarginFromSalePrice(basePrice, wp.price) } : wp
+        ));
+      };
       if (field === 'purchasePrice') {
         if (nv.profitMargin) nv.salePrice = calculateSalePriceFromMargin(text, nv.profitMargin);
-        nv.wholesalePrices = prev.wholesalePrices.map((wp) =>
-          wp.price ? { ...wp, margin: calculateMarginFromSalePrice(text, wp.price) } : wp,
-        );
+        updateWholesaleMargins(getWholesaleBasePrice(nv.salePrice, text));
       }
       if (field === 'profitMargin' && nv.purchasePrice)
         nv.salePrice = calculateSalePriceFromMargin(nv.purchasePrice, text);
       if (field === 'salePrice' && nv.purchasePrice)
         nv.profitMargin = calculateMarginFromSalePrice(nv.purchasePrice, text);
+      if (field === 'profitMargin' || field === 'salePrice') {
+        updateWholesaleMargins(getWholesaleBasePrice(field === 'salePrice' ? text : nv.salePrice, nv.purchasePrice));
+      }
       return nv;
     });
   };
@@ -201,8 +216,9 @@ export default function EditProductScreen() {
     setValues((v) => {
       const p = [...v.wholesalePrices];
       const item = { ...p[index], [field]: value };
-      if (field === 'price'  && v.purchasePrice) item.margin = calculateMarginFromSalePrice(v.purchasePrice, value);
-      if (field === 'margin' && v.purchasePrice) item.price  = calculateSalePriceFromMargin(v.purchasePrice, value);
+      const wholesaleBase = getWholesaleBasePrice(v.salePrice, v.purchasePrice);
+      if (field === 'price'  && wholesaleBase) item.margin = calculateMarginFromSalePrice(wholesaleBase, value);
+      if (field === 'margin' && wholesaleBase) item.price  = calculateSalePriceFromMargin(wholesaleBase, value);
       p[index] = item;
       return { ...v, wholesalePrices: p };
     });

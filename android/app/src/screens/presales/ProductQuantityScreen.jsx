@@ -96,27 +96,6 @@ export default function ProductQuantityScreen({ navigation, route }) {
 
     return (
       <View style={{ width: '100%', marginBottom: 4 }}>
-        {/* Tags de precios por ruta */}
-        {routePrices.length > 0 && (
-          <View style={{ marginBottom: 4 }}>
-            <Text style={[localStyles.chipSectionLabel, { color: '#7C3AED' }]}>Precios por Ruta:</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 10, alignItems: 'center' }}
-              keyboardShouldPersistTaps="handled" style={{ maxHeight: 36 }}>
-              {routePrices.map((rp) => {
-                const isActive = rp.routeId === activeRouteId;
-                return (
-                  <View key={rp.routeId} style={[localStyles.chip, { backgroundColor: isActive ? '#EDE9FE' : '#F3F4F6', borderColor: isActive ? '#7C3AED' : '#D1D5DB' }]}>
-                    <Icon name="navigate" size={11} color={isActive ? '#7C3AED' : '#9CA3AF'} style={{ marginRight: 3 }} />
-                    <Text style={[localStyles.chipText, { color: isActive ? '#7C3AED' : '#6B7280' }]}>
-                      {rp.routeName}: C${Number(rp.price).toFixed(2)}{isActive ? ' ✓' : ''}
-                    </Text>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-        )}
 
         {/* Tags de descuentos por categoría */}
         {categoryTiers.length > 0 && (

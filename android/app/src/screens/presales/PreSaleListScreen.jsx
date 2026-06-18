@@ -1,9 +1,10 @@
 import React, { useContext, useState, useMemo, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicator, Modal } from 'react-native';
+import auth from '@react-native-firebase/auth';
 import { PreSaleContext } from './context/preSaleContext';
 import Icon from 'react-native-vector-icons/Ionicons';
 import PreSaleCard from './components/PreSaleCard';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 import globalStyles from '../../styles/globalStyles';
 import { resolveCustomerName } from '../../utils/customerUtils';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
@@ -47,8 +48,12 @@ const summaryStyles = StyleSheet.create({
 
 export default function PreSaleListScreen({ navigation }) {
     const { preSales, loadPreSales, loading, customersById } = useContext(PreSaleContext);
+    const route = useRoute();
     const [activeTab, setActiveTab] = useState(TABS[0]);
     const { bottomPadding } = useAdaptiveBottom();
+    const role = route?.params?.role || 'vendedor';
+    const currentEmail = route?.params?.user?.email || auth().currentUser?.email || '';
+    const isAdmin = role === 'admin';
 
     // --- Date filter state ---
     const [dateFrom, setDateFrom] = useState(null);
@@ -86,6 +91,11 @@ export default function PreSaleListScreen({ navigation }) {
         else if (activeTab === 'Pagadas') data = preSales.filter(p => p.status === 'paid');
         else data = [];
 
+        if (!isAdmin) {
+            const mine = normalizeKey(currentEmail);
+            data = data.filter((p) => normalizeKey(p.createdBy) === mine);
+        }
+
         // Apply date filter
         if (dateFrom || dateTo) {
             data = data.filter(p => {
@@ -98,7 +108,7 @@ export default function PreSaleListScreen({ navigation }) {
         }
 
         return data;
-    }, [preSales, activeTab, dateFrom, dateTo]);
+    }, [preSales, activeTab, dateFrom, dateTo, isAdmin, currentEmail]);
 
     const renderEmptyComponent = () => (
         <View style={styles.emptyContainer}>
@@ -171,9 +181,9 @@ export default function PreSaleListScreen({ navigation }) {
                         <FlatList
                             data={filteredData}
                             renderItem={({ item }) => (
-                                <TouchableOpacity onPress={() => navigation.navigate('PreSaleDetail', { presale: item })}>
-                                    <PreSaleCard presale={item} customerName={resolveCustomerName(item, customersById)} />
-                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => navigation.navigate('PreSaleDetail', { presale: item, role })}>
+                                     <PreSaleCard presale={item} customerName={resolveCustomerName(item, customersById)} />
+                                 </TouchableOpacity>
                             )}
                             keyExtractor={item => item.id}
                             contentContainerStyle={styles.listContent}
@@ -270,3 +280,5 @@ const styles = StyleSheet.create({
     productName: { fontSize: 16, fontWeight: '500' },
     productQuantity: { fontSize: 16, fontWeight: 'bold', color: '#007AFF' },
 });
+
+const normalizeKey = (value) => String(value || '').trim().toLowerCase();

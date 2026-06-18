@@ -73,7 +73,7 @@ export default function PreSaleProductsScreen({ navigation }) {
   };
 
   const renderProductCard = ({ item }) => {
-    const { priceToUse, pricingSource, routePrice } = calcPriceForProduct({
+    const { priceToUse, pricingSource } = calcPriceForProduct({
       product: item,
       qty: 1,
       customer,
@@ -101,11 +101,6 @@ export default function PreSaleProductsScreen({ navigation }) {
             <Text style={[styles.cardPrice, isRoutePriced && { color: '#7C3AED' }]}>
               {formatCurrency(priceToUse)}
             </Text>
-            {isRoutePriced && (
-              <Text style={localStyles.regularPriceStrike}>
-                C${(Number(item.salePrice) || 0).toFixed(2)}
-              </Text>
-            )}
           </View>
           <View
             style={[
@@ -284,11 +279,5 @@ const localStyles = StyleSheet.create({
     fontSize: 9,
     color: '#7C3AED',
     fontWeight: '700',
-  },
-  regularPriceStrike: {
-    fontSize: 10,
-    color: '#9CA3AF',
-    textDecorationLine: 'line-through',
-    marginTop: 1,
   },
 });

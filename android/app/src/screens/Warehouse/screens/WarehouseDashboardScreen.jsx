@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
+import ReturnRequestsScreen from './ReturnRequestsScreen';
+import { subscribePendingReturnRequests } from '../../../services/returnService';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -32,7 +34,8 @@ try {
 export default function WarehouseDashboardScreen({ navigation }) {
   const [preSales, setPreSales] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'list' | 'dashboard'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'list' | 'dashboard' | 'returns'
+  const [pendingReturnsCount, setPendingReturnsCount] = useState(0);
 
   // Restore tab from navigation params (e.g. coming back from detail)
   useEffect(() => {
@@ -81,6 +84,14 @@ export default function WarehouseDashboardScreen({ navigation }) {
       });
     return () => subscriber();
   }, [selectedRoute]); // Recargar si cambia la ruta
+
+  // Escuchar solicitudes de devolución pendientes para mostrar badge (filtrado por ruta)
+  useEffect(() => {
+    const unsub = subscribePendingReturnRequests((docs) => {
+      setPendingReturnsCount(docs.length);
+    }, selectedRoute?.id || null);
+    return () => unsub();
+  }, [selectedRoute]);
 
   useEffect(() => {
     const unsub = firestore()
@@ -387,6 +398,20 @@ export default function WarehouseDashboardScreen({ navigation }) {
             <Icon name="list-outline" size={20} color={activeTab === 'list' ? '#5856D6' : '#888'} />
             <Text style={[styles.tabText, activeTab === 'list' && styles.activeTabText]}>Ordenes</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'returns' && styles.activeTabButton]}
+            onPress={() => setActiveTab('returns')}
+        >
+            <View style={{ position: 'relative' }}>
+              <Icon name="return-up-back-outline" size={20} color={activeTab === 'returns' ? '#5856D6' : '#888'} />
+              {pendingReturnsCount > 0 && (
+                <View style={styles.returnBadge}>
+                  <Text style={styles.returnBadgeText}>{pendingReturnsCount > 9 ? '9+' : pendingReturnsCount}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.tabText, activeTab === 'returns' && styles.activeTabText]}>Devoluciones</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Ambas vistas siempre montadas; se ocultan con display:'none' para evitar re-montaje
@@ -414,6 +439,10 @@ export default function WarehouseDashboardScreen({ navigation }) {
             }
             contentContainerStyle={{ paddingBottom: 20 }}
           />
+        </View>
+
+        <View style={{ flex: 1, display: activeTab === 'returns' ? 'flex' : 'none' }}>
+          <ReturnRequestsScreen routeId={selectedRoute?.id || null} />
         </View>
       </View>
     </View>

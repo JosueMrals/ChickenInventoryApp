@@ -146,6 +146,14 @@ export default function AddProductScreen() {
     });
   }, [categoryActivationRules]);
 
+  const getWholesaleBasePrice = useCallback((salePrice, purchasePrice = '') => {
+    const sale = Number(salePrice);
+    if (Number.isFinite(sale) && sale > 0) return sale;
+    const cost = Number(purchasePrice);
+    if (Number.isFinite(cost) && cost > 0) return cost;
+    return null;
+  }, []);
+
   useEffect(() => {
     if (scannedCode) setValues((prev) => ({ ...prev, barcode: scannedCode }));
   }, [scannedCode]);
@@ -174,16 +182,27 @@ export default function AddProductScreen() {
         } else if (!newValues.autoSalePrice && newValues.salePrice) {
           newValues.profitMargin = calculateMarginFromSalePrice(text, newValues.salePrice);
         }
+        const wholesaleBase = getWholesaleBasePrice(newValues.salePrice, text);
         newValues.wholesalePrices = prev.wholesalePrices.map((wp) => {
-          if (wp.price) return { ...wp, margin: calculateMarginFromSalePrice(text, wp.price) };
+          if (wp.price && wholesaleBase) return { ...wp, margin: calculateMarginFromSalePrice(wholesaleBase, wp.price) };
           return wp;
         });
       }
       if (field === 'profitMargin') {
         if (newValues.purchasePrice) newValues.salePrice = calculateSalePriceFromMargin(newValues.purchasePrice, text);
+        const wholesaleBase = getWholesaleBasePrice(newValues.salePrice, newValues.purchasePrice);
+        newValues.wholesalePrices = prev.wholesalePrices.map((wp) => {
+          if (wp.price && wholesaleBase) return { ...wp, margin: calculateMarginFromSalePrice(wholesaleBase, wp.price) };
+          return wp;
+        });
       }
       if (field === 'salePrice') {
         if (newValues.purchasePrice) newValues.profitMargin = calculateMarginFromSalePrice(newValues.purchasePrice, text);
+        const wholesaleBase = getWholesaleBasePrice(text, newValues.purchasePrice);
+        newValues.wholesalePrices = prev.wholesalePrices.map((wp) => {
+          if (wp.price && wholesaleBase) return { ...wp, margin: calculateMarginFromSalePrice(wholesaleBase, wp.price) };
+          return wp;
+        });
       }
       return newValues;
     });
@@ -232,10 +251,11 @@ export default function AddProductScreen() {
     setValues((v) => {
       const newPrices = [...v.wholesalePrices];
       const currentItem = { ...newPrices[index], [field]: value };
-      if (field === 'price' && v.purchasePrice) {
-        currentItem.margin = calculateMarginFromSalePrice(v.purchasePrice, value);
-      } else if (field === 'margin' && v.purchasePrice) {
-        currentItem.price = calculateSalePriceFromMargin(v.purchasePrice, value);
+      const wholesaleBase = getWholesaleBasePrice(v.salePrice, v.purchasePrice);
+      if (field === 'price' && wholesaleBase) {
+        currentItem.margin = calculateMarginFromSalePrice(wholesaleBase, value);
+      } else if (field === 'margin' && wholesaleBase) {
+        currentItem.price = calculateSalePriceFromMargin(wholesaleBase, value);
       }
       newPrices[index] = currentItem;
       return { ...v, wholesalePrices: newPrices };

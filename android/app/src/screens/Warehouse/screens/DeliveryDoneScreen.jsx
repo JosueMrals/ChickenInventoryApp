@@ -8,6 +8,8 @@ import {
   ScrollView,
   ActivityIndicator,
   SafeAreaView,
+  Modal,
+  TextInput,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import DeliveryTicket from '../components/DeliveryTicket';
@@ -25,16 +27,27 @@ import {
   getTicketCustomizationSettings,
   DEFAULT_TICKET_SETTINGS,
 } from '../../settings/ticketCustomization/ticketCustomizationService';
+import {
+  createReturnRequest,
+  subscribeReturnRequestsByPresale,
+} from '../../../services/returnService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function DeliveryDoneScreen({ navigation, route }) {
   const { sale: routeSale } = route.params;
   const viewShotRef = useRef();
+  const insets = useSafeAreaInsets();
   const [printing, setPrinting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [customersById, setCustomersById] = useState({});
   const [usersByEmail, setUsersByEmail] = useState({});
   const [ticketSettings, setTicketSettings] = useState(DEFAULT_TICKET_SETTINGS);
   const [bonusMovements, setBonusMovements] = useState([]);
+  // Devolución
+  const [returnModalVisible, setReturnModalVisible] = useState(false);
+  const [returnReason, setReturnReason] = useState('');
+  const [submittingReturn, setSubmittingReturn] = useState(false);
+  const [existingReturnRequest, setExistingReturnRequest] = useState(null);
 
   const currentUser = auth().currentUser;
   const ticketWidth = ticketSettings.paperWidthMm >= 75 ? 576 : 384;
@@ -109,6 +122,16 @@ export default function DeliveryDoneScreen({ navigation, route }) {
       unsubBonuses();
       mounted = false;
     };
+  }, [routeSale?.id]);
+
+  // Escuchar si ya existe una solicitud de devolución para esta venta
+  useEffect(() => {
+    if (!routeSale?.id) return;
+    const unsub = subscribeReturnRequestsByPresale(routeSale.id, (docs) => {
+      const active = docs.find((d) => d.status === 'pending_review' || d.status === 'approved');
+      setExistingReturnRequest(active || null);
+    });
+    return () => unsub();
   }, [routeSale?.id]);
 
   const customerName = resolveCustomerName(sale, customersById, 'Cliente General');
@@ -202,6 +225,33 @@ export default function DeliveryDoneScreen({ navigation, route }) {
     }
   };
 
+  const handleOpenReturnModal = () => {
+    setReturnReason('');
+    setReturnModalVisible(true);
+  };
+
+  const handleSubmitReturn = async () => {
+    if (!returnReason.trim()) {
+      Alert.alert('Campo requerido', 'Debes ingresar una razón detallada para la devolución.');
+      return;
+    }
+    try {
+      setSubmittingReturn(true);
+      await createReturnRequest({
+        presaleId: routeSale.id,
+        sale: ticketSale,
+        reason: returnReason.trim(),
+        requestedByRole: 'entregador',
+      });
+      setReturnModalVisible(false);
+      Alert.alert('Solicitud enviada', 'La solicitud de devolución fue enviada al equipo de bodega para revisión.');
+    } catch (e) {
+      Alert.alert('Error', e.message || 'No se pudo enviar la solicitud.');
+    } finally {
+      setSubmittingReturn(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.screen}>
       {/* ── Header ──────────────────────────────────────────────────────────── */}
@@ -229,41 +279,60 @@ export default function DeliveryDoneScreen({ navigation, route }) {
       </ScrollView>
 
       {/* ── Acciones ─────────────────────────────────────────────────────────── */}
-      <View style={styles.actions}>
+      <View style={[styles.actions, { paddingBottom: insets.bottom + 10 }]}>
+
+
         <View style={styles.rowButtons}>
           <TouchableOpacity
-            style={[styles.shareBtn, sharing && styles.btnDisabled]}
+            style={[styles.iconBtn, styles.shareBtn, sharing && styles.btnDisabled]}
             onPress={handleShare}
             disabled={sharing}
             activeOpacity={0.85}>
             {sharing ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <>
-                <Icon name="share-social-outline" size={18} color="#fff" />
-                <Text style={styles.actionBtnText}>Compartir</Text>
-              </>
+              <Icon name="share-social-outline" size={20} color="#fff" />
             )}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.printBtn, printing && styles.btnDisabled]}
+            style={[styles.iconBtn, styles.printBtn, printing && styles.btnDisabled]}
             onPress={handlePrint}
             disabled={printing}
             activeOpacity={0.85}>
             {printing ? (
-              <>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.actionBtnText}>Imprimiendo…</Text>
-              </>
+              <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <>
-                <Icon name="print-outline" size={18} color="#fff" />
-                <Text style={styles.actionBtnText}>Imprimir</Text>
-              </>
+              <Icon name="print-outline" size={20} color="#fff" />
             )}
           </TouchableOpacity>
+
+        {/* Botón devolución */}
+        {existingReturnRequest ? (
+          <View style={styles.returnStatusRow}>
+            <Text style={[
+              styles.returnStatusText,
+              existingReturnRequest.status === 'approved' && { color: '#16A34A' },
+            ]}>
+              {existingReturnRequest.status === 'approved'
+                ? 'Devolución aprobada'
+                : 'Solicitud de devolución en revisión'}
+            </Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.iconBtn, styles.returnBtn, existingReturnRequest && styles.returnBtnDisabled]}
+            onPress={handleOpenReturnModal}
+            disabled={!!existingReturnRequest}>
+            <Icon
+              name={existingReturnRequest ? (existingReturnRequest.status === 'approved' ? 'checkmark-circle-outline' : 'time-outline') : 'return-up-back-outline'}
+              size={20}
+              color={existingReturnRequest ? '#9CA3AF' : '#D92D20'}
+            />
+          </TouchableOpacity>
+        )}
         </View>
+
 
         <TouchableOpacity
           style={styles.backBtn}
@@ -272,7 +341,53 @@ export default function DeliveryDoneScreen({ navigation, route }) {
           <Icon name="arrow-back-outline" size={18} color="#374151" />
           <Text style={styles.backBtnText}>Volver a Mis Entregas</Text>
         </TouchableOpacity>
+
+
       </View>
+
+      {/* Modal de solicitud de devolución */}
+      <Modal
+        visible={returnModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !submittingReturn && setReturnModalVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Solicitar Devolución</Text>
+            <Text style={styles.modalDesc}>
+              La solicitud será enviada a bodega para verificación manual.
+              Los productos serán devueltos al inventario solo tras su confirmación.
+            </Text>
+            <Text style={styles.modalLabel}>Razón de devolución (obligatoria)</Text>
+            <TextInput
+              value={returnReason}
+              onChangeText={setReturnReason}
+              placeholder="Ej: El cliente rechazó el pedido al momento de la entrega..."
+              placeholderTextColor="#9CA3AF"
+              style={styles.reasonInput}
+              multiline
+              numberOfLines={4}
+              editable={!submittingReturn}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setReturnModalVisible(false)}
+                disabled={submittingReturn}>
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSubmitBtn}
+                onPress={handleSubmitReturn}
+                disabled={submittingReturn}>
+                {submittingReturn
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.modalSubmitText}>Enviar solicitud</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -313,7 +428,15 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
   },
-  rowButtons: { flexDirection: 'row', gap: 10 },
+  rowButtons: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  iconBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
   shareBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -351,4 +474,68 @@ const styles = StyleSheet.create({
   },
   backBtnText: { color: '#374151', fontSize: 15, fontWeight: '700' },
   btnDisabled: { opacity: 0.6 },
+  returnBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: 14,
+    paddingVertical: 12,
+    marginBottom: 4,
+  },
+  returnBtnDisabled: {
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  returnReason: { color: '#D92D20', fontSize: 14, fontWeight: '700' },
+  returnStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  returnStatusText: { fontSize: 13, fontWeight: '700', color: '#B45309' },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 32,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 8 },
+  modalDesc: { fontSize: 13, color: '#6B7280', lineHeight: 18, marginBottom: 14 },
+  modalLabel: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6 },
+  reasonInput: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#111827',
+    minHeight: 90,
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  modalActions: { flexDirection: 'row', gap: 10 },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    alignItems: 'center',
+  },
+  modalCancelText: { color: '#374151', fontWeight: '600', fontSize: 14 },
+  modalSubmitBtn: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#D92D20',
+    alignItems: 'center',
+  },
+  modalSubmitText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

@@ -15,9 +15,8 @@ import { getCategoryLabel } from '../constants/productCategories';
 export default function ProductCard({ product, onEdit, onAddStock, onPress, hideActions = false, routePrice, routeLabel }) {
   const isLowStock = (product?.stock ?? 0) < 5;
 
-  // Si hay precio de ruta disponible se muestra ese, de lo contrario el precio base
-  const displayPrice = routePrice !== undefined ? routePrice : (product?.salePrice ?? '0.00');
-  const hasRoutePrice = routePrice !== undefined && String(routePrice) !== String(product?.salePrice ?? '');
+  // Mostrar precio solo cuando existe precio de ruta configurado
+  const hasRoutePrice = routePrice !== undefined && routePrice !== null;
 
   return (
     <TouchableOpacity 
@@ -35,13 +34,10 @@ export default function ProductCard({ product, onEdit, onAddStock, onPress, hide
         <Text style={styles.name} numberOfLines={1}>{product?.name}</Text>
         <Text style={styles.code} numberOfLines={1}>Cat: {getCategoryLabel(product)} | Cod: {product?.barcode ?? '---'}</Text>
         <View style={styles.rowInfo}>
-            <Text style={styles.price}>${displayPrice}</Text>
-            {/* Badge de ruta activa */}
-            {hasRoutePrice && routeLabel && (
-              <View style={styles.routeLabelBadge}>
-                <Icon name="navigate" size={9} color="#7C3AED" />
-                <Text style={styles.routeLabelText} numberOfLines={1}>{routeLabel}</Text>
-              </View>
+            {hasRoutePrice && (
+              <>
+                <Text style={styles.price}>${routePrice}</Text>
+              </>
             )}
             <View style={[styles.badge, isLowStock ? styles.badgeLow : styles.badgeNormal]}>
                 <Text style={[styles.badgeText, isLowStock ? styles.textLow : styles.textNormal]}>
@@ -57,10 +53,6 @@ export default function ProductCard({ product, onEdit, onAddStock, onPress, hide
           <TouchableOpacity onPress={() => onAddStock && onAddStock(product)} style={[styles.actionBtn, styles.stockBtn]}>
              <Icon name="layers-outline" size={20} color="#fff" />
           </TouchableOpacity>
-          
-{/*           <TouchableOpacity onPress={() => onEdit && onEdit(product)} style={[styles.actionBtn, styles.editBtn]}> */}
-{/*              <Icon name="create-outline" size={20} color="#fff" /> */}
-{/*           </TouchableOpacity> */}
         </View>
       )}
 

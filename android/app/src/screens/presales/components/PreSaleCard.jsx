@@ -84,24 +84,31 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         paddingBottom: 12,
         borderBottomWidth: 1,
         borderBottomColor: '#F0F0F0',
     },
     headerInfo: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
+        flex: 1,
+        minWidth: 0,
+        paddingRight: 10,
     },
     customerName: {
         fontSize: 16,
         fontWeight: 'bold',
         marginLeft: 8,
         color: '#333',
+        flexShrink: 1,
+        flexWrap: 'wrap',
     },
     headerBadges: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'flex-end',
+        flexShrink: 0,
         gap: 6,
     },
     creditBadge: {

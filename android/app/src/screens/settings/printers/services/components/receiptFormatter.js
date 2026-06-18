@@ -84,7 +84,9 @@ function formatItemLines(item, columns, options = {}) {
     lines.push(clampLine(nameLines[i], columns.maxChars));
   }
 
-  const unitPrice = formatMoney(unitPriceValue, options.currency);
+  // Precio efectivo: total / qty para que qty × precio = total (absorbe descuentos y precio de ruta)
+  const effectiveUnitPriceValue = qtyValue > 0 ? totalValue / qtyValue : unitPriceValue;
+  const unitPrice = formatMoney(effectiveUnitPriceValue, options.currency);
   const detailLine = `Cant: ${qtyValue} X ${unitPrice}`;
   lines.push(clampLine(detailLine, columns.maxChars));
 

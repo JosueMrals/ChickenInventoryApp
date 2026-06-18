@@ -15,10 +15,10 @@ import ProductQuantityScreen from '../screens/presales/ProductQuantityScreen';
 
 const Stack = createNativeStackNavigator();
 
-export default function PreSaleStack() {
+export default function PreSaleStack({ route }) {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="PreSalesList" component={PreSalesListScreen} />
+      <Stack.Screen name="PreSalesList" component={PreSalesListScreen} initialParams={route?.params || {}} />
       <Stack.Screen name="PreSaleProducts" component={PreSaleProductsScreen} />
       <Stack.Screen name="PreSaleCart" component={PreSaleCartScreen} />
       <Stack.Screen name="PreSaleEditCart" component={PreSaleEditCartScreen} />

@@ -7,6 +7,7 @@ import { getPreSaleHistory } from '../../services/preSaleService';
 import HistoryDetailModal from './components/HistoryDetailModal';
 import { useRoute as useRouteContext } from '../../context/RouteContext'; // Rename to avoid conflict with navigation route
 import { resolveCustomerName } from '../../utils/customerUtils';
+import { createReturnRequest, subscribeReturnRequestsByPresale } from '../../services/returnService';
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
@@ -120,6 +121,11 @@ export default function PreSaleDetailScreen({ route, navigation }) {
     const [deleteModalVisible, setDeleteModalVisible] = useState(false);
     const [deleteReason, setDeleteReason] = useState('');
     const [isDeleting, setIsDeleting] = useState(false);
+    // Devolución
+    const [returnModalVisible, setReturnModalVisible] = useState(false);
+    const [returnReason, setReturnReason] = useState('');
+    const [submittingReturn, setSubmittingReturn] = useState(false);
+    const [existingReturnRequest, setExistingReturnRequest] = useState(null);
 
     // Obtener rol del contexto de ruta o de los params de navegación
     // Asumimos que podemos obtener el rol de alguna manera global o pasarlo
@@ -154,6 +160,16 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         };
         fetchHistory();
     }, [presale.id]);
+
+    // Escuchar solicitudes de devolución activas para esta venta
+    useEffect(() => {
+        if (presale.status !== 'paid') return;
+        const unsub = subscribeReturnRequestsByPresale(presale.id, (docs) => {
+            const active = docs.find((d) => d.status === 'pending_review' || d.status === 'approved');
+            setExistingReturnRequest(active || null);
+        });
+        return () => unsub();
+    }, [presale.id, presale.status]);
 
     const handleEdit = async () => {
         setIsEditing(true);
@@ -297,6 +313,37 @@ export default function PreSaleDetailScreen({ route, navigation }) {
     // Vamos a asumir que el rol se pasa o se obtiene. Si no, ocultamos.
     const showPayButton = presale.status === 'pending' && (userRole === 'admin' || userRole === 'entregador');
     const canDelete = presale.status === 'pending' || presale.status === 'credit_pending';
+    const isPaid = presale.status === 'paid' || presale.status === 'returned';
+
+    const handleOpenReturnModal = useCallback(() => {
+        setReturnReason('');
+        setReturnModalVisible(true);
+    }, []);
+
+    const handleSubmitReturn = useCallback(async () => {
+        if (!returnReason.trim()) {
+            Alert.alert('Campo requerido', 'Debes ingresar una razón detallada para la devolución.');
+            return;
+        }
+        try {
+            setSubmittingReturn(true);
+            await createReturnRequest({
+                presaleId: presale.id,
+                sale: {
+                    ...presale,
+                    customerName: resolveCustomerName(presale, customersById),
+                },
+                reason: returnReason.trim(),
+                requestedByRole: userRole === 'admin' ? 'admin' : 'vendedor',
+            });
+            setReturnModalVisible(false);
+            Alert.alert('Solicitud enviada', 'La solicitud fue enviada a bodega para verificación.');
+        } catch (e) {
+            Alert.alert('Error', e.message || 'No se pudo enviar la solicitud.');
+        } finally {
+            setSubmittingReturn(false);
+        }
+    }, [returnReason, presale, customersById, userRole]);
 
     return (
         <SafeAreaView style={globalStyles.container}>
@@ -321,16 +368,16 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 					historyItem={selectedHistoryItem}
 				/>
 
-				{(presale.status === 'pending' || presale.status === 'credit_pending') && (
-					<View style={styles.footer}>
-						<TouchableOpacity style={[styles.editButton, { flex: 1, flexDirection: 'row', width: 'auto' }]} onPress={handleEdit} disabled={isEditing}>
-							{isEditing ? <ActivityIndicator color="#007AFF" /> : (
+			{(presale.status === 'pending' || presale.status === 'credit_pending') && (
+				<View style={styles.footer}>
+					<TouchableOpacity style={[styles.editButton, { flex: 1, flexDirection: 'row', width: 'auto' }]} onPress={handleEdit} disabled={isEditing}>
+						{isEditing ? <ActivityIndicator color="#007AFF" /> : (
                                 <>
                                     <Icon name="create-outline" size={22} color="#007AFF" style={{ marginRight: 8 }}/>
                                     <Text style={{ color: '#007AFF', fontSize: 16, fontWeight: '600' }}>Editar Pedido</Text>
                                 </>
                             )}
-						</TouchableOpacity>
+					</TouchableOpacity>
 
                         {canDelete && (
                             <TouchableOpacity style={styles.deleteButton} onPress={openDeleteModal}>
@@ -345,8 +392,36 @@ export default function PreSaleDetailScreen({ route, navigation }) {
                                 <Text style={styles.payButtonText}>Cobrar</Text>
                             </TouchableOpacity>
                         )}
-					</View>
-				)}
+				</View>
+			)}
+
+            {/* Botón de devolución para ventas pagadas */}
+            {isPaid && (
+                <View style={styles.returnFooter}>
+                    {existingReturnRequest ? (
+                        <View style={styles.returnStatusRow}>
+                            <Icon
+                                name={existingReturnRequest.status === 'approved' ? 'checkmark-circle' : 'time-outline'}
+                                size={16}
+                                color={existingReturnRequest.status === 'approved' ? '#16A34A' : '#B45309'}
+                            />
+                            <Text style={[
+                                styles.returnStatusText,
+                                existingReturnRequest.status === 'approved' && { color: '#16A34A' },
+                            ]}>
+                                {existingReturnRequest.status === 'approved'
+                                    ? 'Devolución aprobada — inventario restituido'
+                                    : 'Solicitud de devolución en revisión por bodega'}
+                            </Text>
+                        </View>
+                    ) : presale.status !== 'returned' ? (
+                        <TouchableOpacity style={styles.returnButton} onPress={handleOpenReturnModal}>
+                            <Icon name="return-up-back-outline" size={20} color="#D92D20" style={{ marginRight: 8 }} />
+                            <Text style={styles.returnButtonText}>Solicitar Devolución</Text>
+                        </TouchableOpacity>
+                    ) : null}
+                </View>
+            )}
             </View>
 
             <Modal
@@ -384,6 +459,50 @@ export default function PreSaleDetailScreen({ route, navigation }) {
                                 ) : (
                                     <Text style={styles.modalDeleteText}>Confirmar</Text>
                                 )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Modal de solicitud de devolución */}
+            <Modal
+                visible={returnModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => !submittingReturn && setReturnModalVisible(false)}>
+                <View style={styles.modalBackdrop}>
+                    <View style={styles.modalCard}>
+                        <Text style={styles.modalTitle}>Solicitar Devolución</Text>
+                        <Text style={styles.modalText}>
+                            La solicitud será revisada manualmente por bodega.
+                            Los productos serán devueltos al inventario solo tras su confirmación.
+                        </Text>
+                        <Text style={styles.modalLabel}>Razón de devolución (obligatoria)</Text>
+                        <TextInput
+                            value={returnReason}
+                            onChangeText={setReturnReason}
+                            placeholder="Ej: Cliente devolvió el pedido por producto en mal estado..."
+                            placeholderTextColor="#9CA3AF"
+                            style={styles.reasonInput}
+                            multiline
+                            numberOfLines={4}
+                            editable={!submittingReturn}
+                        />
+                        <View style={styles.modalActions}>
+                            <TouchableOpacity
+                                style={styles.modalCancelButton}
+                                onPress={() => setReturnModalVisible(false)}
+                                disabled={submittingReturn}>
+                                <Text style={styles.modalCancelText}>Cancelar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.modalDeleteButton, { backgroundColor: '#D92D20' }]}
+                                onPress={handleSubmitReturn}
+                                disabled={submittingReturn}>
+                                {submittingReturn
+                                    ? <ActivityIndicator color="#fff" />
+                                    : <Text style={styles.modalDeleteText}>Enviar</Text>}
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -449,4 +568,24 @@ const styles = StyleSheet.create({
     modalCancelText: { color: '#374151', fontWeight: '600' },
     modalDeleteButton: { backgroundColor: '#D92D20', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, minWidth: 96, alignItems: 'center' },
     modalDeleteText: { color: '#fff', fontWeight: '700' },
+    returnFooter: {
+        paddingHorizontal: 16,
+        paddingBottom: 14,
+        paddingTop: 6,
+        backgroundColor: '#FFF',
+        borderTopWidth: 1,
+        borderTopColor: '#F3F4F6',
+    },
+    returnButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#FCA5A5',
+        borderRadius: 12,
+        paddingVertical: 14,
+    },
+    returnButtonText: { color: '#D92D20', fontWeight: '700', fontSize: 15 },
+    returnStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', paddingVertical: 10 },
+    returnStatusText: { fontSize: 13, fontWeight: '700', color: '#B45309', flexShrink: 1 },
 });

@@ -19,23 +19,23 @@ const DeliveryItem = ({ item, onGoToPayment, customerName }) => {
   return (
     <View style={styles.card}>
         <View style={styles.cardHeader}>
-             <View style={{flex: 1}}>
-                 <Text style={styles.customerName}>{customerName || 'Cliente General'}</Text>
-                 <Text style={styles.metaText}>#{item.id.substring(0, 6).toUpperCase()} · {createdDate}</Text>
-             </View>
+             <View style={styles.cardHeaderInfo}>
+                  <Text style={styles.customerName}>{customerName || 'Cliente General'}</Text>
+                  <Text style={styles.metaText}>#{item.id.substring(0, 6).toUpperCase()} · {createdDate}</Text>
+              </View>
 
-             <View style={{alignItems: 'flex-end'}}>
-                 <Text style={styles.totalText}>${item.total?.toFixed(2)}</Text>
-                 <View style={styles.badgeRow}>
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>Pendiente</Text>
-                    </View>
-                    {isCredit && (
-                      <View style={styles.creditBadge}>
-                        <Text style={styles.creditBadgeText}>Crédito</Text>
-                      </View>
-                    )}
-                 </View>
+             <View style={styles.cardHeaderRight}>
+                  <Text style={styles.totalText}>${item.total?.toFixed(2)}</Text>
+                  <View style={styles.badgeRow}>
+                     <View style={styles.badge}>
+                       <Text style={styles.badgeText}>Pendiente</Text>
+                     </View>
+                     {isCredit && (
+                       <View style={styles.creditBadge}>
+                         <Text style={styles.creditBadgeText}>Crédito</Text>
+                       </View>
+                     )}
+                  </View>
              </View>
         </View>
 
@@ -574,13 +574,13 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  historyInfo: { flex: 1, paddingRight: 12 },
+  historyInfo: { flex: 1, paddingRight: 12, minWidth: 0 },
   historyTitle: { fontSize: 14, fontWeight: 'bold', color: '#444', marginBottom: 2 },
-  historyCustomer: { fontSize: 15, fontWeight: '600', color: '#222', marginBottom: 2 },
+  historyCustomer: { fontSize: 15, fontWeight: '600', color: '#222', marginBottom: 2, flexWrap: 'wrap', flexShrink: 1 },
   historyMeta: { fontSize: 12, color: '#888' },
-  historyRight: { alignItems: 'flex-end', gap: 4 },
+  historyRight: { alignItems: 'flex-end', gap: 4, flexShrink: 0, minWidth: 74 },
   historyTotal: { fontSize: 16, fontWeight: 'bold', color: '#2DCE89' },
-  historyBadgeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 },
+  historyBadgeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8, flexShrink: 0 },
   historyBonusRow: {
     marginTop: 8,
     borderRadius: 8,
@@ -624,14 +624,19 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     paddingVertical: 12,
     paddingHorizontal: 14,
   },
+  cardHeaderInfo: { flex: 1, paddingRight: 12, minWidth: 0 },
+  cardHeaderRight: { alignItems: 'flex-end', flexShrink: 0, minWidth: 94 },
   customerName: {
     fontSize: 15,
     fontWeight: '700',
     color: '#111827',
     marginBottom: 2,
+    flexWrap: 'wrap',
+    flexShrink: 1,
   },
   metaText: {
     fontSize: 11,
@@ -653,6 +658,8 @@ const styles = StyleSheet.create({
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexShrink: 0,
     gap: 6,
   },
   creditBadge: {

@@ -418,12 +418,19 @@ function buildDeliveryReceiptText(sale, layout = {}) {
     const qty = Number(item.quantity || item.qty || 0);
     const unitPrice = Number(item.unitPrice || item.price || 0);
     const total = Number(item.total || unitPrice * qty);
+    // Precio efectivo: total / qty para que qty × precio = total (absorbe descuentos y precio de ruta)
+    const effectiveUnitPrice = qty > 0 ? total / qty : unitPrice;
     const totalStr = `C$${total.toFixed(2)}`.padStart(columns.totalWidth);
-    const nameFirst = rawName.substring(0, columns.nameWidth).padEnd(columns.nameWidth);
+    const nameLines = splitTextByWidth(rawName, columns.nameWidth);
+    const nameFirst = (nameLines[0] || "").padEnd(columns.nameWidth);
     text += `${nameFirst} ${totalStr}\n`;
+    // Continuaciones del nombre sin recortar
+    nameLines.slice(1).forEach((linePart) => {
+      text += `${linePart.padEnd(columns.nameWidth)} ${"".padStart(columns.totalWidth)}\n`;
+    });
 
     // Segunda línea: cantidad × precio unitario
-    const detailLine = `${qty} x C$${unitPrice.toFixed(2)}`;
+    const detailLine = `${qty} x C$${effectiveUnitPrice.toFixed(2)}`;
     text += `  ${detailLine}\n`;
 
 
@@ -440,9 +447,13 @@ function buildDeliveryReceiptText(sale, layout = {}) {
         aggMap.set(bName, existing + bQty);
       });
       aggMap.forEach((bQty, bName) => {
-        text += `  Regalo: +${bQty} ${bName.substring(0, columns.maxChars - 14)}\n`;
-      });
-    }
+        const prefix = `  Regalo: +${bQty} `;
+        const bonusLines = splitTextByWidth(bName, Math.max(1, columns.maxChars - prefix.length));
+        bonusLines.forEach((linePart, idx) => {
+          text += idx === 0 ? `${prefix}${linePart}\n` : `${" ".repeat(prefix.length)}${linePart}\n`;
+        });
+       });
+     }
 
     text += "\n"; // separador entre ítems
   });
@@ -457,7 +468,11 @@ function buildDeliveryReceiptText(sale, layout = {}) {
       aggMap.set(bName, (aggMap.get(bName) || 0) + bQty);
     });
     aggMap.forEach((bQty, bName) => {
-      text += `  +${bQty} ${bName.substring(0, columns.maxChars - 6)}\n`;
+      const prefix = `  +${bQty} `;
+      const bonusLines = splitTextByWidth(bName, Math.max(1, columns.maxChars - prefix.length));
+      bonusLines.forEach((linePart, idx) => {
+        text += idx === 0 ? `${prefix}${linePart}\n` : `${" ".repeat(prefix.length)}${linePart}\n`;
+      });
     });
     text += "\n";
   }

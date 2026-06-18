@@ -138,7 +138,7 @@ export function calcPriceForProduct({
   // El "precio efectivo base" es el de ruta si está configurado, si no el regular
   const effectiveBasePrice = routeSpecificPrice !== null ? routeSpecificPrice : regularPrice;
 
-  // ── 1. Calcular precio mayorista (precio fijo, no depende del base) ────────
+  // ── 1. Calcular precio mayorista (precio fijo, pero solo aplica si mejora el base efectivo) ────────
   const wholesalePriceValue = getWholesalePrice(product, safeQty);
   const hasWholesale = wholesalePriceValue !== null;
 
@@ -166,56 +166,55 @@ export function calcPriceForProduct({
   let appliedCategoryMinQty = null;
   let appliedTiersCount = 0;
 
-  if (hasWholesale && categoryDiscountedPrice !== null) {
-    if (wholesalePriceValue <= categoryDiscountedPrice) {
-      priceToUse = wholesalePriceValue;
-      usedWholesale = true;
-      pricingSource = 'wholesale';
-    } else {
-      priceToUse = categoryDiscountedPrice;
-      pricingSource = 'category';
-      appliedDiscountType = categoryStacked.totalPercent > 0 ? 'percent' : 'amount';
-      appliedDiscountValue = categoryStacked.totalPercent > 0
+  const candidates = [];
+
+  if (hasWholesale && wholesalePriceValue < effectiveBasePrice) {
+    candidates.push({
+      price: wholesalePriceValue,
+      pricingSource: 'wholesale',
+      usedWholesale: true,
+    });
+  }
+
+  if (categoryDiscountedPrice !== null && categoryDiscountedPrice < effectiveBasePrice) {
+    candidates.push({
+      price: categoryDiscountedPrice,
+      pricingSource: 'category',
+      appliedDiscountType: categoryStacked.totalPercent > 0 ? 'percent' : 'amount',
+      appliedDiscountValue: categoryStacked.totalPercent > 0
         ? categoryStacked.totalPercent
-        : categoryStacked.totalAmount;
-      appliedCategoryMinQty = categoryStacked.lowestMinQty;
-      appliedTiersCount = categoryStacked.appliedTiers.length;
-    }
-  } else if (hasWholesale) {
-    priceToUse = wholesalePriceValue;
-    usedWholesale = true;
-    pricingSource = 'wholesale';
-  } else if (categoryDiscountedPrice !== null) {
-    priceToUse = categoryDiscountedPrice;
-    pricingSource = 'category';
-    appliedDiscountType = categoryStacked.totalPercent > 0 ? 'percent' : 'amount';
-    appliedDiscountValue = categoryStacked.totalPercent > 0
-      ? categoryStacked.totalPercent
-      : categoryStacked.totalAmount;
-    appliedCategoryMinQty = categoryStacked.lowestMinQty;
-    appliedTiersCount = categoryStacked.appliedTiers.length;
-  } else if (pricingSource !== 'route') {
-    // ── 4. Descuento de cliente (solo si no aplican mayorista/categoría/ruta) ─
-    const customerDiscount = Number(customer?.discount || 0);
-    if (customerDiscount > 0) {
-      priceToUse = effectiveBasePrice * (1 - customerDiscount / 100);
-      pricingSource = 'customer';
-      appliedDiscountType = 'percent';
-      appliedDiscountValue = customerDiscount;
-    }
-  } else if (pricingSource === 'route') {
-    // Ruta activa, sin mayorista ni categoría: intentar descuento de cliente sobre precio de ruta
-    const customerDiscount = Number(customer?.discount || 0);
-    if (customerDiscount > 0) {
-      const customerPrice = effectiveBasePrice * (1 - customerDiscount / 100);
-      if (customerPrice < priceToUse) {
-        priceToUse = customerPrice;
-        pricingSource = 'route+customer';
-        appliedDiscountType = 'percent';
-        appliedDiscountValue = customerDiscount;
-      }
+        : categoryStacked.totalAmount,
+      appliedCategoryMinQty: categoryStacked.lowestMinQty,
+      appliedTiersCount: categoryStacked.appliedTiers.length,
+    });
+  }
+
+  const customerDiscount = Number(customer?.discount || 0);
+  if (customerDiscount > 0) {
+    const customerPrice = effectiveBasePrice * (1 - customerDiscount / 100);
+    if (customerPrice < effectiveBasePrice) {
+      candidates.push({
+        price: customerPrice,
+        pricingSource: routeSpecificPrice !== null ? 'route+customer' : 'customer',
+        appliedDiscountType: 'percent',
+        appliedDiscountValue: customerDiscount,
+      });
     }
   }
+
+  candidates
+    .sort((a, b) => a.price - b.price)
+    .some((candidate) => {
+      if (!(candidate.price < priceToUse)) return false;
+      priceToUse = candidate.price;
+      pricingSource = candidate.pricingSource;
+      usedWholesale = Boolean(candidate.usedWholesale);
+      appliedDiscountType = candidate.appliedDiscountType || null;
+      appliedDiscountValue = candidate.appliedDiscountValue || 0;
+      appliedCategoryMinQty = candidate.appliedCategoryMinQty || null;
+      appliedTiersCount = candidate.appliedTiersCount || 0;
+      return true;
+    });
 
   priceToUse = Math.max(0, Math.round((priceToUse + Number.EPSILON) * 100) / 100);
   const roundedBasePrice = Math.round((effectiveBasePrice + Number.EPSILON) * 100) / 100;
