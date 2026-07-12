@@ -36,6 +36,7 @@ import WarehouseDashboardScreen from './android/app/src/screens/Warehouse/screen
 import WarehouseOrderDetailScreen from './android/app/src/screens/Warehouse/screens/WarehouseOrderDetailScreen';
 import ProductHandoverScreen from './android/app/src/screens/Warehouse/screens/ProductHandoverScreen';
 import MyDeliveriesScreen from './android/app/src/screens/Warehouse/screens/MyDeliveriesScreen';
+import ReturnsScreen from './android/app/src/screens/returns/ReturnsScreen';
 import DeliveryPaymentScreen from './android/app/src/screens/Warehouse/screens/DeliveryPaymentScreen';
 import DeliveryDoneScreen from './android/app/src/screens/Warehouse/screens/DeliveryDoneScreen';
 // ------------------------------------
@@ -74,9 +75,11 @@ const CustomersScreenAny = CustomersScreen as React.ComponentType<any>;
 const CreditsScreenAny = CreditsScreen as React.ComponentType<any>;
 const CreditsHistoryScreenAny = CreditsHistoryScreen as React.ComponentType<any>;
 const MyDeliveriesScreenAny = MyDeliveriesScreen as React.ComponentType<any>;
+const ReturnsScreenAny = ReturnsScreen as React.ComponentType<any>;
+const WarehouseDashboardScreenAny = WarehouseDashboardScreen as React.ComponentType<any>;
 
 function AppDrawer({ route, navigation }: any) {
-  const { role, user } = route?.params || {};
+  const { role, user, screen } = route?.params || {};
 
   // ── Obtener el nombre de la ruta activa del Drawer ──────────────────────
   const activeDrawerRoute = useNavigationState(
@@ -126,7 +129,7 @@ function AppDrawer({ route, navigation }: any) {
 
   return (
     <Drawer.Navigator
-      initialRouteName="DashboardScreen"
+      initialRouteName={screen || "DashboardScreen"}
       backBehavior="firstRoute"
       drawerContent={(props) => <Sidebar {...props} role={role} user={user} />}
       screenOptions={{ headerShown: false }}
@@ -213,10 +216,13 @@ function AppDrawer({ route, navigation }: any) {
 	  />
 
 	  {/* WAREHOUSE ROUTES */}
-	  <Drawer.Screen name="PreparePreSales"
-		  component={WarehouseDashboardScreen}
-          options={{ title: "Bodega - Control" }}
-	  />
+	  <Drawer.Screen name="PreparePreSales" options={{ title: "Bodega - Control" }}>
+		  {(props) => <WarehouseDashboardScreenAny {...props} user={user} role={role} />}
+	  </Drawer.Screen>
+
+      <Drawer.Screen name="Returns" options={{ drawerLabel: "Devoluciones" }}>
+        {(props) => <ReturnsScreenAny {...props} user={user} role={role} />}
+      </Drawer.Screen>
 
       <Drawer.Screen name="WarehouseOrderDetail"
         component={WarehouseOrderDetailScreen}

@@ -3,20 +3,21 @@ import { StyleSheet, Platform } from 'react-native';
 export default StyleSheet.create({
   container: {
       flex: 1,
-      backgroundColor: '#F5F6FA',
+      backgroundColor: '#F4F1FA',
     },
 
     header: {
       paddingTop: 50,
       paddingHorizontal: 16,
-      paddingBottom: 10,
+      paddingBottom: 14,
       backgroundColor: '#007AFF',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderBottomLeftRadius: 14,
-      borderBottomRightRadius: 14,
+      borderBottomLeftRadius: 28,
+      borderBottomRightRadius: 28,
       marginBottom: 10,
+      elevation: 8,
     },
 
     title: {

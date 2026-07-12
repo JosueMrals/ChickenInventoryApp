@@ -22,14 +22,14 @@ const ROLE_COLORS = {
   bodeguero:  { bg: '#F5F3FF', text: '#7C3AED', icon: 'cube' },
 };
 
-function UserCard({ item, currentUser, onEdit, onDelete }) {
+function UserCard({ item, currentUser, onView, onEdit, onDelete }) {
   const roleColor = ROLE_COLORS[item.role] ?? { bg: '#F1F5F9', text: '#475569', icon: 'person' };
   const initials  = `${item.nombre?.charAt(0) ?? ''}${item.apellido?.charAt(0) ?? ''}`.toUpperCase() || item.email?.charAt(0)?.toUpperCase() || '?';
   const fullName  = [item.nombre, item.apellido].filter(Boolean).join(' ') || '—';
   const isSelf    = item.id === currentUser?.uid;
 
   return (
-    <TouchableOpacity style={styles.card} onPress={() => onEdit(item)} activeOpacity={0.75}>
+    <TouchableOpacity style={styles.card} onPress={() => onView(item)} activeOpacity={0.75}>
       {/* Avatar */}
       <View style={[styles.cardAvatar, { backgroundColor: roleColor.bg }]}>
         <Text style={[styles.cardAvatarText, { color: roleColor.text }]}>{initials}</Text>
@@ -94,6 +94,10 @@ export default function UserManagementScreen({ route, navigation }) {
 
   if (currentRole !== 'admin') return null;
 
+  const handleViewPress = (user) => {
+    navigation.navigate('UserDetail', { userId: user.id, userData: user, role: currentRole, currentUser });
+  };
+
   const handleEditPress = (user) => {
     navigation.navigate('EditUser', { userData: user, onUpdateUser: updateUser });
   };
@@ -125,7 +129,7 @@ export default function UserManagementScreen({ route, navigation }) {
     if (loading) return <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 40 }} />;
     return (
       <View style={styles.emptyContainer}>
-        <Icon name="people-outline" size={64} color="#D1D5DB" />
+        <Icon name="people-outline" size={64} color="#C9C3D6" />
         <Text style={styles.emptyTitle}>
           {searchQuery ? 'Sin resultados' : 'Sin usuarios'}
         </Text>
@@ -142,8 +146,8 @@ export default function UserManagementScreen({ route, navigation }) {
     <View style={globalStyles.container}>
       {/* Header */}
       <View style={[globalStyles.header, styles.header]}>
-        <TouchableOpacity onPress={() => navigation.openDrawer()}>
-          <Icon name="menu" size={26} color="#fff" />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
+          <Icon name="chevron-back" size={22} color="#fff" />
         </TouchableOpacity>
         <Text style={[globalStyles.title, { flex: 1 }]}>Usuarios</Text>
         <View style={styles.headerBadge}>
@@ -176,11 +180,11 @@ export default function UserManagementScreen({ route, navigation }) {
       {/* Búsqueda */}
       <View style={styles.searchSection}>
         <View style={styles.searchBox}>
-          <Icon name="search" size={18} color="#9CA3AF" />
+          <Icon name="search" size={18} color="#9A93AA" />
           <TextInput
             style={styles.searchInput}
             placeholder="Buscar por nombre, correo o rol..."
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor="#B0AABF"
             value={searchQuery}
             onChangeText={setSearchQuery}
             autoCapitalize="none"
@@ -188,7 +192,7 @@ export default function UserManagementScreen({ route, navigation }) {
           />
           {searchQuery ? (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Icon name="close-circle" size={18} color="#9CA3AF" />
+              <Icon name="close-circle" size={18} color="#9A93AA" />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -202,6 +206,7 @@ export default function UserManagementScreen({ route, navigation }) {
           <UserCard
             item={item}
             currentUser={currentUser}
+            onView={handleViewPress}
             onEdit={handleEditPress}
             onDelete={deleteUser}
           />
@@ -230,13 +235,21 @@ export default function UserManagementScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   header: { marginBottom: 0 },
+  headerBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)',
+  },
   headerBadge: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 3,
     minWidth: 28,
     alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   headerBadgeText: { color: '#fff', fontWeight: '800', fontSize: 13 },
 
@@ -246,83 +259,74 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    paddingTop: 10,
+    paddingBottom: 4,
   },
   statChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#F1F5F9',
-    borderRadius: 20,
+    backgroundColor: '#fff',
+    borderRadius: 999,
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
+    borderWidth: 1.5,
+    borderColor: '#EDE9F7',
   },
-  statText: { fontSize: 11, fontWeight: '700', color: '#475569' },
+  statText: { fontSize: 11, fontWeight: '700', color: '#635F69' },
 
   /* Search */
   searchSection: {
-    backgroundColor: '#F7F9FC',
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EBEBEB',
+    paddingVertical: 8,
   },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
+    borderWidth: 1.5,
+    borderColor: '#EDE9F7',
+    elevation: 4,
   },
-  searchInput: { flex: 1, fontSize: 14, color: '#1A1A2E' },
+  searchInput: { flex: 1, fontSize: 14, color: '#332F3A', fontWeight: '600' },
 
   /* User Card */
   card: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 20,
+    padding: 12,
     marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1.5,
+    borderColor: '#EDE9F7',
+    elevation: 6,
   },
   cardAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  cardAvatarText: { fontSize: 18, fontWeight: '800' },
+  cardAvatarText: { fontSize: 17, fontWeight: '800' },
   cardInfo: { flex: 1, minWidth: 0 },
-  cardName: { fontSize: 15, fontWeight: '700', color: '#1A1A2E', marginBottom: 1 },
-  cardEmail: { fontSize: 12, color: '#64748B', marginBottom: 5 },
+  cardName: { fontSize: 14, fontWeight: '700', color: '#332F3A', marginBottom: 1 },
+  cardEmail: { fontSize: 12, color: '#7A7488', marginBottom: 5 },
   cardMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, alignItems: 'center' },
-  cardSub: { fontSize: 10, color: '#94A3B8', fontWeight: '500' },
+  cardSub: { fontSize: 10, color: '#9A93AA', fontWeight: '600' },
 
   rolePill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    borderRadius: 10,
+    borderRadius: 999,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
@@ -332,46 +336,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    borderRadius: 10,
+    borderRadius: 999,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
   verifiedOk: { backgroundColor: '#DCFCE7' },
-  verifiedPending: { backgroundColor: '#FEF3C7' },
+  verifiedPending: { backgroundColor: '#FEF3E2' },
   verifiedText: { fontSize: 10, fontWeight: '700' },
 
   cardActions: { gap: 6, alignItems: 'center' },
   editIconBtn: {
-    width: 34, height: 34, borderRadius: 10,
-    backgroundColor: '#EFF6FF',
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: '#E1EFFF',
     alignItems: 'center', justifyContent: 'center',
   },
   deleteIconBtn: {
-    width: 34, height: 34, borderRadius: 10,
-    backgroundColor: '#FEF2F2',
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: '#FDF2F2',
     alignItems: 'center', justifyContent: 'center',
   },
 
   /* Empty */
   emptyContainer: { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: '#9CA3AF' },
-  emptyDesc: { fontSize: 13, color: '#C4C9D4', textAlign: 'center', maxWidth: 260 },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#9A93AA' },
+  emptyDesc: { fontSize: 12, color: '#B0AABF', textAlign: 'center', maxWidth: 260 },
 
   /* FAB */
   fab: {
     position: 'absolute',
     right: 20,
     backgroundColor: '#007AFF',
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 6,
-    shadowColor: '#007AFF',
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
 });
 

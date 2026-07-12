@@ -1,36 +1,49 @@
 import { StyleSheet } from 'react-native';
 
 export default StyleSheet.create({
-  header: {
-    paddingHorizontal: 25,
-    paddingTop: 40,
-    paddingBottom: 20,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+  navBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
     flexDirection: 'row',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
-  headerContent: {
-    flex: 1,
+  navBarBg: {
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
   },
-  headerTitle: {
-    color: '#1A1A1A',
-    fontSize: 24,
+  collapsedTitle: {
+    position: 'absolute',
+    left: 70,
+    right: 70,
+    bottom: 8,
+    textAlign: 'center',
+    fontSize: 17,
     fontWeight: '700',
-    letterSpacing: -0.5,
+    color: '#1A1A1A',
   },
-  headerSubtitle: {
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarInitial: {
+    color: '#FFFFFF',
     fontSize: 14,
-    color: '#8E8E93',
-    marginTop: 2,
-    fontWeight: '500',
+    fontWeight: '700',
   },
   logoutButton: {
-    padding: 10,
-    backgroundColor: '#F2F2F7',
-    borderRadius: 12,
+    padding: 8,
+    backgroundColor: '#FFF1F0',
+    borderRadius: 10,
   },
 });

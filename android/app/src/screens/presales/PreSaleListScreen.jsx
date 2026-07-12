@@ -88,7 +88,7 @@ export default function PreSaleListScreen({ navigation }) {
         let data;
         if (activeTab === 'Pendientes') data = preSales.filter(p => p.status === 'pending');
         else if (activeTab === 'Crédito') data = preSales.filter(p => p.status === 'credit_pending' || p.paymentMethod === 'credit');
-        else if (activeTab === 'Pagadas') data = preSales.filter(p => p.status === 'paid');
+        else if (activeTab === 'Pagadas') data = preSales.filter(p => ['paid', 'partially_returned', 'returned'].includes(p.status));
         else data = [];
 
         if (!isAdmin) {

@@ -1,19 +1,15 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, Alert, Animated, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import auth from '@react-native-firebase/auth';
-import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigationRef } from '../../../../../../App';
 import styles from '../styles/DashboardHeaderStyles';
-import { useRoute } from '../../../context/RouteContext';
 
-export default function DashboardHeader({ user, role }) {
-  const navigation = useNavigation();
-  const { selectedRoute } = useRoute();
+const COLLAPSE_DISTANCE = 40;
 
-  // Normalizamos el rol a minúsculas para evitar problemas de mayúsculas/minúsculas
-  const safeRole = role ? role.toLowerCase() : '';
-  const canSelectRoute = ['vendedor', 'entregador', 'bodeguero', 'user'].includes(safeRole);
+export default function DashboardHeader({ displayName, scrollY }) {
+  const insets = useSafeAreaInsets();
 
   const handleLogout = async () => {
     try {
@@ -30,35 +26,29 @@ export default function DashboardHeader({ user, role }) {
     }
   };
 
-  const handleChangeRoute = () => {
-    navigation.navigate('RouteSelection', { user, role });
-  };
+  const collapseProgress = scrollY.interpolate({
+    inputRange: [0, COLLAPSE_DISTANCE],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
 
   return (
-    <View style={styles.header}>
-      <View style={styles.headerContent}>
-        <Text style={styles.headerTitle}>Bienvenido</Text>
-        <Text style={styles.headerSubtitle}>
-          {user.email} • {role ? role.toUpperCase() : ''}
-        </Text>
+    <View style={[styles.navBar, { height: insets.top + 44, paddingTop: insets.top }]}>
+      <Animated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, styles.navBarBg, { opacity: collapseProgress }]}
+      />
 
-        {/* Renderizado condicional de la selección de ruta */}
-        {canSelectRoute && (
-          <TouchableOpacity
-            onPress={handleChangeRoute}
-            style={{flexDirection: 'row', alignItems: 'center', marginTop: 8, paddingVertical: 4}}
-            activeOpacity={0.6}
-          >
-            <Icon name="location-sharp" size={16} color="#007AFF" style={{marginRight: 4}} />
-            <Text style={{color: '#007AFF', fontWeight: '700', fontSize: 14}}>
-              {selectedRoute ? `Ruta: ${selectedRoute.name}` : 'Seleccionar Ruta'}
-            </Text>
-            <Icon name="chevron-down" size={16} color="#007AFF" style={{marginLeft: 4}} />
-          </TouchableOpacity>
-        )}
+      <View style={styles.avatar}>
+        <Text style={styles.avatarInitial}>{displayName.charAt(0).toUpperCase()}</Text>
       </View>
+
+      <Animated.Text style={[styles.collapsedTitle, { opacity: collapseProgress }]} numberOfLines={1}>
+        {displayName}
+      </Animated.Text>
+
       <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-        <Icon name="log-out-outline" size={24} color="#FF3B30" />
+        <Icon name="log-out-outline" size={20} color="#FF3B30" />
       </TouchableOpacity>
     </View>
   );

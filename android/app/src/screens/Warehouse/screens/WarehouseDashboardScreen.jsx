@@ -6,8 +6,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import ReturnRequestsScreen from './ReturnRequestsScreen';
-import { subscribePendingReturnRequests } from '../../../services/returnService';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -31,11 +29,10 @@ try {
   // Ignorar si ya fue configurado (solo puede llamarse una vez)
 }
 
-export default function WarehouseDashboardScreen({ navigation }) {
+export default function WarehouseDashboardScreen({ navigation, user, role }) {
   const [preSales, setPreSales] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'list' | 'dashboard' | 'returns'
-  const [pendingReturnsCount, setPendingReturnsCount] = useState(0);
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'list' | 'dashboard'
 
   // Restore tab from navigation params (e.g. coming back from detail)
   useEffect(() => {
@@ -54,7 +51,18 @@ export default function WarehouseDashboardScreen({ navigation }) {
   const [todayAssignedCount, setTodayAssignedCount] = useState(0);
   const { selectedRoute } = useRoute();
 
+  // El bodeguero SIEMPRE trabaja sobre una ruta seleccionada; sin ruta se le
+  // exige elegir una (ver gate más abajo). Admin puede supervisar todas.
+  const requiresRoute = role !== 'admin';
+  const routeMissing = requiresRoute && !selectedRoute?.id;
+
   useEffect(() => {
+    if (routeMissing) {
+      setPreSales([]);
+      setLoading(false);
+      return undefined;
+    }
+
     // Solo obtener órdenes relevantes para Bodega (pending -> preparing -> ready_for_delivery)
     let query = firestore()
       .collection('presales')
@@ -83,15 +91,7 @@ export default function WarehouseDashboardScreen({ navigation }) {
         setLoading(false);
       });
     return () => subscriber();
-  }, [selectedRoute]); // Recargar si cambia la ruta
-
-  // Escuchar solicitudes de devolución pendientes para mostrar badge (filtrado por ruta)
-  useEffect(() => {
-    const unsub = subscribePendingReturnRequests((docs) => {
-      setPendingReturnsCount(docs.length);
-    }, selectedRoute?.id || null);
-    return () => unsub();
-  }, [selectedRoute]);
+  }, [selectedRoute, routeMissing]); // Recargar si cambia la ruta
 
   useEffect(() => {
     const unsub = firestore()
@@ -328,6 +328,38 @@ export default function WarehouseDashboardScreen({ navigation }) {
       );
   };
 
+  // Gate: el bodeguero debe seleccionar una ruta antes de ver/preparar productos.
+  // Evita mezclar productos de rutas distintas durante la preparación.
+  if (routeMissing) {
+    return (
+        <View style={styles.container}>
+            <View style={globalStyles.header}>
+                <TouchableOpacity onPress={() => navigation.goBack()}>
+                    <Icon name="chevron-back" size={28} color="#FFF" />
+                </TouchableOpacity>
+                <Text style={globalStyles.title}>Bodega - Preparar Productos</Text>
+                <View style={{ width: 28 }} />
+            </View>
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 }}>
+                <Icon name="map-outline" size={64} color="#C7C7CC" />
+                <Text style={{ fontSize: 17, fontWeight: '700', color: '#333', marginTop: 16, textAlign: 'center' }}>
+                    Selecciona una ruta
+                </Text>
+                <Text style={{ fontSize: 14, color: '#8E8E93', marginTop: 8, textAlign: 'center' }}>
+                    Para preparar productos primero debes elegir la ruta en la que vas a trabajar.
+                </Text>
+                <TouchableOpacity
+                    style={{ backgroundColor: '#007AFF', borderRadius: 30, paddingVertical: 14, paddingHorizontal: 28, marginTop: 24 }}
+                    onPress={() => navigation.navigate('RouteSelection', { user, role, returnTo: 'PreparePreSales' })}
+                    activeOpacity={0.8}
+                >
+                    <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 15 }}>Seleccionar Ruta</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+  }
+
   if (loading) {
     return (
         <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
@@ -398,20 +430,6 @@ export default function WarehouseDashboardScreen({ navigation }) {
             <Icon name="list-outline" size={20} color={activeTab === 'list' ? '#5856D6' : '#888'} />
             <Text style={[styles.tabText, activeTab === 'list' && styles.activeTabText]}>Ordenes</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'returns' && styles.activeTabButton]}
-            onPress={() => setActiveTab('returns')}
-        >
-            <View style={{ position: 'relative' }}>
-              <Icon name="return-up-back-outline" size={20} color={activeTab === 'returns' ? '#5856D6' : '#888'} />
-              {pendingReturnsCount > 0 && (
-                <View style={styles.returnBadge}>
-                  <Text style={styles.returnBadgeText}>{pendingReturnsCount > 9 ? '9+' : pendingReturnsCount}</Text>
-                </View>
-              )}
-            </View>
-            <Text style={[styles.tabText, activeTab === 'returns' && styles.activeTabText]}>Devoluciones</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Ambas vistas siempre montadas; se ocultan con display:'none' para evitar re-montaje
@@ -441,9 +459,6 @@ export default function WarehouseDashboardScreen({ navigation }) {
           />
         </View>
 
-        <View style={{ flex: 1, display: activeTab === 'returns' ? 'flex' : 'none' }}>
-          <ReturnRequestsScreen routeId={selectedRoute?.id || null} />
-        </View>
       </View>
     </View>
   );

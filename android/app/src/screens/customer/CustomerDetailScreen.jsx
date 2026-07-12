@@ -4,6 +4,7 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import { useCustomers } from './hooks/useCustomers';
 import { useSalesHistory } from './hooks/useSalesHistory';
 import FilterTabs from './components/FilterTabs';
+import PhotoGallery from './components/PhotoGallery';
 import styles from './styles/styles';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -63,6 +64,11 @@ export default function CustomerDetailScreen() {
         <Text style={styles.text}>Tel: {customer.phone}</Text>
         <Text style={styles.text}>Cédula: {customer.cedula || '-'}</Text>
         <Text style={styles.text}>Dirección: {customer.address || '-'}</Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Fotos</Text>
+        <PhotoGallery photos={customer.photos || []} />
       </View>
 
       <View style={styles.section}>

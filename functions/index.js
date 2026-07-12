@@ -179,6 +179,71 @@ exports.updateUserPassword = functions.https.onCall(async (reqData, context) => 
     }
 });
 
+// Resuelve el identificador de login (usuario o correo) al correo real.
+// Se llama ANTES de autenticar, por eso no usa ensureAdmin: solo App Check.
+exports.resolveLoginEmail = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
+    const data = getPayload(reqData);
+    const identifier = typeof data?.identifier === 'string' ? data.identifier.trim() : '';
+
+    if (!identifier) {
+        throw new functions.https.HttpsError('invalid-argument', 'Falta el usuario o correo.');
+    }
+
+    if (/^\S+@\S+\.\S+$/.test(identifier)) {
+        return { email: identifier.toLowerCase() };
+    }
+
+    const querySnap = await db.collection('users').where('user', '==', identifier).limit(1).get();
+    if (querySnap.empty || !querySnap.docs[0].data().email) {
+        throw new functions.https.HttpsError('not-found', 'Usuario no encontrado.');
+    }
+
+    return { email: querySnap.docs[0].data().email };
+});
+
+// Permite que cualquier usuario autenticado edite su PROPIO perfil.
+// Solo campos no sensibles — nunca 'role', 'email' ni 'verified' — para que
+// esto no se convierta en una vía de escalación de privilegios.
+exports.updateOwnProfile = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Se requiere autenticación.');
+    }
+
+    const data = getPayload(reqData);
+    const { nombre, apellido, user, cedula, telefono } = data;
+
+    if (!nombre?.trim() || !apellido?.trim() || !user?.trim()) {
+        throw new functions.https.HttpsError('invalid-argument', 'Nombre, apellido y usuario son obligatorios.');
+    }
+
+    const uid = context.auth.uid;
+    const updateData = {
+        nombre:    nombre.trim(),
+        apellido:  apellido.trim(),
+        user:      user.trim(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    updateData.cedula   = cedula?.trim()   || admin.firestore.FieldValue.delete();
+    updateData.telefono = telefono?.trim() || admin.firestore.FieldValue.delete();
+
+    try {
+        await db.collection('users').doc(uid).update(updateData);
+
+        try {
+            await admin.auth().updateUser(uid, { displayName: `${nombre.trim()} ${apellido.trim()}` });
+        } catch (profileErr) {
+            console.warn('No se pudo actualizar displayName en Auth:', profileErr);
+        }
+
+        return { success: true, message: 'Perfil actualizado.' };
+    } catch (error) {
+        console.error('Error actualizando perfil propio:', error);
+        throw new functions.https.HttpsError('internal', error.message);
+    }
+});
+
 // --- OPERACIONES DE NEGOCIO ---
 
 exports.dispatchPreSale = functions.https.onCall(async (reqData, context) => {

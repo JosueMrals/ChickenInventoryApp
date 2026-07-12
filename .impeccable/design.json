@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-05T00:00:00.000Z",
+  "title": "Design System: ChickenInventoryApp",
+  "extensions": {
+    "colorMeta": {
+      "field-blue": { "role": "primary", "displayName": "Field Blue", "canonical": "#007AFF", "tonalRamp": ["#001A38", "#003670", "#0052A8", "#0069D6", "#007AFF", "#3D9BFF", "#7FBBFF", "#C2DDFF"] },
+      "accent-purple": { "role": "secondary", "displayName": "Signal Purple", "canonical": "#5856D6", "tonalRamp": ["#141360", "#252296", "#3B38B8", "#4A47CB", "#5856D6", "#8583E3", "#B2B0EF", "#DEDDFA"] },
+      "success-green": { "role": "tertiary", "displayName": "Success Green", "canonical": "#34C759", "tonalRamp": ["#0B3317", "#124F24", "#1E7A38", "#289C48", "#34C759", "#66D680", "#99E5AA", "#CCF2D4"] },
+      "danger-red": { "role": "tertiary", "displayName": "Danger Red", "canonical": "#FF3B30", "tonalRamp": ["#3D0906", "#7A120C", "#B81C12", "#E6281C", "#FF3B30", "#FF6E66", "#FFA19B", "#FFD3D0"] },
+      "ink": { "role": "neutral", "displayName": "Deep Ink", "canonical": "#1A1A1A", "tonalRamp": ["#000000", "#0D0D0D", "#1A1A1A", "#333333", "#666666", "#999999", "#CCCCCC", "#F2F2F2"] },
+      "surface": { "role": "neutral", "displayName": "Pure Surface", "canonical": "#FFFFFF", "tonalRamp": ["#E0E0E0", "#E8E8E8", "#F0F0F0", "#F5F5F5", "#F9F9F9", "#FCFCFC", "#FFFFFF", "#FFFFFF"] },
+      "app-bg": { "role": "neutral", "displayName": "App Canvas", "canonical": "#F5F6FA", "tonalRamp": ["#B8BDD1", "#CDD1E1", "#DEE1EC", "#E9EBF3", "#F0F2F8", "#F5F6FA", "#F9FAFC", "#FDFDFE"] },
+      "shadow-ink": { "role": "neutral", "displayName": "Shadow Ink", "canonical": "#0A2540", "tonalRamp": ["#020A11", "#051526", "#0A2540", "#123B60", "#1D5686", "#3F7FAE", "#7EACCB", "#BFD8E8"] }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Screen header titles, white on Field Blue band." },
+      "sectionTitle": { "displayName": "Section Title", "purpose": "In-screen section headers (e.g. dashboard 'Modules')." },
+      "statValue": { "displayName": "Stat Value", "purpose": "The primary number on a stat card." },
+      "body": { "displayName": "Body / Label-strong", "purpose": "Card labels, module names, primary readable content." },
+      "label": { "displayName": "Label", "purpose": "Captions, timestamps, footer text." }
+    },
+    "shadows": [
+      { "name": "card-lift", "value": "shadowColor: #0A2540; shadowOffset: 0,2; shadowOpacity: 0.05; shadowRadius: 6; elevation: 2", "purpose": "The single elevation token used on every floating surface (stat cards, module cards)." }
+    ],
+    "motion": [],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Stat Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Icon + bold value + muted label, the dashboard's glanceable metric unit.",
+      "html": "<div class=\"ds-stat-card\"><div class=\"ds-stat-icon\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#007AFF\" stroke-width=\"2\"><path d=\"M3 3v18h18\"/><path d=\"M18 17V9\"/><path d=\"M13 17V5\"/><path d=\"M8 17v-3\"/></svg></div><div class=\"ds-stat-text\"><div class=\"ds-stat-value\">128</div><div class=\"ds-stat-label\">Ventas hoy</div></div></div>",
+      "css": ".ds-stat-card { display: flex; flex-direction: row; align-items: center; background: #FFFFFF; border-radius: 16px; padding: 10px; box-shadow: 0 2px 6px rgba(10,37,64,0.05); } .ds-stat-icon { width: 34px; height: 34px; border-radius: 12px; background: rgba(0,122,255,0.1); display: flex; align-items: center; justify-content: center; margin-right: 10px; } .ds-stat-value { color: #1A1A1A; font-size: 16px; font-weight: 800; line-height: 20px; } .ds-stat-label { color: #8E8E93; font-size: 11px; font-weight: 500; margin-top: 1px; }"
+    },
+    {
+      "name": "Module Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Icon-topped tappable card for dashboard module navigation.",
+      "html": "<div class=\"ds-module-card\"><div class=\"ds-module-icon\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#007AFF\" stroke-width=\"2\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"/></svg></div><div class=\"ds-module-label\">Inventario</div></div>",
+      "css": ".ds-module-card { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; background: #FFFFFF; border-radius: 16px; padding: 20px 8px; box-shadow: 0 2px 6px rgba(10,37,64,0.05); } .ds-module-icon { padding: 12px; border-radius: 16px; background: rgba(0,122,255,0.1); margin-bottom: 8px; } .ds-module-label { color: #1A1A1A; font-size: 14px; font-weight: 600; text-align: center; margin-top: 4px; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Pill-shaped primary action button, used for the app's single primary CTA per screen.",
+      "html": "<button class=\"ds-btn-primary\">Confirmar</button>",
+      "css": ".ds-btn-primary { background: #007AFF; color: #FFFFFF; padding: 14px 16px; border-radius: 30px; font-weight: 700; font-size: 14px; border: none; transition: opacity 0.15s; } .ds-btn-primary:hover, .ds-btn-primary:focus-visible { opacity: 0.85; } .ds-btn-primary:active { opacity: 0.7; }"
+    },
+    {
+      "name": "Success Button",
+      "kind": "button",
+      "refersTo": "button-success",
+      "description": "Confirm / paid / positive action button.",
+      "html": "<button class=\"ds-btn-success\">Marcar pagado</button>",
+      "css": ".ds-btn-success { background: #34C759; color: #FFFFFF; padding: 12px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; border: none; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive / delete / error action button.",
+      "html": "<button class=\"ds-btn-danger\">Eliminar</button>",
+      "css": ".ds-btn-danger { background: #FF3B30; color: #FFFFFF; padding: 12px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; border: none; }"
+    },
+    {
+      "name": "Screen Header",
+      "kind": "nav",
+      "refersTo": "card-header",
+      "description": "Full-width Field Blue header band with white bold title, used at the top of every screen.",
+      "html": "<div class=\"ds-header\"><span class=\"ds-header-title\">Ventas</span></div>",
+      "css": ".ds-header { background: #007AFF; padding: 50px 16px 10px; border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; display: flex; align-items: center; justify-content: space-between; } .ds-header-title { color: #FFFFFF; font-size: 22px; font-weight: 800; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Field Blue System",
+    "overview": "This is an operational tool, not a showcase: staff record sales, restock inventory, and close delivery routes on it, often one-handed, sometimes outdoors, sometimes at a warehouse counter. The system reads as clean and trustworthy — a single confident operational blue (#007AFF) anchors every screen (headers, primary actions, active states), sitting on white cards over a quiet light gray-blue canvas. There is no custom typeface; the system leans on the platform's own Roboto stack, weighted heavily (700-800) at the top of the hierarchy so numbers and titles stay legible at a glance. Depth is conveyed through one soft, barely-there shadow rather than layered elevation — the app is deliberately flat and calm, not skeuomorphic or glossy. This system explicitly rejects decoration for its own sake: no gradients, no glassmorphism, no ornamental color beyond the functional palette (blue for primary action, green for success/paid, red for danger/error). Every color has a job.",
+    "keyCharacteristics": [
+      "One dominant accent (#007AFF) carries primary actions and identity across all modules — headers, FABs, active tabs, primary buttons.",
+      "White cards (16px radius) float on a light gray-blue app background with one soft, consistent shadow recipe.",
+      "Type is system-default (Roboto), leaning bold (700-800) for numbers/titles and medium (500-600) for body/labels — no custom font stack.",
+      "Semantic color is functional only: green = success/paid, red = danger/error/delete, purple = a secondary/rare accent.",
+      "Pill-shaped (30px radius) primary action buttons and FABs; smaller 8-12px radii for cards, inputs, and icon containers."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Field Blue (#007AFF) is the only color that means \"this is the primary action or the app's identity.\" If a new component needs an accent, reach for Field Blue before introducing a new hue.", "section": "colors" },
+      { "name": "The Weight-Over-Family Rule", "body": "Hierarchy is built with font-weight and size on one system font, never a second typeface. Don't introduce a display font for emphasis — go heavier or bigger on the existing stack.", "section": "typography" },
+      { "name": "The One Shadow Rule", "body": "Every elevated surface uses the exact same shadow recipe. Don't invent a second, heavier shadow for \"more important\" cards — importance is carried by content and color, not by shadow depth.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use Field Blue (#007AFF) for the single primary action or identity element per screen.",
+      "Do use the Card Lift shadow (#0A2540 @ 0.05 opacity) for every elevated surface, uniformly.",
+      "Do keep hierarchy in weight and size on the system font — 800/700 for titles and numbers, 500/600 for body and labels.",
+      "Do reserve green/red strictly for success/paid and danger/error states.",
+      "Do keep primary buttons and FABs pill-shaped (30px radius) for easy one-handed tapping in the field."
+    ],
+    "donts": [
+      "Don't add gradients, glassmorphism, or decorative blur — this system is flat and functional, not a showcase.",
+      "Don't introduce a second display typeface; go heavier/bigger on the existing system font instead.",
+      "Don't invent a second shadow tier \"for emphasis\" — the One Shadow Rule means importance comes from content, not depth.",
+      "Don't use green or red decoratively outside their success/danger meaning.",
+      "Don't trade legibility for polish — low-contrast grays or dense unlabeled icon rows work against the field/warehouse mixed-use context this app runs in."
+    ]
+  }
+}

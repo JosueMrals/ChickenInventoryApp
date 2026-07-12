@@ -81,6 +81,9 @@ yarn-error.log
 android/**/google-services.json
 ios/**/GoogleService-Info.plist
 
+# Claves SSH — nunca deben entrar al repo
+.ssh/
+
 # Local secrets and env files
 .env
 .env.*

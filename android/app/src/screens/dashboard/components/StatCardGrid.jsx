@@ -1,7 +1,15 @@
 import React from 'react';
-import { View } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import StatCard from './StatCard';
-import styles from '../styles/dashboardStyles';
+
+// ponytail: estilos locales; el rediseño del dashboard eliminó statRow/statCardWrapper
+// de dashboardStyles y las tarjetas quedaban con altura 0.
+const styles = StyleSheet.create({
+  statRow: { flexDirection: 'row', alignItems: 'stretch', marginBottom: 10 },
+  // El wrapper es fila para que el `flex: 1` de StatCard mida ancho y no alto:
+  // en columna el flex lo dejaba con altura 0 y no se veia el contenido.
+  statCardWrapper: { flexDirection: 'row', paddingHorizontal: 5 },
+});
 
 /**
  * Componente para renderizar una grilla de StatCards con un layout personalizable.

@@ -11,7 +11,7 @@ export default function StatCard({ icon, color, title, value }) {
       </View>
       <View style={styles.statTextContainer}>
         <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
-        <Text style={styles.statTitle} numberOfLines={1}>{title}</Text>
+        <Text style={styles.statTitle} numberOfLines={2}>{title}</Text>
       </View>
     </View>
   );

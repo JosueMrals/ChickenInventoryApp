@@ -8,6 +8,7 @@ import HistoryDetailModal from './components/HistoryDetailModal';
 import { useRoute as useRouteContext } from '../../context/RouteContext'; // Rename to avoid conflict with navigation route
 import { resolveCustomerName } from '../../utils/customerUtils';
 import { createReturnRequest, subscribeReturnRequestsByPresale } from '../../services/returnService';
+import ReturnRequestModal from '../returns/components/ReturnRequestModal';
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
@@ -123,7 +124,6 @@ export default function PreSaleDetailScreen({ route, navigation }) {
     const [isDeleting, setIsDeleting] = useState(false);
     // Devolución
     const [returnModalVisible, setReturnModalVisible] = useState(false);
-    const [returnReason, setReturnReason] = useState('');
     const [submittingReturn, setSubmittingReturn] = useState(false);
     const [existingReturnRequest, setExistingReturnRequest] = useState(null);
 
@@ -163,9 +163,11 @@ export default function PreSaleDetailScreen({ route, navigation }) {
 
     // Escuchar solicitudes de devolución activas para esta venta
     useEffect(() => {
-        if (presale.status !== 'paid') return;
+        if (!['paid', 'partially_returned'].includes(presale.status)) return;
         const unsub = subscribeReturnRequestsByPresale(presale.id, (docs) => {
-            const active = docs.find((d) => d.status === 'pending_review' || d.status === 'approved');
+            // Solo una solicitud en revisión bloquea nuevas devoluciones; tras aprobarse
+            // se permiten devoluciones parciales adicionales.
+            const active = docs.find((d) => d.status === 'pending_review');
             setExistingReturnRequest(active || null);
         });
         return () => unsub();
@@ -313,18 +315,11 @@ export default function PreSaleDetailScreen({ route, navigation }) {
     // Vamos a asumir que el rol se pasa o se obtiene. Si no, ocultamos.
     const showPayButton = presale.status === 'pending' && (userRole === 'admin' || userRole === 'entregador');
     const canDelete = presale.status === 'pending' || presale.status === 'credit_pending';
-    const isPaid = presale.status === 'paid' || presale.status === 'returned';
+    const isPaid = ['paid', 'returned', 'partially_returned'].includes(presale.status);
 
-    const handleOpenReturnModal = useCallback(() => {
-        setReturnReason('');
-        setReturnModalVisible(true);
-    }, []);
+    const handleOpenReturnModal = useCallback(() => setReturnModalVisible(true), []);
 
-    const handleSubmitReturn = useCallback(async () => {
-        if (!returnReason.trim()) {
-            Alert.alert('Campo requerido', 'Debes ingresar una razón detallada para la devolución.');
-            return;
-        }
+    const handleSubmitReturn = useCallback(async (reason, selItems, selBonuses) => {
         try {
             setSubmittingReturn(true);
             await createReturnRequest({
@@ -333,7 +328,9 @@ export default function PreSaleDetailScreen({ route, navigation }) {
                     ...presale,
                     customerName: resolveCustomerName(presale, customersById),
                 },
-                reason: returnReason.trim(),
+                items: selItems,
+                bonuses: selBonuses,
+                reason,
                 requestedByRole: userRole === 'admin' ? 'admin' : 'vendedor',
             });
             setReturnModalVisible(false);
@@ -343,7 +340,7 @@ export default function PreSaleDetailScreen({ route, navigation }) {
         } finally {
             setSubmittingReturn(false);
         }
-    }, [returnReason, presale, customersById, userRole]);
+    }, [presale, customersById, userRole]);
 
     return (
         <SafeAreaView style={globalStyles.container}>
@@ -465,49 +462,14 @@ export default function PreSaleDetailScreen({ route, navigation }) {
                 </View>
             </Modal>
 
-            {/* Modal de solicitud de devolución */}
-            <Modal
+            {/* Modal de solicitud de devolución (selección de productos + razón) */}
+            <ReturnRequestModal
                 visible={returnModalVisible}
-                transparent
-                animationType="slide"
-                onRequestClose={() => !submittingReturn && setReturnModalVisible(false)}>
-                <View style={styles.modalBackdrop}>
-                    <View style={styles.modalCard}>
-                        <Text style={styles.modalTitle}>Solicitar Devolución</Text>
-                        <Text style={styles.modalText}>
-                            La solicitud será revisada manualmente por bodega.
-                            Los productos serán devueltos al inventario solo tras su confirmación.
-                        </Text>
-                        <Text style={styles.modalLabel}>Razón de devolución (obligatoria)</Text>
-                        <TextInput
-                            value={returnReason}
-                            onChangeText={setReturnReason}
-                            placeholder="Ej: Cliente devolvió el pedido por producto en mal estado..."
-                            placeholderTextColor="#9CA3AF"
-                            style={styles.reasonInput}
-                            multiline
-                            numberOfLines={4}
-                            editable={!submittingReturn}
-                        />
-                        <View style={styles.modalActions}>
-                            <TouchableOpacity
-                                style={styles.modalCancelButton}
-                                onPress={() => setReturnModalVisible(false)}
-                                disabled={submittingReturn}>
-                                <Text style={styles.modalCancelText}>Cancelar</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalDeleteButton, { backgroundColor: '#D92D20' }]}
-                                onPress={handleSubmitReturn}
-                                disabled={submittingReturn}>
-                                {submittingReturn
-                                    ? <ActivityIndicator color="#fff" />
-                                    : <Text style={styles.modalDeleteText}>Enviar</Text>}
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
+                sale={{ ...presale, customerName: resolveCustomerName(presale, customersById) }}
+                onClose={() => !submittingReturn && setReturnModalVisible(false)}
+                onSubmit={handleSubmitReturn}
+                submitting={submittingReturn}
+            />
         </SafeAreaView>
     );
 }

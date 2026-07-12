@@ -1,196 +1,395 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView,
-  Animated,
   ScrollView,
-  Image,
+  Alert,
+  StyleSheet,
 } from 'react-native';
-import { firestore } from '../services/firebaseConfig';
+import Icon from 'react-native-vector-icons/Ionicons';
+import { firestore, functions } from '../services/firebaseConfig';
 import auth from '@react-native-firebase/auth';
+import globalStyles from '../styles/globalStyles';
+import { useAdaptiveBottom } from '../hooks/useAdaptiveBottom';
 
-export default function ProfileScreen({ route, navigation }) {
-  const { user: routeUser, role: routeRole } = route.params || {};
-  const [user, setUser] = useState(routeUser || auth().currentUser);
-  const [role, setRole] = useState(routeRole || '');
-  const [loading, setLoading] = useState(false);
-  const [profileData, setProfileData] = useState(null);
-  const fadeAnim = useState(new Animated.Value(0))[0];
+const EMPTY_FORM = { nombre: '', apellido: '', user: '', cedula: '', telefono: '' };
 
-  useEffect(() => {
-    if (user?.uid) fetchProfile();
+const ROLE_COLORS = {
+  admin:      { bg: '#EFF6FF', text: '#1D4ED8', icon: 'shield-checkmark' },
+  vendedor:   { bg: '#F0FDF4', text: '#16A34A', icon: 'cart' },
+  entregador: { bg: '#FFF7ED', text: '#EA580C', icon: 'bicycle' },
+  bodeguero:  { bg: '#F5F3FF', text: '#7C3AED', icon: 'cube' },
+};
 
-    // Animación de entrada
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
-  }, [user]);
+const formatDate = (value) => {
+  if (!value) return null;
+  const date = typeof value?.toDate === 'function' ? value.toDate() : new Date(value.seconds ? value.seconds * 1000 : value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString('es-NI', { year: 'numeric', month: 'long', day: 'numeric' });
+};
 
-  const fetchProfile = async () => {
-    try {
-      setLoading(true);
-      const docSnap = await firestore().collection('users').doc(user.uid).get();
-      if (docSnap.exists) setProfileData(docSnap.data());
-    } catch (e) {
-      console.log('🔥 Error obteniendo perfil:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await auth().signOut();
-    navigation.replace('Login');
-  };
-
-  const firstLetter = user?.email?.charAt(0)?.toUpperCase() || 'U';
-
+function InfoRow({ icon, label, value }) {
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 40 }}>
-        {/* 🔷 Header con gradiente */}
-        <View
-          style={{
-            height: 180,
-            backgroundColor: '#007AFF',
-            borderBottomLeftRadius: 25,
-            borderBottomRightRadius: 25,
-            justifyContent: 'center',
-            alignItems: 'center',
-            shadowColor: '#007AFF',
-            shadowOpacity: 0.3,
-            shadowRadius: 10,
-            elevation: 6,
-          }}
-        >
-          <View
-            style={{
-              width: 100,
-              height: 100,
-              borderRadius: 50,
-              backgroundColor: '#fff',
-              justifyContent: 'center',
-              alignItems: 'center',
-              marginBottom: 8,
-              elevation: 4,
-            }}
-          >
-            <Text style={{ fontSize: 36, color: '#007AFF', fontWeight: '700' }}>
-              {firstLetter}
-            </Text>
-          </View>
-          <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700' }}>
-            {user?.email}
-          </Text>
-          <Text style={{ color: '#E0E0E0', fontSize: 14 }}>
-            {role?.toUpperCase() || profileData?.role?.toUpperCase() || 'USER'}
-          </Text>
-        </View>
-
-        {/* 🧾 Datos del perfil */}
-        <Animated.View
-          style={{
-            flex: 1,
-            padding: 20,
-            opacity: fadeAnim,
-            transform: [
-              {
-                translateY: fadeAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [20, 0],
-                }),
-              },
-            ],
-          }}
-        >
-          {loading ? (
-            <View style={{ justifyContent: 'center', alignItems: 'center', marginTop: 40 }}>
-              <ActivityIndicator size="large" color="#007AFF" />
-            </View>
-          ) : (
-            <View style={{ gap: 15 }}>
-              <View style={card}>
-                <Text style={label}>Correo electrónico</Text>
-                <Text style={value}>{user?.email}</Text>
-              </View>
-
-              <View style={card}>
-                <Text style={label}>Rol</Text>
-                <Text style={[value, { color: role === 'admin' ? '#007AFF' : '#333' }]}>
-                  {role || profileData?.role || 'user'}
-                </Text>
-              </View>
-
-              <View style={card}>
-                <Text style={label}>ID de usuario (UID)</Text>
-                <Text
-                  style={[value, { fontSize: 13, color: '#666' }]}
-                  numberOfLines={1}
-                  ellipsizeMode="middle"
-                >
-                  {user?.uid}
-                </Text>
-              </View>
-
-              {profileData?.createdAt && (
-                <View style={card}>
-                  <Text style={label}>Fecha de registro</Text>
-                  <Text style={value}>
-                    {new Date(profileData.createdAt.seconds * 1000).toLocaleString()}
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
-        </Animated.View>
-
-        {/* 🔴 Botón de cerrar sesión */}
-        <TouchableOpacity
-          onPress={handleLogout}
-          activeOpacity={0.8}
-          style={{
-            backgroundColor: '#FF3B30',
-            marginHorizontal: 20,
-            marginTop: 10,
-            paddingVertical: 14,
-            borderRadius: 12,
-            alignItems: 'center',
-            elevation: 4,
-          }}
-        >
-          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>
-            Cerrar sesión
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
+    <View style={ls.infoRow}>
+      <View style={ls.infoIconWrap}>
+        <Icon name={icon} size={15} color="#9A93AA" />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={ls.infoLabel}>{label}</Text>
+        <Text style={ls.infoValue}>{value || 'No registrado'}</Text>
+      </View>
+    </View>
   );
 }
 
-const card = {
-  backgroundColor: '#fff',
-  borderRadius: 12,
-  padding: 16,
-  elevation: 2,
-  shadowColor: '#000',
-  shadowOpacity: 0.1,
-  shadowRadius: 6,
-};
+function EditField({ label, value, onChangeText, placeholder, keyboard, optional }) {
+  return (
+    <View style={ls.fieldWrap}>
+      <Text style={ls.label}>
+        {label} {optional && <Text style={ls.optional}>(opcional)</Text>}
+      </Text>
+      <View style={ls.inputRow}>
+        <TextInput
+          style={ls.input}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor="#B0AABF"
+          keyboardType={keyboard}
+          autoCapitalize={keyboard ? 'sentences' : 'none'}
+        />
+      </View>
+    </View>
+  );
+}
 
-const label = {
-  fontSize: 14,
-  color: '#999',
-  fontWeight: '500',
-  marginBottom: 4,
-};
+export default function ProfileScreen({ route, navigation }) {
+  const { user: routeUser, role: routeRole } = route.params || {};
+  const [user] = useState(routeUser || auth().currentUser);
+  const [role] = useState(routeRole || '');
+  const [loading, setLoading] = useState(false);
+  const [profileData, setProfileData] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const { bottomPadding } = useAdaptiveBottom();
 
-const value = {
-  fontSize: 16,
-  color: '#222',
-  fontWeight: '600',
-};
+  // Evita que un snapshot en vivo (propio o de un admin editando en paralelo)
+  // sobreescriba lo que el usuario está tecleando en modo edición.
+  const editingRef = useRef(editing);
+  useEffect(() => { editingRef.current = editing; }, [editing]);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    setLoading(true);
+    const unsubscribe = firestore()
+      .collection('users')
+      .doc(user.uid)
+      .onSnapshot(
+        (docSnap) => {
+          if (docSnap.exists) {
+            const data = docSnap.data();
+            setProfileData(data);
+            if (!editingRef.current) {
+              setForm({
+                nombre: data.nombre || '',
+                apellido: data.apellido || '',
+                user: data.user || '',
+                cedula: data.cedula || '',
+                telefono: data.telefono || '',
+              });
+            }
+          }
+          setLoading(false);
+        },
+        (error) => {
+          console.error('🔥 Error escuchando perfil:', error);
+          setLoading(false);
+        }
+      );
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  const setField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const startEditing = () => {
+    if (profileData) {
+      setForm({
+        nombre: profileData.nombre || '',
+        apellido: profileData.apellido || '',
+        user: profileData.user || '',
+        cedula: profileData.cedula || '',
+        telefono: profileData.telefono || '',
+      });
+    }
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.nombre.trim() || !form.apellido.trim() || !form.user.trim()) {
+      Alert.alert('Campos incompletos', 'Nombre, apellido y usuario son obligatorios.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updateFn = functions().httpsCallable('updateOwnProfile');
+      await updateFn({ data: form });
+      setProfileData((prev) => ({ ...prev, ...form }));
+      setEditing(false);
+      Alert.alert('✅ Perfil actualizado');
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'No se pudo actualizar el perfil.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert('Cerrar sesión', '¿Estás seguro de que deseas cerrar sesión?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Salir',
+        style: 'destructive',
+        onPress: async () => {
+          await auth().signOut();
+          navigation.replace('Login');
+        },
+      },
+    ]);
+  };
+
+  const roleKey = (role || profileData?.role || 'user').toLowerCase();
+  const roleColor = ROLE_COLORS[roleKey] ?? { bg: '#F1F5F9', text: '#475569', icon: 'person' };
+  const initials = `${profileData?.nombre?.charAt(0) ?? ''}${profileData?.apellido?.charAt(0) ?? ''}`.toUpperCase()
+    || user?.email?.charAt(0)?.toUpperCase() || '?';
+  const fullName = [profileData?.nombre, profileData?.apellido].filter(Boolean).join(' ') || 'Sin nombre';
+
+  return (
+    <View style={ls.flex}>
+      {/* Header */}
+      <View style={globalStyles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={ls.headerBtn}>
+          <Icon name="chevron-back" size={22} color="#fff" />
+        </TouchableOpacity>
+        <Text style={[globalStyles.title, { flex: 1 }]} numberOfLines={1}>Mi Perfil</Text>
+        {!editing && (
+          <TouchableOpacity onPress={startEditing} style={ls.headerBtn}>
+            <Icon name="create-outline" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <ScrollView
+        contentContainerStyle={[ls.scroll, { paddingBottom: bottomPadding + 90 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {loading ? (
+          <View style={ls.center}>
+            <ActivityIndicator size="large" color="#007AFF" />
+          </View>
+        ) : (
+          <>
+            {/* Avatar + info */}
+            <View style={ls.avatarCard}>
+              <View style={[ls.avatar, { backgroundColor: roleColor.bg }]}>
+                <Text style={[ls.avatarText, { color: roleColor.text }]}>{initials}</Text>
+              </View>
+              <View style={ls.avatarInfo}>
+                <Text style={ls.avatarName}>{fullName}</Text>
+                <Text style={ls.avatarEmail}>{user?.email}</Text>
+                <View style={[ls.roleBadge, { backgroundColor: roleColor.bg }]}>
+                  <Icon name={roleColor.icon} size={11} color={roleColor.text} />
+                  <Text style={[ls.roleBadgeText, { color: roleColor.text }]}>
+                    {roleKey.charAt(0).toUpperCase() + roleKey.slice(1)}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {editing ? (
+              <View style={ls.section}>
+                <View style={ls.sectionTitleRow}>
+                  <View style={ls.sectionIcon}>
+                    <Icon name="create-outline" size={16} color="#007AFF" />
+                  </View>
+                  <Text style={ls.sectionTitle}>Editar información</Text>
+                </View>
+
+                <View style={ls.row}>
+                  <View style={{ flex: 1 }}>
+                    <EditField label="Nombre" value={form.nombre} onChangeText={(t) => setField('nombre', t)} placeholder="Nombre" />
+                  </View>
+                  <View style={{ width: 8 }} />
+                  <View style={{ flex: 1 }}>
+                    <EditField label="Apellido" value={form.apellido} onChangeText={(t) => setField('apellido', t)} placeholder="Apellido" />
+                  </View>
+                </View>
+
+                <EditField label="Usuario" value={form.user} onChangeText={(t) => setField('user', t)} placeholder="usuario123" />
+                <EditField label="Cédula" value={form.cedula} onChangeText={(t) => setField('cedula', t)} placeholder="000-000000-0000X" optional />
+                <EditField label="Teléfono" value={form.telefono} onChangeText={(t) => setField('telefono', t)} placeholder="+505 0000-0000" keyboard="phone-pad" optional />
+              </View>
+            ) : (
+              <>
+                <View style={ls.section}>
+                  <View style={ls.sectionTitleRow}>
+                    <View style={ls.sectionIcon}>
+                      <Icon name="key-outline" size={16} color="#007AFF" />
+                    </View>
+                    <Text style={ls.sectionTitle}>Información de acceso</Text>
+                  </View>
+                  <InfoRow icon="at-outline" label="Usuario" value={profileData?.user} />
+                  <InfoRow icon="mail-outline" label="Correo electrónico" value={user?.email} />
+                </View>
+
+                <View style={ls.section}>
+                  <View style={ls.sectionTitleRow}>
+                    <View style={[ls.sectionIcon, { backgroundColor: '#F5F3FF' }]}>
+                      <Icon name="person-outline" size={16} color="#7C3AED" />
+                    </View>
+                    <Text style={ls.sectionTitle}>Información personal</Text>
+                  </View>
+                  <InfoRow icon="card-outline" label="Cédula" value={profileData?.cedula} />
+                  <InfoRow icon="call-outline" label="Teléfono" value={profileData?.telefono} />
+                </View>
+
+                <View style={ls.section}>
+                  <View style={ls.sectionTitleRow}>
+                    <View style={[ls.sectionIcon, { backgroundColor: '#FFF7ED' }]}>
+                      <Icon name="shield-checkmark-outline" size={16} color="#EA580C" />
+                    </View>
+                    <Text style={ls.sectionTitle}>Cuenta</Text>
+                  </View>
+                  <InfoRow icon="finger-print-outline" label="ID de usuario" value={user?.uid} />
+                  {!!formatDate(profileData?.createdAt) && (
+                    <InfoRow icon="calendar-outline" label="Miembro desde" value={formatDate(profileData?.createdAt)} />
+                  )}
+                </View>
+              </>
+            )}
+          </>
+        )}
+      </ScrollView>
+
+      {/* Footer con acciones */}
+      {!loading && (
+        <View style={[ls.footer, { paddingBottom: bottomPadding }]}>
+          {editing ? (
+            <>
+              <TouchableOpacity style={ls.btnCancel} onPress={() => setEditing(false)} disabled={saving}>
+                <Text style={ls.btnCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={ls.btnSave} onPress={handleSave} disabled={saving}>
+                {saving ? <ActivityIndicator color="#fff" size="small" /> : (
+                  <>
+                    <Icon name="save-outline" size={18} color="#fff" />
+                    <Text style={ls.btnSaveText}>Guardar</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={ls.btnSave} onPress={startEditing}>
+                <Icon name="create-outline" size={18} color="#fff" />
+                <Text style={ls.btnSaveText}>Editar perfil</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={ls.logoutBtn} onPress={handleLogout}>
+                <Icon name="log-out-outline" size={19} color="#EF4444" />
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+const ls = StyleSheet.create({
+  flex: { flex: 1, backgroundColor: '#F4F1FA' },
+  center: { alignItems: 'center', justifyContent: 'center', marginTop: 60 },
+  scroll: { padding: 14 },
+  row: { flexDirection: 'row' },
+
+  headerBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)',
+  },
+
+  avatarCard: {
+    backgroundColor: '#fff', borderRadius: 20, padding: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 12,
+    borderWidth: 1.5, borderColor: '#EDE9F7', elevation: 6,
+  },
+  avatar: {
+    width: 64, height: 64, borderRadius: 32,
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  avatarText: { fontSize: 22, fontWeight: '800' },
+  avatarInfo: { flex: 1 },
+  avatarName: { fontSize: 16, fontWeight: '800', color: '#332F3A', marginBottom: 2 },
+  avatarEmail: { fontSize: 12, color: '#7A7488', marginBottom: 7 },
+  roleBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3,
+  },
+  roleBadgeText: { fontSize: 11, fontWeight: '700' },
+
+  section: {
+    backgroundColor: '#fff', borderRadius: 20, padding: 14, marginBottom: 12,
+    borderWidth: 1.5, borderColor: '#EDE9F7', elevation: 6,
+  },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 },
+  sectionIcon: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: '#E1EFFF', alignItems: 'center', justifyContent: 'center',
+  },
+  sectionTitle: { fontSize: 14, fontWeight: '800', color: '#332F3A', flex: 1 },
+
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  infoIconWrap: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#F4F1FA', alignItems: 'center', justifyContent: 'center',
+  },
+  infoLabel: {
+    fontSize: 10, color: '#9A93AA', fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 2,
+  },
+  infoValue: { fontSize: 14, color: '#332F3A', fontWeight: '600' },
+
+  fieldWrap: { marginBottom: 10, flex: 1 },
+  label: { fontSize: 11, fontWeight: '700', color: '#635F69', marginBottom: 5, marginLeft: 3 },
+  optional: { fontWeight: '500', color: '#9A93AA', textTransform: 'none' },
+  inputRow: {
+    backgroundColor: '#F4F1FA', borderRadius: 13, paddingHorizontal: 12,
+    minHeight: 44, justifyContent: 'center',
+    borderWidth: 1.5, borderColor: '#E3DEF5',
+  },
+  input: { fontSize: 14, color: '#332F3A', fontWeight: '600', padding: 0 },
+
+  footer: {
+    flexDirection: 'row', gap: 10, padding: 14,
+    backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    borderTopWidth: 1.5, borderColor: '#EDE9F7', elevation: 10,
+  },
+  btnSave: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#007AFF', borderRadius: 16, paddingVertical: 14, elevation: 6,
+  },
+  btnSaveText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  btnCancel: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 16, paddingVertical: 14,
+    backgroundColor: '#F4F1FA', borderWidth: 1.5, borderColor: '#E3DEF5',
+  },
+  btnCancelText: { color: '#635F69', fontSize: 15, fontWeight: '700' },
+  logoutBtn: {
+    width: 52, alignItems: 'center', justifyContent: 'center', borderRadius: 16,
+    backgroundColor: '#FDF2F2', borderWidth: 1.5, borderColor: '#F5D9D9',
+  },
+});

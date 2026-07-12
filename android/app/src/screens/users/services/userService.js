@@ -1,15 +1,23 @@
 import { firestore, auth, functions } from '../../../services/firebaseConfig';
 
-// Escuchar cambios en la colección de usuarios en tiempo real
+const toMillis = (value) => {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+};
+
+// Escuchar cambios en la colección de usuarios en tiempo real.
+// Ordena en el cliente (no con .orderBy('createdAt')): Firestore excluye
+// silenciosamente cualquier doc sin ese campo, y no todos los usuarios lo tienen
+// (p. ej. creados directo en la consola de Firebase, antes de que existiera el campo).
 export const onUsersSnapshot = (callback) => {
   return firestore().collection('users')
-    .orderBy('createdAt', 'desc')
     .onSnapshot(
       (snapshot) => {
-        const usersList = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+        const usersList = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
         callback(usersList);
       },
       (error) => {

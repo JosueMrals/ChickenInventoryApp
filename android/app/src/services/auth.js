@@ -1,5 +1,20 @@
 // src/services/auth.js
-import { auth, firestore } from './firebaseConfig';
+import { auth, firestore, functions } from './firebaseConfig';
+
+// 🔹 Resuelve el identificador de login: si ya es un correo, lo usa tal cual
+// (comportamiento actual); si es un nombre de usuario, lo resuelve al correo
+// real vía Cloud Function (Firestore no es legible antes de autenticar).
+export const resolveLoginEmail = async (identifier) => {
+  const trimmed = (identifier || '').trim();
+  const emailRegex = /^\S+@\S+\.\S+$/;
+  if (emailRegex.test(trimmed)) {
+    return trimmed;
+  }
+
+  const resolveFn = functions().httpsCallable('resolveLoginEmail');
+  const result = await resolveFn({ data: { identifier: trimmed } });
+  return result.data.email;
+};
 
 // 🔹 Login con verificación
 export const loginUser = async (email, password) => {

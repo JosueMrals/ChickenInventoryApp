@@ -8,8 +8,6 @@ import {
   ScrollView,
   ActivityIndicator,
   SafeAreaView,
-  Modal,
-  TextInput,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import DeliveryTicket from '../components/DeliveryTicket';
@@ -31,6 +29,7 @@ import {
   createReturnRequest,
   subscribeReturnRequestsByPresale,
 } from '../../../services/returnService';
+import ReturnRequestModal from '../../returns/components/ReturnRequestModal';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function DeliveryDoneScreen({ navigation, route }) {
@@ -45,7 +44,6 @@ export default function DeliveryDoneScreen({ navigation, route }) {
   const [bonusMovements, setBonusMovements] = useState([]);
   // Devolución
   const [returnModalVisible, setReturnModalVisible] = useState(false);
-  const [returnReason, setReturnReason] = useState('');
   const [submittingReturn, setSubmittingReturn] = useState(false);
   const [existingReturnRequest, setExistingReturnRequest] = useState(null);
 
@@ -128,7 +126,9 @@ export default function DeliveryDoneScreen({ navigation, route }) {
   useEffect(() => {
     if (!routeSale?.id) return;
     const unsub = subscribeReturnRequestsByPresale(routeSale.id, (docs) => {
-      const active = docs.find((d) => d.status === 'pending_review' || d.status === 'approved');
+      // Solo una solicitud en revisión bloquea nuevas devoluciones; tras aprobarse
+      // se permiten devoluciones parciales adicionales.
+      const active = docs.find((d) => d.status === 'pending_review');
       setExistingReturnRequest(active || null);
     });
     return () => unsub();
@@ -225,22 +225,17 @@ export default function DeliveryDoneScreen({ navigation, route }) {
     }
   };
 
-  const handleOpenReturnModal = () => {
-    setReturnReason('');
-    setReturnModalVisible(true);
-  };
+  const handleOpenReturnModal = () => setReturnModalVisible(true);
 
-  const handleSubmitReturn = async () => {
-    if (!returnReason.trim()) {
-      Alert.alert('Campo requerido', 'Debes ingresar una razón detallada para la devolución.');
-      return;
-    }
+  const handleSubmitReturn = async (reason, selItems, selBonuses) => {
     try {
       setSubmittingReturn(true);
       await createReturnRequest({
         presaleId: routeSale.id,
         sale: ticketSale,
-        reason: returnReason.trim(),
+        items: selItems,
+        bonuses: selBonuses,
+        reason,
         requestedByRole: 'entregador',
       });
       setReturnModalVisible(false);
@@ -345,49 +340,14 @@ export default function DeliveryDoneScreen({ navigation, route }) {
 
       </View>
 
-      {/* Modal de solicitud de devolución */}
-      <Modal
+      {/* Modal de solicitud de devolución (selección de productos + razón) */}
+      <ReturnRequestModal
         visible={returnModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => !submittingReturn && setReturnModalVisible(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Solicitar Devolución</Text>
-            <Text style={styles.modalDesc}>
-              La solicitud será enviada a bodega para verificación manual.
-              Los productos serán devueltos al inventario solo tras su confirmación.
-            </Text>
-            <Text style={styles.modalLabel}>Razón de devolución (obligatoria)</Text>
-            <TextInput
-              value={returnReason}
-              onChangeText={setReturnReason}
-              placeholder="Ej: El cliente rechazó el pedido al momento de la entrega..."
-              placeholderTextColor="#9CA3AF"
-              style={styles.reasonInput}
-              multiline
-              numberOfLines={4}
-              editable={!submittingReturn}
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setReturnModalVisible(false)}
-                disabled={submittingReturn}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalSubmitBtn}
-                onPress={handleSubmitReturn}
-                disabled={submittingReturn}>
-                {submittingReturn
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.modalSubmitText}>Enviar solicitud</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        sale={ticketSale}
+        onClose={() => !submittingReturn && setReturnModalVisible(false)}
+        onSubmit={handleSubmitReturn}
+        submitting={submittingReturn}
+      />
     </SafeAreaView>
   );
 }
@@ -489,7 +449,6 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     backgroundColor: '#F9FAFB',
   },
-  returnReason: { color: '#D92D20', fontSize: 14, fontWeight: '700' },
   returnStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -498,44 +457,4 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   returnStatusText: { fontSize: 13, fontWeight: '700', color: '#B45309' },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modalCard: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 32,
-  },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 8 },
-  modalDesc: { fontSize: 13, color: '#6B7280', lineHeight: 18, marginBottom: 14 },
-  modalLabel: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6 },
-  reasonInput: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#111827',
-    minHeight: 90,
-    textAlignVertical: 'top',
-    marginBottom: 16,
-  },
-  modalActions: { flexDirection: 'row', gap: 10 },
-  modalCancelBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    alignItems: 'center',
-  },
-  modalCancelText: { color: '#374151', fontWeight: '600', fontSize: 14 },
-  modalSubmitBtn: {
-    flex: 2,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#D92D20',
-    alignItems: 'center',
-  },
-  modalSubmitText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

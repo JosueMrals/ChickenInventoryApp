@@ -1,0 +1,38 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // =====================================================
+    // ⚙ Roles — espeja firestore.rules (users/{uid}.role)
+    // =====================================================
+    function hasRole(role) {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
+    function isAdmin() { return hasRole('admin'); }
+    function isVendedor() { return hasRole('vendedor'); }
+    function isEntregador() { return hasRole('entregador'); }
+    function isBodeguero() { return hasRole('bodeguero'); }
+    function isOperativo() { return isAdmin() || isVendedor() || isEntregador() || isBodeguero(); }
+
+    // =====================================================
+    // 📷 Fotos de clientes — customers/{customerId}/{fileName}
+    // Mismo criterio que la colección customers en firestore.rules:
+    // los 4 roles leen, solo admin/vendedor escriben o borran.
+    // =====================================================
+    match /customers/{customerId}/{fileName} {
+      allow read: if isOperativo();
+      allow write: if (isAdmin() || isVendedor())
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isAdmin() || isVendedor();
+    }
+
+    // Todo lo demás, denegado por defecto.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

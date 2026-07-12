@@ -185,6 +185,46 @@ service cloud.firestore {
     }
 
     // =====================================================
+    //  ↩ RETURN REQUESTS — solicitudes de devolución
+    // =====================================================
+    match /returnRequests/{returnId} {
+      allow read: if isOperativo();
+
+      // El solicitante (entregador o vendedor) crea la solicitud, siempre
+      // pendiente de revisión y a su propio nombre.
+      allow create: if (isAdmin() || isVendedor() || isEntregador())
+        && request.resource.data.status == 'pending_review'
+        && request.resource.data.requestedByUid == request.auth.uid;
+
+      // Bodega/admin aprueban o rechazan (verificación de cantidades).
+      // Solo desde 'pending_review': evita re-aprobar y duplicar el stock devuelto.
+      allow update: if (isAdmin() || isBodeguero())
+        && resource.data.status == 'pending_review'
+        && (request.resource.data.status == 'approved' || request.resource.data.status == 'rejected');
+
+      allow delete: if false;
+    }
+
+    // =====================================================
+    //  ⚠ DELIVERY SHORTAGES — faltantes a cargo del entregador
+    // =====================================================
+    match /deliveryShortages/{shortageId} {
+      allow read: if isOperativo();
+
+      // Se registran al aprobar una devolución con faltantes (bodega/admin)
+      allow create: if (isAdmin() || isBodeguero())
+        && request.resource.data.status == 'pending';
+
+      // Marcar como entregado posteriormente (reposición de stock).
+      // Solo pendiente → entregado: evita reponer el mismo faltante dos veces.
+      allow update: if (isAdmin() || isBodeguero())
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'fulfilled';
+
+      allow delete: if false;
+    }
+
+    // =====================================================
     //  🗺 ROUTES — rutas de reparto
     // =====================================================
     match /routes/{routeId} {

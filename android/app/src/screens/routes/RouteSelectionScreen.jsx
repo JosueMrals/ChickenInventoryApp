@@ -62,7 +62,7 @@ function getDayChip(name) {
 
 // ── Componente principal ──────────────────────────────────────────────────────
 export default function RouteSelectionScreen({ navigation, route }) {
-  const { user, role } = route.params || {};
+  const { user, role, returnTo } = route.params || {};
   const { updateRoute } = useRoute();
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -100,7 +100,7 @@ export default function RouteSelectionScreen({ navigation, route }) {
     setSelecting(selected.id);
     try {
       await updateRoute(selected);
-      navigation.replace('AppDrawer', { user, role });
+      navigation.replace('AppDrawer', { user, role, screen: returnTo });
     } catch {
       Alert.alert('Error', 'No se pudo seleccionar la ruta.');
     } finally {

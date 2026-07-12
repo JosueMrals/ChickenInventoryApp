@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput, ScrollView } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput } from 'react-native';
 import firestore from '@react-native-firebase/firestore';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
@@ -8,9 +8,19 @@ import { useRoute } from '../../../context/RouteContext';
 import { resolveCustomerName } from '../../../utils/customerUtils';
 import StatCardGrid from '../../dashboard/components/StatCardGrid';
 
+const isCreditSale = (item) =>
+  item?.paymentMethod === 'credit' || String(item?.status || '').startsWith('credit_');
+
+// Efectivo realmente recibido: el vuelto no cuenta, y un crédito puede abonarse parcial.
+const getCollectedAmount = (item) => {
+  const total = Number(item?.total) || 0;
+  const paid = Number(item?.amountPaid);
+  return Number.isFinite(paid) && paid > 0 ? Math.min(paid, total) : total;
+};
+
 // Componente para cada Entrega (Versión Resumida)
 const DeliveryItem = ({ item, onGoToPayment, customerName }) => {
-  const isCredit = item.paymentMethod === 'credit' || String(item.status || '').startsWith('credit_');
+  const isCredit = isCreditSale(item);
 
   const createdDate = item.createdAt
     ? new Date(item.createdAt.toDate()).toLocaleDateString() + ' ' + new Date(item.createdAt.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
@@ -82,6 +92,12 @@ const isWithinRange = (date, rangeKey) => {
     return baseDate.toDateString() === now.toDateString();
   }
 
+  if (rangeKey === 'yesterday') {
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    return baseDate.toDateString() === yesterday.toDateString();
+  }
+
   if (rangeKey === 'week') {
     const weekStart = new Date(now);
     weekStart.setDate(now.getDate() - 7);
@@ -94,6 +110,40 @@ const isWithinRange = (date, rangeKey) => {
 
   return true;
 };
+
+const DATE_CHIPS = [
+  { key: 'all', label: 'Todas' },
+  { key: 'today', label: 'Hoy' },
+  { key: 'yesterday', label: 'Ayer' },
+  { key: 'week', label: '7 dias' },
+  { key: 'month', label: 'Mes' },
+];
+
+const METHOD_CHIPS = [
+  { key: 'all', label: 'Todos' },
+  { key: 'cash', label: 'Efectivo' },
+  { key: 'credit', label: 'Credito' },
+];
+
+const matchesMethod = (item, methodKey) => {
+  if (methodKey === 'cash') return !isCreditSale(item);
+  if (methodKey === 'credit') return isCreditSale(item);
+  return true;
+};
+
+const FilterChips = ({ chips, value, onChange }) => (
+  <View style={styles.filterChips}>
+    {chips.map((chip) => (
+      <TouchableOpacity
+        key={chip.key}
+        style={[styles.chip, value === chip.key && styles.chipActive]}
+        onPress={() => onChange(chip.key)}
+      >
+        <Text style={[styles.chipText, value === chip.key && styles.chipTextActive]}>{chip.label}</Text>
+      </TouchableOpacity>
+    ))}
+  </View>
+);
 
 const getBonusSummary = (sale) => {
   const bonuses = sale?.bonusesAwarded || sale?.bonuses || [];
@@ -138,14 +188,14 @@ const HistoryItem = ({ item, onOpen, customerName }) => {
 
       {bonusSummary.hasBonuses && (
         <View style={styles.historyBonusRow}>
-          <Icon name="gift-outline" size={14} color="#6D28D9" />
+          <Icon name="gift-outline" size={14} color="#5856D6" />
           <Text style={styles.historyBonusText}>
             {bonusSummary.skuCount} regalo(s) · {bonusSummary.unitsCount} unidad(es)
           </Text>
         </View>
       )}
 
-      {(item.paymentMethod === 'credit' || String(item.status || '').startsWith('credit_')) && (
+      {isCreditSale(item) && (
         <View style={styles.historyBadgeRow}>
           <View style={styles.creditBadge}>
             <Text style={styles.creditBadgeText}>Crédito</Text>
@@ -162,14 +212,20 @@ export default function MyDeliveriesScreen({ user, role }) {
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [deliveryFilter, setDeliveryFilter] = useState('');
+  const [deliveryMethodFilter, setDeliveryMethodFilter] = useState('all');
   const [historyFilter, setHistoryFilter] = useState('');
   const [historyDateFilter, setHistoryDateFilter] = useState('all');
+  const [historyMethodFilter, setHistoryMethodFilter] = useState('all');
   const [activePanel, setActivePanel] = useState('pending');
+  const [showFilters, setShowFilters] = useState(false);
   const [customersById, setCustomersById] = useState({});
   const navigation = useNavigation();
   const { selectedRoute } = useRoute();
 
   const isAdmin = role === 'admin';
+  // El entregador siempre trabaja sobre una ruta seleccionada, igual que el
+  // bodeguero en WarehouseDashboardScreen; admin puede ver todas.
+  const routeMissing = !isAdmin && !selectedRoute?.id;
 
   useEffect(() => {
     const unsub = firestore()
@@ -197,6 +253,13 @@ export default function MyDeliveriesScreen({ user, role }) {
 
   useEffect(() => {
     if (!user || !user.uid) {
+        setLoading(false);
+        setLoadingHistory(false);
+        return;
+    }
+    if (routeMissing) {
+        setDeliveries([]);
+        setHistory([]);
         setLoading(false);
         setLoadingHistory(false);
         return;
@@ -281,7 +344,7 @@ export default function MyDeliveriesScreen({ user, role }) {
       subscriber();
       historySubscriber();
     };
-  }, [user, isAdmin, selectedRoute]);
+  }, [user, isAdmin, selectedRoute, routeMissing]);
 
   const handleGoToPayment = (item) => {
       navigation.navigate('DeliveryPayment', { delivery: item });
@@ -295,9 +358,10 @@ export default function MyDeliveriesScreen({ user, role }) {
     const query = normalizeQuery(deliveryFilter);
     return deliveries.filter((item) => {
       const customerName = resolveCustomerName(item, customersById);
-      return matchesFilter(item, query, customerName);
+      if (!matchesFilter(item, query, customerName)) return false;
+      return matchesMethod(item, deliveryMethodFilter);
     });
-  }, [deliveries, deliveryFilter, customersById]);
+  }, [deliveries, deliveryFilter, deliveryMethodFilter, customersById]);
 
   const filteredHistory = useMemo(() => {
     const query = normalizeQuery(historyFilter);
@@ -305,17 +369,79 @@ export default function MyDeliveriesScreen({ user, role }) {
     return history.filter((item) => {
       const customerName = resolveCustomerName(item, customersById);
       if (!matchesFilter(item, query, customerName)) return false;
+      if (!matchesMethod(item, historyMethodFilter)) return false;
       return isWithinRange(item.fechaPago || item.fechaEntregaRepartidor, rangeKey);
     });
-  }, [history, historyFilter, historyDateFilter, customersById]);
+  }, [history, historyFilter, historyDateFilter, historyMethodFilter, customersById]);
 
-  const totalPending = useMemo(() => {
-    return filteredDeliveries.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+  // Efectivo vs credito: lo que el entregador debe traer en mano no incluye el credito.
+  const pendingTotals = useMemo(() => {
+    return filteredDeliveries.reduce(
+      (acc, item) => {
+        const total = Number(item.total) || 0;
+        if (isCreditSale(item)) acc.credit += total;
+        else acc.cash += total;
+        return acc;
+      },
+      { cash: 0, credit: 0 }
+    );
   }, [filteredDeliveries]);
 
-  const totalCollected = useMemo(() => {
-    return filteredHistory.reduce((sum, item) => sum + (Number(item.total) || 0), 0);
+  const collectedTotals = useMemo(() => {
+    return filteredHistory.reduce(
+      (acc, item) => {
+        const amount = getCollectedAmount(item);
+        if (isCreditSale(item)) acc.credit += amount;
+        else acc.cash += amount;
+        return acc;
+      },
+      { cash: 0, credit: 0 }
+    );
   }, [filteredHistory]);
+
+  const isPending = activePanel === 'pending';
+  const searchValue = isPending ? deliveryFilter : historyFilter;
+  const routeHint = isAdmin
+    ? 'Administrador: todas las rutas'
+    : `Ruta: ${selectedRoute?.name || '---'}`;
+
+  // Chips activos (distintos del valor por defecto) para avisar que la lista viene filtrada
+  // aunque el panel de filtros este colapsado.
+  const activeFilterCount = isPending
+    ? Number(deliveryMethodFilter !== 'all')
+    : Number(historyMethodFilter !== 'all') + Number(historyDateFilter !== 'all');
+
+  // Gate: el entregador debe seleccionar una ruta antes de ver sus entregas.
+  // Mismo patrón que WarehouseDashboardScreen para el bodeguero.
+  if (routeMissing) {
+    return (
+      <View style={globalStyles.container}>
+        <View style={globalStyles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Icon name="chevron-back" size={28} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={globalStyles.title}>Mis Entregas</Text>
+          <View style={{ width: 28 }} />
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 }}>
+          <Icon name="map-outline" size={64} color="#C7C7CC" />
+          <Text style={{ fontSize: 17, fontWeight: '700', color: '#333', marginTop: 16, textAlign: 'center' }}>
+            Selecciona una ruta
+          </Text>
+          <Text style={{ fontSize: 14, color: '#8E8E93', marginTop: 8, textAlign: 'center' }}>
+            Para ver tus entregas primero debes elegir la ruta en la que vas a trabajar.
+          </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: '#007AFF', borderRadius: 30, paddingVertical: 14, paddingHorizontal: 28, marginTop: 24 }}
+            onPress={() => navigation.navigate('RouteSelection', { user, role, returnTo: 'MyDeliveries' })}
+            activeOpacity={0.8}
+          >
+            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 15 }}>Seleccionar Ruta</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={globalStyles.container}>
@@ -329,177 +455,180 @@ export default function MyDeliveriesScreen({ user, role }) {
 
       <View style={styles.bodyLayout}>
         <View style={styles.panelStrip}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.panelStripContent}
+          <TouchableOpacity
+            style={[styles.panelButton, activePanel === 'pending' && styles.panelButtonActive]}
+            onPress={() => setActivePanel('pending')}
           >
-            <TouchableOpacity
-              style={[styles.panelButton, activePanel === 'pending' && styles.panelButtonActive]}
-              onPress={() => setActivePanel('pending')}
-            >
-              <Icon name="bicycle-outline" size={18} color={activePanel === 'pending' ? '#fff' : '#475569'} />
-              <Text style={[styles.panelText, activePanel === 'pending' && styles.panelTextActive]}>Pendientes</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.panelButton, activePanel === 'history' && styles.panelButtonActive]}
-              onPress={() => setActivePanel('history')}
-            >
-              <Icon name="receipt-outline" size={18} color={activePanel === 'history' ? '#fff' : '#475569'} />
-              <Text style={[styles.panelText, activePanel === 'history' && styles.panelTextActive]}>Historial</Text>
-            </TouchableOpacity>
-          </ScrollView>
+            <Icon name="bicycle-outline" size={16} color={activePanel === 'pending' ? '#fff' : '#8E8E93'} />
+            <Text style={[styles.panelText, activePanel === 'pending' && styles.panelTextActive]}>
+              Pendientes ({filteredDeliveries.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.panelButton, activePanel === 'history' && styles.panelButtonActive]}
+            onPress={() => setActivePanel('history')}
+          >
+            <Icon name="receipt-outline" size={16} color={activePanel === 'history' ? '#fff' : '#8E8E93'} />
+            <Text style={[styles.panelText, activePanel === 'history' && styles.panelTextActive]}>
+              Historial ({filteredHistory.length})
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.contentPanel}>
-          {activePanel === 'pending' ? (
-            <View style={styles.panelContent}>
-              <Text style={styles.sectionTitle}>Pendientes por cobrar</Text>
-              {!isAdmin && selectedRoute?.name && (
-                <Text style={styles.routeHint}>Ruta activa: {selectedRoute.name}</Text>
-              )}
-              {isAdmin && (
-                <Text style={styles.routeHint}>Administrador: mostrando todas las rutas</Text>
-              )}
+          <View style={styles.toolbar}>
+            <View style={styles.searchBox}>
+              <Icon name="search-outline" size={16} color="#8E8E93" />
               <TextInput
-                value={deliveryFilter}
-                onChangeText={setDeliveryFilter}
-                placeholder="Buscar por cliente, id o total"
-                style={styles.filterInput}
-                placeholderTextColor="#9AA0A6"
+                value={isPending ? deliveryFilter : historyFilter}
+                onChangeText={isPending ? setDeliveryFilter : setHistoryFilter}
+                placeholder={isPending ? 'Buscar cliente, id o total' : 'Buscar en historial'}
+                style={styles.searchInput}
+                placeholderTextColor="#8E8E93"
                 autoCorrect={false}
               />
-              <View style={styles.statsContainer}>
-                <StatCardGrid
-                  availableStats={{
-                    pendingCount: {
-                      icon: 'bicycle-outline',
-                      color: '#2DCE89',
-                      title: 'Pendientes',
-                      value: filteredDeliveries.length,
-                    },
-                    pendingTotal: {
-                      icon: 'cash-outline',
-                      color: '#34C759',
-                      title: 'Total pendiente',
-                      value: `$${totalPending.toFixed(2)}`,
-                    },
-                  }}
-                  layout={[[
-                    { key: 'pendingCount', size: 1 },
-                    { key: 'pendingTotal', size: 1 },
-                  ]]}
-                />
-              </View>
-              {loading ? (
-                <View style={styles.centerContainer}>
-                  <ActivityIndicator size="small" color="#2DCE89" />
-                  <Text style={{ marginTop: 6 }}>Cargando tus entregas...</Text>
-                </View>
-              ) : (
-                <FlatList
-                  data={filteredDeliveries}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => (
-                    <DeliveryItem
-                      item={item}
-                      onGoToPayment={handleGoToPayment}
-                      customerName={resolveCustomerName(item, customersById)}
-                    />
-                  )}
-                  ListEmptyComponent={(
-                    <View style={styles.centerContainer}>
-                      <Icon name="bicycle-outline" size={80} color="#ddd" />
-                      <Text style={styles.emptyText}>No tienes entregas pendientes por cobrar.</Text>
-                    </View>
-                  )}
-                  contentContainerStyle={{ paddingBottom: 20, flexGrow: 1 }}
-                />
+              {!!searchValue && (
+                <TouchableOpacity onPress={() => (isPending ? setDeliveryFilter('') : setHistoryFilter(''))}>
+                  <Icon name="close-circle" size={16} color="#8E8E93" />
+                </TouchableOpacity>
               )}
+            </View>
+            <TouchableOpacity
+              style={[styles.filterToggle, (showFilters || activeFilterCount > 0) && styles.filterToggleActive]}
+              onPress={() => setShowFilters((prev) => !prev)}
+            >
+              <Icon
+                name="options-outline"
+                size={18}
+                color={showFilters || activeFilterCount > 0 ? '#fff' : '#8E8E93'}
+              />
+              {activeFilterCount > 0 && <Text style={styles.filterToggleBadge}>{activeFilterCount}</Text>}
+            </TouchableOpacity>
+          </View>
+
+          {isPending ? (
+            loading ? (
+              <View style={styles.centerContainer}>
+                <ActivityIndicator size="small" color="#007AFF" />
+                <Text style={{ marginTop: 6 }}>Cargando tus entregas...</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={filteredDeliveries}
+                keyExtractor={(item) => item.id}
+                keyboardShouldPersistTaps="handled"
+                ListHeaderComponent={(
+                  <View>
+                    {showFilters && (
+                      <FilterChips
+                        chips={METHOD_CHIPS}
+                        value={deliveryMethodFilter}
+                        onChange={setDeliveryMethodFilter}
+                      />
+                    )}
+                    <Text style={styles.routeHint}>{routeHint}</Text>
+                    <StatCardGrid
+                      availableStats={{
+                        pendingCash: {
+                          icon: 'cash-outline',
+                          color: '#007AFF',
+                          title: 'Efectivo por cobrar',
+                          value: `$${pendingTotals.cash.toFixed(2)}`,
+                        },
+                        pendingCredit: {
+                          icon: 'card-outline',
+                          color: '#5856D6',
+                          title: 'Credito por cobrar',
+                          value: `$${pendingTotals.credit.toFixed(2)}`,
+                        },
+                      }}
+                      layout={[[
+                        { key: 'pendingCash', size: 1 },
+                        { key: 'pendingCredit', size: 1 },
+                      ]]}
+                    />
+                  </View>
+                )}
+                renderItem={({ item }) => (
+                  <DeliveryItem
+                    item={item}
+                    onGoToPayment={handleGoToPayment}
+                    customerName={resolveCustomerName(item, customersById)}
+                  />
+                )}
+                ListEmptyComponent={(
+                  <View style={styles.centerContainer}>
+                    <Icon name="bicycle-outline" size={64} color="#E0E0E0" />
+                    <Text style={styles.emptyText}>No tienes entregas pendientes por cobrar.</Text>
+                  </View>
+                )}
+                contentContainerStyle={styles.listContent}
+              />
+            )
+          ) : loadingHistory ? (
+            <View style={styles.centerContainer}>
+              <ActivityIndicator size="small" color="#007AFF" />
+              <Text style={{ marginTop: 6 }}>Cargando historial...</Text>
             </View>
           ) : (
-            <View style={styles.panelContent}>
-              <Text style={styles.sectionTitle}>Historial de entregas</Text>
-              {!isAdmin && selectedRoute?.name && (
-                <Text style={styles.routeHint}>Ruta activa: {selectedRoute.name}</Text>
-              )}
-              {isAdmin && (
-                <Text style={styles.routeHint}>Administrador: mostrando todas las rutas</Text>
-              )}
-              <TextInput
-                value={historyFilter}
-                onChangeText={setHistoryFilter}
-                placeholder="Buscar en historial"
-                style={styles.filterInput}
-                placeholderTextColor="#9AA0A6"
-                autoCorrect={false}
-              />
-              <View style={styles.filterChips}>
-                {[
-                  { key: 'all', label: 'Todas' },
-                  { key: 'today', label: 'Hoy' },
-                  { key: 'week', label: '7 dias' },
-                  { key: 'month', label: 'Mes' },
-                ].map((chip) => (
-                  <TouchableOpacity
-                    key={chip.key}
-                    style={[styles.chip, historyDateFilter === chip.key && styles.chipActive]}
-                    onPress={() => setHistoryDateFilter(chip.key)}
-                  >
-                    <Text style={[styles.chipText, historyDateFilter === chip.key && styles.chipTextActive]}>
-                      {chip.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.statsContainer}>
-                <StatCardGrid
-                  availableStats={{
-                    paidCount: {
-                      icon: 'receipt-outline',
-                      color: '#007AFF',
-                      title: 'Cobradas',
-                      value: filteredHistory.length,
-                    },
-                    totalCollected: {
-                      icon: 'cash-outline',
-                      color: '#34C759',
-                      title: 'Total recaudado',
-                      value: `$${totalCollected.toFixed(2)}`,
-                    },
-                  }}
-                  layout={[[
-                    { key: 'paidCount', size: 1 },
-                    { key: 'totalCollected', size: 1 },
-                  ]]}
-                />
-              </View>
-              {loadingHistory ? (
-                <View style={styles.centerContainer}>
-                  <ActivityIndicator size="small" color="#2DCE89" />
-                  <Text style={{ marginTop: 6 }}>Cargando historial...</Text>
+            <FlatList
+              data={filteredHistory}
+              keyExtractor={(item) => item.id}
+              keyboardShouldPersistTaps="handled"
+              ListHeaderComponent={(
+                <View>
+                  {showFilters && (
+                    <>
+                      <FilterChips
+                        chips={DATE_CHIPS}
+                        value={historyDateFilter}
+                        onChange={setHistoryDateFilter}
+                      />
+                      <FilterChips
+                        chips={METHOD_CHIPS}
+                        value={historyMethodFilter}
+                        onChange={setHistoryMethodFilter}
+                      />
+                    </>
+                  )}
+                  <Text style={styles.routeHint}>{routeHint}</Text>
+                  <StatCardGrid
+                    availableStats={{
+                      cashCollected: {
+                        icon: 'cash-outline',
+                        color: '#34C759',
+                        title: 'Efectivo cobrado',
+                        value: `$${collectedTotals.cash.toFixed(2)}`,
+                      },
+                      creditCollected: {
+                        icon: 'card-outline',
+                        color: '#5856D6',
+                        title: 'Credito cobrado',
+                        value: `$${collectedTotals.credit.toFixed(2)}`,
+                      },
+                    }}
+                    layout={[[
+                      { key: 'cashCollected', size: 1 },
+                      { key: 'creditCollected', size: 1 },
+                    ]]}
+                  />
                 </View>
-              ) : (
-                <FlatList
-                  data={filteredHistory}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item }) => (
-                    <HistoryItem
-                      item={item}
-                      onOpen={openHistory}
-                      customerName={resolveCustomerName(item, customersById)}
-                    />
-                  )}
-                  ListEmptyComponent={(
-                    <View style={styles.centerContainer}>
-                      <Icon name="receipt-outline" size={80} color="#ddd" />
-                      <Text style={styles.emptyText}>No tienes entregas cobradas.</Text>
-                    </View>
-                  )}
-                  contentContainerStyle={{ paddingBottom: 20, flexGrow: 1 }}
+              )}
+              renderItem={({ item }) => (
+                <HistoryItem
+                  item={item}
+                  onOpen={openHistory}
+                  customerName={resolveCustomerName(item, customersById)}
                 />
               )}
-            </View>
+              ListEmptyComponent={(
+                <View style={styles.centerContainer}>
+                  <Icon name="receipt-outline" size={64} color="#E0E0E0" />
+                  <Text style={styles.emptyText}>No tienes entregas cobradas.</Text>
+                </View>
+              )}
+              contentContainerStyle={styles.listContent}
+            />
           )}
         </View>
       </View>
@@ -508,118 +637,83 @@ export default function MyDeliveriesScreen({ user, role }) {
 }
 
 const styles = StyleSheet.create({
+  // Tokens de ../DESIGN.md: Field Blue #007AFF (accion primaria/estado activo),
+  // verde #34C759 solo para cobrado/pagado, morado #5856D6 para credito, Card Lift como
+  // unica sombra.
   centerContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 20 },
-  emptyText: { textAlign: 'center', marginTop: 10, fontSize: 16, color: '#888', maxWidth: '80%' },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#111', marginBottom: 6 },
+  emptyText: { textAlign: 'center', marginTop: 10, fontSize: 16, color: '#8E8E93', maxWidth: '80%' },
   bodyLayout: { flex: 1 },
   panelStrip: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: '#F8FAFC',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  panelStripContent: {
-    gap: 10,
-    alignItems: 'center',
-  },
-  panelButton: {
     flexDirection: 'row',
     gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 16,
-    backgroundColor: '#E2E8F0',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F5F6FA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  panelButton: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: '#EEEEEE',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  panelButtonActive: { backgroundColor: '#2DCE89' },
-  panelText: { fontSize: 12, fontWeight: '700', color: '#475569' },
-  panelTextActive: { color: '#fff' },
-  contentPanel: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
-  panelContent: { flex: 1 },
-  filterInput: {
-    marginBottom: 12,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    color: '#111',
-  },
-  filterChips: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
-  statsContainer: {
-    marginBottom: -5,
-  },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#E2E8F0',
-  },
-  chipActive: { backgroundColor: '#111827' },
-  chipText: { fontSize: 12, color: '#334155', fontWeight: '600' },
-  chipTextActive: { color: '#fff' },
-  routeHint: { fontSize: 12, color: '#64748B', marginBottom: 8 },
-  historyCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 12,
-    padding: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-  },
-  historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  historyInfo: { flex: 1, paddingRight: 12, minWidth: 0 },
-  historyTitle: { fontSize: 14, fontWeight: 'bold', color: '#444', marginBottom: 2 },
-  historyCustomer: { fontSize: 15, fontWeight: '600', color: '#222', marginBottom: 2, flexWrap: 'wrap', flexShrink: 1 },
-  historyMeta: { fontSize: 12, color: '#888' },
-  historyRight: { alignItems: 'flex-end', gap: 4, flexShrink: 0, minWidth: 74 },
-  historyTotal: { fontSize: 16, fontWeight: 'bold', color: '#2DCE89' },
-  historyBadgeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8, flexShrink: 0 },
-  historyBonusRow: {
-    marginTop: 8,
-    borderRadius: 8,
-    backgroundColor: '#F3E8FF',
-    borderWidth: 1,
-    borderColor: '#DDD6FE',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+  panelButtonActive: { backgroundColor: '#007AFF' },
+  panelText: { fontSize: 12, fontWeight: '700', color: '#8E8E93' },
+  panelTextActive: { color: '#FFFFFF' },
+  contentPanel: { flex: 1, paddingHorizontal: 16, paddingTop: 10 },
+  toolbar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  searchBox: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-  },
-  historyBonusText: {
-    color: '#6D28D9',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  creditBadge: {
-    backgroundColor: '#1F2937',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  creditBadgeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  card: {
-    backgroundColor: '#fff',
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  searchInput: { flex: 1, paddingVertical: 8, color: '#1A1A1A', fontSize: 14, fontWeight: '600' },
+  filterToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 12,
+    backgroundColor: '#EEEEEE',
+  },
+  filterToggleActive: { backgroundColor: '#007AFF' },
+  filterToggleBadge: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  filterChips: { flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#EEEEEE',
+  },
+  chipActive: { backgroundColor: '#007AFF' },
+  chipText: { fontSize: 12, color: '#333333', fontWeight: '600' },
+  chipTextActive: { color: '#FFFFFF' },
+  routeHint: { fontSize: 11, fontWeight: '500', color: '#8E8E93', marginBottom: 6 },
+  listContent: { paddingBottom: 20, flexGrow: 1 },
+
+  // Card Lift: la unica receta de sombra del sistema.
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     marginBottom: 10,
-    padding: 0,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    overflow: 'hidden',
+    paddingBottom: 10,
+    shadowColor: '#0A2540',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -631,30 +725,24 @@ const styles = StyleSheet.create({
   cardHeaderInfo: { flex: 1, paddingRight: 12, minWidth: 0 },
   cardHeaderRight: { alignItems: 'flex-end', flexShrink: 0, minWidth: 94 },
   customerName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111827',
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
     marginBottom: 2,
     flexWrap: 'wrap',
     flexShrink: 1,
   },
-  metaText: {
-    fontSize: 11,
-    color: '#6B7280',
-  },
-  totalText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#2DCE89',
-    marginBottom: 4,
-  },
+  metaText: { fontSize: 11, fontWeight: '500', color: '#8E8E93' },
+  // Pendiente: aun no es dinero cobrado, por eso va en tinta y no en verde.
+  totalText: { fontSize: 16, fontWeight: '800', color: '#1A1A1A', lineHeight: 20, marginBottom: 4 },
   badge: {
-    backgroundColor: '#FFECB3',
+    backgroundColor: '#EEEEEE',
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 10,
+    borderRadius: 8,
     alignSelf: 'flex-end',
   },
+  badgeText: { fontSize: 10, fontWeight: '700', color: '#8E8E93' },
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -663,54 +751,65 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   creditBadge: {
-    backgroundColor: '#1F2937',
+    backgroundColor: '#5856D6',
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 10,
+    borderRadius: 8,
   },
-  creditBadgeText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  creditHint: {
-    fontSize: 12,
-    color: '#111827',
-    marginTop: 6,
-    fontWeight: '600',
-  },
-  cardBody: {},
-  divider: {
-    height: 1,
-    backgroundColor: '#eee',
-    marginVertical: 10,
-  },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#555',
-    marginBottom: 2,
-  },
-  bodyText: {
-    fontSize: 14,
-    color: '#444',
-    marginBottom: 4,
-  },
-  productText: {
-    fontSize: 13,
-    color: '#666',
-    marginLeft: 6,
-  },
+  creditBadgeText: { fontSize: 10, fontWeight: '700', color: '#FFFFFF' },
   mainActionButton: {
-    backgroundColor: '#2DCE89',
+    backgroundColor: '#007AFF',
+    marginHorizontal: 14,
     paddingVertical: 12,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
   },
   mainActionText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 13,
     letterSpacing: 0.6,
   },
+
+  historyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    marginBottom: 10,
+    padding: 12,
+    shadowColor: '#0A2540',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  historyInfo: { flex: 1, paddingRight: 12, minWidth: 0 },
+  historyTitle: { fontSize: 11, fontWeight: '500', color: '#8E8E93', marginBottom: 2 },
+  historyCustomer: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+    marginBottom: 2,
+    flexWrap: 'wrap',
+    flexShrink: 1,
+  },
+  historyMeta: { fontSize: 11, fontWeight: '500', color: '#8E8E93' },
+  historyRight: { alignItems: 'flex-end', gap: 4, flexShrink: 0, minWidth: 74 },
+  // Cobrado: verde semantico, aqui si corresponde.
+  historyTotal: { fontSize: 16, fontWeight: '800', color: '#34C759', lineHeight: 20 },
+  historyBadgeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8, flexShrink: 0 },
+  historyBonusRow: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: '#5856D615',
+    borderWidth: 1,
+    borderColor: '#5856D630',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historyBonusText: { color: '#5856D6', fontSize: 12, fontWeight: '600' },
 });

@@ -14,11 +14,11 @@ import {
   StatusBar
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { loginUser, getUserRole, resendVerificationEmail } from '../services/auth';
+import { loginUser, getUserRole, resendVerificationEmail, resolveLoginEmail } from '../services/auth';
 import { getSavedAccounts, saveAccount, removeAccount } from '../services/accountManager';
 
 export default function LoginScreen({ navigation }) {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [unverifiedUser, setUnverifiedUser] = useState(null);
@@ -61,25 +61,23 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  const processLogin = async (emailInput, passwordInput, isQuickLogin = false) => {
-    if (!emailInput || !passwordInput) {
-      Alert.alert('Campos incompletos', 'Por favor ingresa tu correo y contraseña.');
-      return;
-    }
-
-    // Validación básica del formato de email para evitar llamadas innecesarias
-    const emailTrimmed = emailInput.trim();
-    const emailRegex = /^\S+@\S+\.\S+$/;
-    if (!emailRegex.test(emailTrimmed)) {
-      Alert.alert('Correo inválido', 'Por favor ingresa un correo electrónico válido.');
+  const processLogin = async (identifierInput, passwordInput, isQuickLogin = false) => {
+    if (!identifierInput || !passwordInput) {
+      Alert.alert('Campos incompletos', 'Por favor ingresa tu usuario o correo y tu contraseña.');
       return;
     }
 
     setLoading(true);
     setUnverifiedUser(null);
     try {
-      // 1. Autenticación con Backend (Firebase)
-      const user = await loginUser(emailInput.trim(), passwordInput);
+      // 1. Resolver el identificador: cuentas guardadas ya tienen el correo real;
+      // si no, puede ser un nombre de usuario o un correo (resolveLoginEmail decide).
+      const resolvedEmail = isQuickLogin
+        ? identifierInput.trim()
+        : await resolveLoginEmail(identifierInput);
+
+      // 2. Autenticación con Backend (Firebase)
+      const user = await loginUser(resolvedEmail, passwordInput);
 
       if (!user.emailVerified) {
         setUnverifiedUser(user);
@@ -89,19 +87,22 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      // 2. Obtener rol
+      // 3. Obtener rol
       const role = await getUserRole(user.uid, user.email);
       // Evitar logs que expongan datos sensibles en producción. Mantener solo código si es necesario.
       console.log('✅ Rol obtenido:', role);
 
-      // 3. Guardar credenciales localmente para futuro acceso rápido
+      // 4. Guardar credenciales localmente para futuro acceso rápido
       await saveAccount(user, passwordInput, role);
 
       setLoading(false);
       setLoggingInAccount(null);
 
       // REDIRECCIÓN SEGÚN ROL (RUTA O DASHBOARD)
-      const rolesWithRoute = ['user', 'entregador', 'bodeguero', 'vendedor'];
+      // bodeguero/entregador ya no eligen ruta aquí: la eligen desde el dashboard,
+      // justo después de entrar a la acción que la necesita (ver WarehouseDashboardScreen
+      // y MyDeliveriesScreen, que piden la ruta con un gate propio).
+      const rolesWithRoute = ['user', 'vendedor'];
       if (rolesWithRoute.includes(role)) {
         navigation.replace('RouteSelection', { role, user });
       } else {
@@ -115,6 +116,8 @@ export default function LoginScreen({ navigation }) {
       if (error.code === 'auth/invalid-email') msg = 'Correo electrónico inválido.';
       if (error.code === 'auth/user-not-found') msg = 'Usuario no encontrado.';
       if (error.code === 'auth/wrong-password') msg = 'Contraseña incorrecta.'; // Posible si cambió pass en otro lado
+      if (error.code === 'functions/not-found') msg = 'Usuario no encontrado.';
+      if (error.code === 'functions/invalid-argument') msg = 'Ingresa un usuario o correo válido.';
 
       Alert.alert('Error de Acceso', msg);
       setLoading(false);
@@ -123,7 +126,7 @@ export default function LoginScreen({ navigation }) {
   };
 
   const handleLogin = () => {
-    processLogin(email, password, false);
+    processLogin(identifier, password, false);
   };
 
   const handleQuickLogin = (account) => {
@@ -261,16 +264,16 @@ export default function LoginScreen({ navigation }) {
           ) : (
             /* VISTA: FORMULARIO DE LOGIN */
             <View style={styles.formContainer}>
-              {/* Input Email */}
+              {/* Input Usuario o Email */}
               <View style={styles.inputWrapper}>
-                <Icon name="mail-outline" size={20} color="#666" style={styles.inputIcon} />
+                <Icon name="person-outline" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
-                  placeholder="Correo electrónico"
+                  placeholder="Usuario o correo electrónico"
                   placeholderTextColor="#A0A0A0"
-                  keyboardType="email-address"
+                  keyboardType="default"
                   autoCapitalize="none"
-                  value={email}
-                  onChangeText={setEmail}
+                  value={identifier}
+                  onChangeText={setIdentifier}
                   returnKeyType="next"
                   onSubmitEditing={() => passwordInputRef.current && passwordInputRef.current.focus()}
                   blurOnSubmit={false}

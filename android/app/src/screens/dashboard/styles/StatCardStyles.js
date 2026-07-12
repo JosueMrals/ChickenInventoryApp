@@ -1,23 +1,23 @@
-import { StyleSheet, Dimensions } from 'react-native';
-
-const { width } = Dimensions.get('window');
+import { StyleSheet } from 'react-native';
 
 export default StyleSheet.create({
   statCard: {
-    width: (width - 50) / 3, // 2 columns
+    flex: 1,
+    minHeight: 58,
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 8,
-    marginBottom: 12,
-    flexDirection: 'row', // Horizontal
+    padding: 10,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-    elevation: 0.5,
+    shadowColor: '#0A2540',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   statIconContainer: {
-    width: 25,
-    height: 30,
+    width: 34,
+    height: 34,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -29,13 +29,14 @@ export default StyleSheet.create({
   },
   statValue: {
     color: '#1A1A1A',
-    fontSize: 18,
-    fontWeight: '700',
-    lineHeight: 22,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 20,
   },
   statTitle: {
     color: '#8E8E93',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
+    marginTop: 1,
   },
 });

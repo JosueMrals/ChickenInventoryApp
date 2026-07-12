@@ -3,52 +3,54 @@ import { StyleSheet } from 'react-native';
 export default StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F0F4F8',
   },
-  // --- Stats Styles ---
-  statsContainer: {
-    paddingHorizontal: 15,
-    paddingTop: 10,
-    paddingBottom: 10,
+  // --- Large Title ---
+  largeTitleBlock: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 20,
   },
-  statRow: {
-    flexDirection: 'row',
-    marginBottom: 10,
-  },
-  statCardWrapper: {
-    paddingHorizontal: 5,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+  largeTitleGreeting: {
+    fontSize: 30,
+    fontWeight: '800',
     color: '#1A1A1A',
-    marginHorizontal: 25,
-    marginBottom: 15,
-    marginTop: 10,
+    letterSpacing: -0.5,
   },
-  // --- Modules Styles ---
-  modulesContainer: {
-    paddingHorizontal: 15,
+  largeTitleSubtitle: {
+    fontSize: 14,
+    color: '#8E8E93',
+    fontWeight: '600',
+    marginTop: 4,
   },
-  moduleRow: {
-    flexDirection: 'row',
-    marginBottom: 10,
+  // --- Grouped sections ---
+  sectionsContainer: {
+    paddingHorizontal: 16,
   },
-  moduleCardWrapper: {
-    paddingHorizontal: 5,
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8E8E93',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  sectionWrapper: {
+    marginBottom: 24,
   },
   // --- General Styles ---
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA'
+    backgroundColor: '#F0F4F8',
   },
   loadingText: {
     marginTop: 20,
     color: '#8E8E93',
     fontSize: 16,
-    fontWeight: '600'
+    fontWeight: '600',
   },
   footer: {
     alignItems: 'center',

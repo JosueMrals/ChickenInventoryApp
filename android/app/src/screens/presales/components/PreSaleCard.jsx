@@ -34,8 +34,12 @@ export default function PreSaleCard({ presale, customerName }) {
                             <Text style={styles.creditText}>Crédito</Text>
                         </View>
                     )}
-                    <View style={[styles.statusBadge, presale.status === 'paid' ? styles.paidBadge : styles.pendingBadge]}>
-                        <Text style={styles.statusText}>{presale.status === 'paid' ? 'Pagada' : 'Pendiente'}</Text>
+                    <View style={[styles.statusBadge, ['paid', 'partially_returned', 'returned'].includes(presale.status) ? styles.paidBadge : styles.pendingBadge]}>
+                        <Text style={styles.statusText}>
+                            {presale.status === 'returned' ? 'Devuelta'
+                                : presale.status === 'partially_returned' ? 'Dev. parcial'
+                                : presale.status === 'paid' ? 'Pagada' : 'Pendiente'}
+                        </Text>
                     </View>
                 </View>
             </View>

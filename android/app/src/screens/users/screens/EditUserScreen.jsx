@@ -17,7 +17,7 @@ import globalStyles from '../../../styles/globalStyles';
 import RoleSelector from '../components/RoleSelector';
 import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
 
-const PLACEHOLDER_COLOR = '#9CA3AF';
+const PLACEHOLDER_COLOR = '#B0AABF';
 
 const ROLE_COLORS = {
   admin:      { bg: '#EFF6FF', text: '#1D4ED8' },
@@ -99,8 +99,8 @@ export default function EditUserScreen() {
 
       {/* Header */}
       <View style={globalStyles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4 }}>
-          <Icon name="chevron-back" size={26} color="#fff" />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
+          <Icon name="chevron-back" size={22} color="#fff" />
         </TouchableOpacity>
         <Text style={[globalStyles.title, { flex: 1 }]} numberOfLines={1}>Editar Usuario</Text>
         <View style={{ width: 34 }} />
@@ -135,7 +135,7 @@ export default function EditUserScreen() {
         <View style={styles.section}>
           <View style={styles.sectionTitleRow}>
             <View style={styles.sectionIcon}>
-              <Icon name="person-outline" size={17} color="#007AFF" />
+              <Icon name="person-outline" size={16} color="#007AFF" />
             </View>
             <Text style={styles.sectionTitle}>Información Personal</Text>
           </View>
@@ -203,7 +203,7 @@ export default function EditUserScreen() {
         <View style={styles.section}>
           <View style={styles.sectionTitleRow}>
             <View style={[styles.sectionIcon, { backgroundColor: '#F5F3FF' }]}>
-              <Icon name="shield-checkmark-outline" size={17} color="#7C3AED" />
+              <Icon name="shield-checkmark-outline" size={16} color="#7C3AED" />
             </View>
             <Text style={styles.sectionTitle}>Rol del Usuario</Text>
           </View>
@@ -214,7 +214,7 @@ export default function EditUserScreen() {
         <View style={styles.section}>
           <View style={styles.sectionTitleRow}>
             <View style={[styles.sectionIcon, { backgroundColor: '#FFF7ED' }]}>
-              <Icon name="lock-closed-outline" size={17} color="#EA580C" />
+              <Icon name="lock-closed-outline" size={16} color="#EA580C" />
             </View>
             <Text style={styles.sectionTitle}>Cambiar Contraseña</Text>
             <Text style={styles.optionalBadge}>Opcional</Text>
@@ -234,7 +234,7 @@ export default function EditUserScreen() {
               secureTextEntry={!showPassword}
             />
             <TouchableOpacity onPress={() => setShowPassword((v) => !v)} style={styles.eyeBtn}>
-              <Icon name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#9CA3AF" />
+              <Icon name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#9A93AA" />
             </TouchableOpacity>
           </View>
 
@@ -249,7 +249,7 @@ export default function EditUserScreen() {
               secureTextEntry={!showConfirm}
             />
             <TouchableOpacity onPress={() => setShowConfirm((v) => !v)} style={styles.eyeBtn}>
-              <Icon name={showConfirm ? 'eye-off-outline' : 'eye-outline'} size={20} color="#9CA3AF" />
+              <Icon name={showConfirm ? 'eye-off-outline' : 'eye-outline'} size={20} color="#9A93AA" />
             </TouchableOpacity>
           </View>
         </View>
@@ -277,137 +277,133 @@ export default function EditUserScreen() {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: '#F5F6FA' },
-  scroll: { padding: 16 },
+  flex: { flex: 1, backgroundColor: '#F4F1FA' },
+  scroll: { padding: 14 },
+
+  headerBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)',
+  },
 
   /* Avatar card */
   avatarCard: {
     backgroundColor: '#fff',
     borderRadius: 20,
-    padding: 20,
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    marginBottom: 14,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
+    gap: 14,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: '#EDE9F7',
+    elevation: 6,
   },
   avatar: {
     width: 64,
     height: 64,
-    borderRadius: 20,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
   avatarText: { fontSize: 22, fontWeight: '800' },
   avatarInfo: { flex: 1 },
-  avatarName: { fontSize: 17, fontWeight: '800', color: '#1A1A2E', marginBottom: 2 },
-  avatarEmail: { fontSize: 13, color: '#64748B', marginBottom: 6 },
+  avatarName: { fontSize: 16, fontWeight: '800', color: '#332F3A', marginBottom: 2 },
+  avatarEmail: { fontSize: 12, color: '#7A7488', marginBottom: 6 },
   roleBadge: {
     alignSelf: 'flex-start',
-    borderRadius: 20,
+    borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 3,
   },
-  roleBadgeText: { fontSize: 12, fontWeight: '700' },
+  roleBadgeText: { fontSize: 11, fontWeight: '700' },
 
   /* Sections */
   section: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 14,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
+    borderRadius: 20,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: '#EDE9F7',
+    elevation: 6,
   },
   sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
     gap: 8,
   },
   sectionIcon: {
-    width: 32, height: 32, borderRadius: 8,
-    backgroundColor: '#EFF6FF',
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: '#E1EFFF',
     alignItems: 'center', justifyContent: 'center',
   },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: '#1A1A2E', flex: 1 },
+  sectionTitle: { fontSize: 14, fontWeight: '800', color: '#332F3A', flex: 1 },
   optionalBadge: {
-    fontSize: 11, fontWeight: '700', color: '#94A3B8',
-    backgroundColor: '#F1F5F9', borderRadius: 10,
+    fontSize: 10, fontWeight: '700', color: '#9A93AA',
+    backgroundColor: '#F4F1FA', borderRadius: 999,
     paddingHorizontal: 8, paddingVertical: 2,
   },
 
   /* Inputs */
   label: {
-    fontSize: 11, color: '#64748B', fontWeight: '700',
-    textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6,
+    fontSize: 11, color: '#635F69', fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 5,
   },
-  optional: { fontWeight: '500', textTransform: 'none', color: '#94A3B8' },
-  helperText: { fontSize: 12, color: '#94A3B8', marginBottom: 12 },
+  optional: { fontWeight: '500', textTransform: 'none', color: '#9A93AA' },
+  helperText: { fontSize: 11, color: '#9A93AA', marginBottom: 10 },
   input: {
-    backgroundColor: '#F5F6FA',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 10,
-    padding: 12,
-    fontSize: 15,
-    color: '#1A1A2E',
-    marginBottom: 12,
+    backgroundColor: '#F4F1FA',
+    borderWidth: 1.5,
+    borderColor: '#E3DEF5',
+    borderRadius: 13,
+    padding: 11,
+    fontSize: 14,
+    color: '#332F3A',
+    fontWeight: '600',
+    marginBottom: 10,
   },
-  rowInputs: { flexDirection: 'row', gap: 10 },
+  rowInputs: { flexDirection: 'row', gap: 8 },
   halfInput: { flex: 1 },
 
   /* Password field */
   passwordWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F5F6FA',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 10,
-    marginBottom: 12,
-    paddingRight: 10,
+    backgroundColor: '#F4F1FA',
+    borderWidth: 1.5,
+    borderColor: '#E3DEF5',
+    borderRadius: 13,
+    marginBottom: 10,
+    paddingRight: 8,
   },
-  passwordInput: { flex: 1, padding: 12, fontSize: 15, color: '#1A1A2E' },
+  passwordInput: { flex: 1, padding: 11, fontSize: 14, color: '#332F3A', fontWeight: '600' },
   eyeBtn: { padding: 6 },
 
   /* Footer */
   footer: {
     backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    paddingHorizontal: 14,
+    paddingTop: 11,
+    borderTopWidth: 1.5,
+    borderTopColor: '#EDE9F7',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     elevation: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: -3 },
     paddingBottom: 20,
-    borderRadius: 14,
   },
   saveBtn: {
     backgroundColor: '#007AFF',
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: 16,
+    paddingVertical: 14,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#007AFF',
-    shadowOpacity: 0.25,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
   },
   saveBtnDisabled: { backgroundColor: '#A0AEC0', elevation: 0 },
-  saveBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
-
