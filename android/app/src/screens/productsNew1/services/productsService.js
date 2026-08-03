@@ -52,7 +52,7 @@ export async function deleteProduct(productId) {
 export async function getProductById(productId) {
   const docRef = db.collection(COLLECTION).doc(productId);
   const snap = await docRef.get();
-  if (!snap.exists) return null;
+  if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() };
 }
 

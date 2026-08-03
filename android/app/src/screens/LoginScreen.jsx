@@ -14,7 +14,7 @@ import {
   StatusBar
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { loginUser, getUserRole, resendVerificationEmail, resolveLoginEmail } from '../services/auth';
+import { loginUser, getUserProfile, getDisplayName, resendVerificationEmail, resolveLoginEmail } from '../services/auth';
 import { getSavedAccounts, saveAccount, removeAccount } from '../services/accountManager';
 
 export default function LoginScreen({ navigation }) {
@@ -87,13 +87,14 @@ export default function LoginScreen({ navigation }) {
         return;
       }
 
-      // 3. Obtener rol
-      const role = await getUserRole(user.uid, user.email);
-      // Evitar logs que expongan datos sensibles en producción. Mantener solo código si es necesario.
-      console.log('✅ Rol obtenido:', role);
+      // 3. Obtener perfil (rol + nombre). El nombre sale del doc de Firestore,
+      // no del displayName de Auth, que no todas las cuentas tienen seteado.
+      const profile = await getUserProfile(user.uid, user.email);
+      const role = profile?.role || 'user';
+      const displayName = getDisplayName(profile, user.email);
 
       // 4. Guardar credenciales localmente para futuro acceso rápido
-      await saveAccount(user, passwordInput, role);
+      await saveAccount(user, passwordInput, role, displayName);
 
       setLoading(false);
       setLoggingInAccount(null);

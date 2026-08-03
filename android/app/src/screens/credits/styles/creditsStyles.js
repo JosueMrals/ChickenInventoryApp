@@ -116,6 +116,29 @@ export default StyleSheet.create({
     borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 20,
   },
   input: { flex: 1, fontSize: 18, fontWeight: '700', color: '#111827', marginLeft: 8 },
+
+  /* Fecha de pago acordada dentro del modal */
+  dueRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#F3F4F6', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 6, marginTop: -8, marginBottom: 14,
+  },
+  dueRowLate: { backgroundColor: '#FEE2E2' },
+  dueRowText: { fontSize: 11, fontWeight: '600', color: '#6B7280', flex: 1 },
+  dueRowTextLate: { color: '#DC2626' },
+
+  /* Vista previa del abono (aplicado / restante / cambio) */
+  previewBox: {
+    backgroundColor: '#F8F9FA', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB',
+    paddingHorizontal: 12, paddingVertical: 8, marginTop: -10, marginBottom: 16, gap: 4,
+  },
+  previewRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  previewLabel: { fontSize: 12, fontWeight: '600', color: '#6B7280' },
+  previewValue: { fontSize: 13, fontWeight: '800', color: '#1F2937' },
+  previewValueSuccess: { color: '#10B981' },
+  previewChangeLabel: { color: '#B45309' },
+  previewChangeValue: { color: '#B45309' },
+
   modalButtons: { flexDirection: 'row', gap: 10 },
   btnConfirm: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

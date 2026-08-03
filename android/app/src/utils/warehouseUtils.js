@@ -72,7 +72,10 @@ export const groupItemsByProduct = (preSales, filterStatus = null, productCatego
           category: categoryName,
           regularQty: 0,
           bonusQty: 0,
-          totalQty: 0
+          totalQty: 0,
+          // En cuántas órdenes distintas aparece: el bodeguero necesita saber si
+          // esas 40 unidades son de una orden o están repartidas en quince.
+          orderIds: new Set(),
         };
       }
 
@@ -84,11 +87,14 @@ export const groupItemsByProduct = (preSales, filterStatus = null, productCatego
         totals[productKey].regularQty += qty;
       }
       totals[productKey].totalQty += qty;
+      if (sale?.id) totals[productKey].orderIds.add(sale.id);
     });
   });
 
   // Convertir a array y ordenar por cantidad total descendente
-  return Object.values(totals).sort((a, b) => b.totalQty - a.totalQty);
+  return Object.values(totals)
+    .map(({ orderIds, ...product }) => ({ ...product, orderCount: orderIds.size }))
+    .sort((a, b) => b.totalQty - a.totalQty);
 };
 
 /**
@@ -113,6 +119,7 @@ export const groupAggregatedProductsByCategory = (products = []) => {
   return Object.values(grouped)
     .map((section) => ({
       ...section,
+      productCount: section.products.length,
       products: section.products.sort((a, b) => b.totalQty - a.totalQty),
     }))
     .sort((a, b) => b.totalQty - a.totalQty);

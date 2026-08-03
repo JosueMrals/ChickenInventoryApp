@@ -30,18 +30,19 @@ service cloud.firestore {
     match /customers/{customerId} {
       allow read: if isAdmin() || isVendedor() || isEntregador() || isBodeguero();
 
-      // Crear / actualizar clientes:
-      // admin o vendedor
-      allow create, update: if isAdmin() || isVendedor();
+      // Crear clientes: admin o vendedor
+      allow create: if isAdmin() || isVendedor();
 
-      // Pero solo ADMIN puede modificar campos sensibles:
+      // Actualizar: solo ADMIN puede modificar campos sensibles (límite de
+      // crédito, sobregiro, descuento y tipo). Nota: antes existía un
+      // `allow update` amplio que anulaba esta restricción (los allow se OR-ean).
       allow update: if isAdmin() ||
         (
           isVendedor() &&
           !request.resource.data
             .diff(resource.data)
             .affectedKeys()
-            .hasAny(['creditLimit', 'discount', 'type'])
+            .hasAny(['creditLimit', 'creditOverdraftType', 'creditOverdraftValue', 'discount', 'type'])
         );
 
       // Solo admin puede eliminar
@@ -164,8 +165,20 @@ service cloud.firestore {
         && request.resource.data.payments is list
         && request.resource.data.payments.size() >= getPaymentsSize(resource.data);
 
-      // Solo admin puede eliminar créditos
-      allow delete: if isAdmin();
+      // Editar la pre-venta origen cambia lo adeudado (monto o fecha de pago).
+      // No toca `paid` ni `payments`, e isValidCreditState mantiene el invariante
+      // total == paid + pending, así que no se puede "perder" un abono por aquí.
+      allow update: if (isAdmin() || isVendedor())
+        && request.resource.data
+            .diff(resource.data)
+            .affectedKeys()
+            .hasOnly(['total', 'pending', 'dueDate', 'updatedAt'])
+        && request.resource.data.paid == resource.data.paid
+        && isValidCreditState(request.resource.data);
+
+      // Admin siempre; el vendedor solo puede borrar un crédito SIN abonos
+      // (pre-venta a crédito que se corrige a contado antes de cobrar nada).
+      allow delete: if isAdmin() || (isVendedor() && resource.data.paid == 0);
     }
 
     // =====================================================
@@ -196,13 +209,16 @@ service cloud.firestore {
         && request.resource.data.status == 'pending_review'
         && request.resource.data.requestedByUid == request.auth.uid;
 
-      // Bodega/admin aprueban o rechazan (verificación de cantidades).
-      // Solo desde 'pending_review': evita re-aprobar y duplicar el stock devuelto.
-      allow update: if (isAdmin() || isBodeguero())
-        && resource.data.status == 'pending_review'
-        && (request.resource.data.status == 'approved' || request.resource.data.status == 'rejected');
+      // Dos vías de escritura, ambas solo sobre solicitudes aún pendientes:
+      //  1) Bodega/admin resuelven: pending_review → approved | rejected.
+      //     Restringirlo a 'pending_review' evita re-aprobar y duplicar el stock devuelto.
+      //  2) El solicitante corrige la suya (razón/cantidades) sin cambiar de estado
+      //     ni de dueño; una vez resuelta, ya no puede tocarla.
+      allow update: if isOwnPendingFix() || isWarehouseResolution();
 
-      allow delete: if false;
+      // El solicitante puede eliminar su solicitud mientras nadie la haya resuelto.
+      allow delete: if isAdmin()
+        || (isOwnReturn() && resource.data.status == 'pending_review');
     }
 
     // =====================================================
@@ -221,7 +237,75 @@ service cloud.firestore {
         && resource.data.status == 'pending'
         && request.resource.data.status == 'fulfilled';
 
+      // Segunda salida del faltante: en vez de reponer el producto, el admin lo
+      // descuenta del salario al cerrar la nómina. Igual que arriba, solo desde
+      // 'pending': un faltante ya repuesto o ya descontado no se vuelve a cobrar.
+      allow update: if isAdmin()
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'payroll_deducted';
+
       allow delete: if false;
+    }
+
+    // =====================================================
+    //  💵 PAYROLL ADVANCES — adelantos de salario
+    // =====================================================
+    match /payrollAdvances/{advanceId} {
+      // El trabajador puede consultar lo suyo; los salarios ajenos viven en
+      // users/ y en payrollSettlements, no aquí.
+      allow read: if isAdmin() || isOwnPayrollDoc();
+
+      // Nace siempre sin saldar: así lo encuentran las consultas del periodo
+      // abierto (settlementId == null).
+      allow create: if isAdmin()
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.settlementId == null;
+
+      // Solo para saldarlo al cerrar el periodo; el monto es inmutable.
+      allow update: if isAdmin()
+        && resource.data.settlementId == null
+        && request.resource.data.settlementId != null
+        && request.resource.data.amount == resource.data.amount;
+
+      // Corregir un adelanto mal registrado, mientras no se haya pagado.
+      allow delete: if isAdmin() && resource.data.settlementId == null;
+    }
+
+    // =====================================================
+    //  🧺 STAFF PURCHASES — productos de bodega para uso personal
+    // =====================================================
+    match /staffPurchases/{purchaseId} {
+      allow read: if isAdmin() || isOwnPayrollDoc();
+
+      // La entrega la hace bodega (o admin) y descuenta inventario.
+      allow create: if (isAdmin() || isBodeguero())
+        && request.resource.data.total is number
+        && request.resource.data.total >= 0
+        && request.resource.data.settlementId == null;
+
+      // Igual que los adelantos: solo saldar, sin tocar el monto.
+      allow update: if isAdmin()
+        && resource.data.settlementId == null
+        && request.resource.data.settlementId != null
+        && request.resource.data.total == resource.data.total;
+
+      // Anular una entrega (devuelve el stock) mientras no se haya pagado.
+      allow delete: if (isAdmin() || isBodeguero()) && resource.data.settlementId == null;
+    }
+
+    // =====================================================
+    //  🧾 PAYROLL SETTLEMENTS — cierres de periodo (día de pago)
+    // =====================================================
+    match /payrollSettlements/{settlementId} {
+      allow read: if isAdmin() || isOwnPayrollDoc();
+
+      allow create: if isAdmin()
+        && request.resource.data.uid is string
+        && request.resource.data.netPay is number;
+
+      // Un pago cerrado es un registro contable: no se reescribe ni se borra.
+      allow update, delete: if false;
     }
 
     // =====================================================
@@ -250,9 +334,24 @@ service cloud.firestore {
     // =====================================================
     // ⚙ FUNCIONES COMUNES
     // =====================================================
+    // El rol viaja en el custom claim del token, sincronizado desde users/{uid}
+    // por el trigger syncUserRoleClaim (functions/index.js).
+    //
+    // Antes esto hacía siempre un get() a users/{uid}: una lectura extra facturada
+    // en CADA evaluación de regla, o sea en cada request contra cualquier colección.
+    // Con el claim, el caso normal no lee nada.
+    //
+    // El fallback al documento existe solo para tokens emitidos antes de la
+    // migración (vigencia máxima 1 h) y para usuarios a los que todavía no se les
+    // corrió el backfill (callable syncAllRoleClaims). Una vez propagados los
+    // claims, borrar legacyHasRole() y su llamada.
     function hasRole(role) {
       return request.auth != null
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (request.auth.token.get('role', '') == role || legacyHasRole(role));
+    }
+
+    function legacyHasRole(role) {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
     }
 
@@ -274,6 +373,38 @@ service cloud.firestore {
 
     function isOperativo() {
       return isAdmin() || isVendedor() || isEntregador() || isBodeguero();
+    }
+
+    // ── Nómina ─────────────────────────────────────────────────────────────
+    // Documentos de nómina que pertenecen al propio trabajador (`uid`).
+    //
+    // OJO: hoy la regla global de arriba (`match /{document=**}`) ya concede
+    // lectura a cualquier usuario autenticado, y los `allow` se OR-ean, así que
+    // esta condición todavía no restringe nada por sí sola. Se deja explícita
+    // para que el día que esa lectura global se acote — recomendable, porque
+    // aquí hay salarios — la nómina quede protegida sin tener que reescribirla.
+    function isOwnPayrollDoc() {
+      return request.auth != null && resource.data.uid == request.auth.uid;
+    }
+
+    // ── Devoluciones ───────────────────────────────────────────────────────
+    function isOwnReturn() {
+      return request.auth != null && resource.data.requestedByUid == request.auth.uid;
+    }
+
+    // El solicitante corrige su propia solicitud: sigue pendiente, sigue siendo suya.
+    function isOwnPendingFix() {
+      return isOwnReturn()
+        && resource.data.status == 'pending_review'
+        && request.resource.data.status == 'pending_review'
+        && request.resource.data.requestedByUid == resource.data.requestedByUid;
+    }
+
+    // Bodega/admin resuelven una solicitud pendiente.
+    function isWarehouseResolution() {
+      return (isAdmin() || isBodeguero())
+        && resource.data.status == 'pending_review'
+        && (request.resource.data.status == 'approved' || request.resource.data.status == 'rejected');
     }
 
     function isValidCreditState(data) {

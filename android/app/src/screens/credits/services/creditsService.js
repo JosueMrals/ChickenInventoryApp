@@ -1,12 +1,7 @@
 import { firestore, auth } from '../../../services/firebaseConfig';
-
-const toCents = (value) => {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return 0;
-  return Math.round(num * 100);
-};
-
-const fromCents = (value) => Number((value / 100).toFixed(2));
+import { getAggregateFromServer, sum } from '@react-native-firebase/firestore';
+import { computeAbono } from '../../../utils/creditUtils';
+import { TERMINAL_PRESALE_STATUSES } from '../../../services/preSaleService';
 
 function sanitizeDocId(rawId) {
   if (typeof rawId !== 'string') return null;
@@ -58,57 +53,76 @@ function toFirestoreTimestamp(value) {
   return firestore.Timestamp.fromDate(new Date());
 }
 
-function normalizePaymentEntry(entry, fallbackDate) {
-  if (!entry || typeof entry !== 'object') return null;
+/** 🧾 Obtener lista de créditos en tiempo real.
+ *  `status` va al query en vez de filtrarse en JS, y `limit` acota la lista:
+ *  `credits` solo crece y antes se transfería entera para mostrar una pantalla.
+ *  Los totales NO salen de aquí (serían parciales): ver getCreditTotals(). */
+export const fetchCredits = (onUpdate, { status = null, limit = 100 } = {}, onError = null) => {
+  let query = firestore().collection('credits');
+  if (status) query = query.where('status', '==', status);
 
-  const amount = Number(entry.amount);
-  const safeAmount = Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
-  const by = typeof entry.by === 'string' && entry.by.trim() ? entry.by.trim() : 'N/A';
-
-  const previousPending = Number(entry.previousPending);
-  const newPending = Number(entry.newPending);
-
-  const normalized = {
-    amount: safeAmount,
-    date: toFirestoreTimestamp(entry.date || fallbackDate),
-    by,
-  };
-
-  if (Number.isFinite(previousPending)) normalized.previousPending = Number(previousPending.toFixed(2));
-  if (Number.isFinite(newPending)) normalized.newPending = Number(newPending.toFixed(2));
-
-  return normalized;
-}
-
-/** 🧾 Obtener lista de créditos en tiempo real */
-export const fetchCredits = (onUpdate) => {
-  return firestore()
-    .collection('credits')
+  return query
     .orderBy('createdAt', 'desc')
-    .onSnapshot(snapshot => {
-      const data = snapshot.docs.map(doc => {
-        const raw = doc.data() || {};
-        const customerName = normalizeCustomerName(raw.customerName || raw.clientName || '', 'Cliente');
-        return {
-          ...raw,
-          customerName,
-          id: doc.id, // Fuerza siempre el id real del documento
-          preSaleId: raw.preSaleId || raw.presaleId || null,
-        };
-      });
-      onUpdate(data);
-    });
+    .limit(limit)
+    .onSnapshot(
+      snapshot => {
+        const data = (snapshot?.docs || []).map(doc => {
+          const raw = doc.data() || {};
+          const customerName = normalizeCustomerName(raw.customerName || raw.clientName || '', 'Cliente');
+          return {
+            ...raw,
+            customerName,
+            id: doc.id, // Fuerza siempre el id real del documento
+            preSaleId: raw.preSaleId || raw.presaleId || null,
+          };
+        });
+        onUpdate(data);
+      },
+      // Sin este callback, un fallo del query (índice en construcción, permisos)
+      // no llamaba a onUpdate NUNCA: la pantalla se quedaba en "Cargando créditos..."
+      // para siempre, sin lista y sin mensaje. Ahora el error se propaga a la UI.
+      error => {
+        console.error('[creditsService] fetchCredits:', error);
+        onError?.(error);
+      },
+    );
 };
 
-/** 💵 Registrar abono y guardar historial */
+/** 💰 Totales de créditos, sumados EN EL SERVIDOR.
+ *
+ *  Antes se calculaban en JS sobre la colección completa ya descargada. Al acotar
+ *  la lista eso daría totales silenciosamente incorrectos — y son montos de dinero.
+ *  Un agregado no descarga los documentos: cuesta una fracción de lectura y el
+ *  resultado es exacto sobre toda la colección, no sobre la página visible.
+ */
+export const getCreditTotals = async () => {
+  const credits = firestore().collection('credits');
+
+  try {
+    const [paidSnap, pendingSnap] = await Promise.all([
+      getAggregateFromServer(credits.where('status', '==', 'paid'), { value: sum('total') }),
+      getAggregateFromServer(credits.where('status', '==', 'pending'), { value: sum('pending') }),
+    ]);
+
+    return {
+      paid: paidSnap.data().value || 0,
+      pending: pendingSnap.data().value || 0,
+    };
+  } catch (error) {
+    console.error('[creditsService] getCreditTotals:', error);
+    // `null`, no 0: son montos de dinero. Un C$0.00 inventado hace creer que no
+    // hay saldo pendiente; la UI muestra "—" cuando el dato no está disponible.
+    return { paid: null, pending: null, error };
+  }
+};
+
+/** 💵 Registrar abono y guardar historial.
+ *  Acepta pagos mayores al saldo: aplica solo el pendiente y devuelve el cambio. */
 export const abonarCredito = async (creditId, amount, userEmail) => {
   const safeCreditId = sanitizeDocId(creditId);
   if (!safeCreditId) {
     throw new Error('Crédito inválido: id no válido.');
   }
-
-  const pagoCents = toCents(amount);
-  if (!pagoCents || pagoCents <= 0) throw new Error('Monto inválido');
 
   const now = new Date();
   const nowTs = firestore.Timestamp.fromDate(now);
@@ -119,48 +133,32 @@ export const abonarCredito = async (creditId, amount, userEmail) => {
 
   await firestore().runTransaction(async (tx) => {
     const creditSnap = await tx.get(creditRef);
-    if (!creditSnap.exists) {
+    if (!creditSnap.exists()) {
       throw new Error('El crédito no existe o fue eliminado.');
     }
 
     const creditData = creditSnap.data() || {};
-    const totalCents = toCents(creditData.total || 0);
-    const paidCents = toCents(creditData.paid || 0);
-    const pendingStoredCents = toCents(creditData.pending || 0);
-    const pendingCents = totalCents > 0
-      ? Math.max(0, totalCents - paidCents)
-      : pendingStoredCents;
-
-    if (pendingCents <= 0) {
-      throw new Error('Este crédito ya está saldado.');
-    }
-
-    if (pagoCents > pendingCents) {
-      throw new Error(`El abono no puede ser mayor al saldo pendiente (C$${fromCents(pendingCents).toFixed(2)}).`);
-    }
-
-    const remainingCents = pendingCents - pagoCents;
-    const nuevoPendienteCents = remainingCents <= 0 ? 0 : remainingCents;
-    const nuevoPagadoCents = totalCents > 0 && nuevoPendienteCents === 0
-      ? totalCents
-      : paidCents + pagoCents;
-    const nuevoEstado = nuevoPendienteCents === 0 ? 'paid' : 'pending';
+    const abonoCalc = computeAbono(creditData, amount);
 
     const abono = {
-      amount: fromCents(pagoCents),
+      amount: abonoCalc.applied,
       date: nowTs,
       by: paymentActor,
-      previousPending: fromCents(pendingCents),
-      newPending: fromCents(nuevoPendienteCents),
+      previousPending: abonoCalc.previousPending,
+      newPending: abonoCalc.newPending,
     };
+    if (abonoCalc.change > 0) {
+      abono.received = abonoCalc.received;
+      abono.change = abonoCalc.change;
+    }
 
     const preSaleRawId = creditData?.preSaleId || creditData?.presaleId || null;
     const preSaleId = sanitizeDocId(preSaleRawId);
 
     tx.update(creditRef, {
-      paid: fromCents(nuevoPagadoCents),
-      pending: fromCents(nuevoPendienteCents),
-      status: nuevoEstado,
+      paid: abonoCalc.newPaid,
+      pending: abonoCalc.newPending,
+      status: abonoCalc.status,
       updatedAt: nowTs,
       payments: firestore.FieldValue.arrayUnion(abono),
     });
@@ -169,20 +167,32 @@ export const abonarCredito = async (creditId, amount, userEmail) => {
     // no bloquear el abono por datos legacy inconsistentes en preSaleId.
 
     result = {
-      nuevoPagado: fromCents(nuevoPagadoCents),
-      nuevoPendiente: fromCents(nuevoPendienteCents),
-      estado: nuevoEstado,
-      appliedAmount: fromCents(pagoCents),
+      nuevoPagado: abonoCalc.newPaid,
+      nuevoPendiente: abonoCalc.newPending,
+      estado: abonoCalc.status,
+      appliedAmount: abonoCalc.applied,
+      change: abonoCalc.change,
       linkedPreSaleId: preSaleId || null,
     };
   });
 
   if (result?.estado === 'paid' && result?.linkedPreSaleId) {
     try {
-      await firestore().collection('presales').doc(result.linkedPreSaleId).update({
-        status: 'paid',
-        fechaPago: nowTs,
-        updatedAt: nowTs,
+      // Transacción propia (fuera del abono, que no debe bloquearse por datos
+      // legacy de preSaleId): relee el estado real antes de marcar 'paid'. Sin
+      // esto, un abono reproducido desde la cola offline podía reescribir una
+      // preventa que mientras tanto fue cancelada o devuelta — el mismo patrón
+      // que regresaba facturas cobradas a "pendiente".
+      const preSaleRef = firestore().collection('presales').doc(result.linkedPreSaleId);
+      await firestore().runTransaction(async (tx) => {
+        const snap = await tx.get(preSaleRef);
+        if (!snap.exists()) return;
+        const currentStatus = snap.data()?.status;
+        if (currentStatus === 'paid') return; // ya reflejaba el saldo: reintento idempotente
+        if (TERMINAL_PRESALE_STATUSES.has(currentStatus)) {
+          throw new Error(`La pre-venta está en estado terminal incompatible: ${currentStatus}`);
+        }
+        tx.update(preSaleRef, { status: 'paid', fechaPago: nowTs, updatedAt: nowTs });
       });
       result.linkedPreSaleUpdated = true;
     } catch (linkError) {
@@ -199,8 +209,9 @@ export const abonarCredito = async (creditId, amount, userEmail) => {
   return result;
 };
 
-/** 🧾 Crear crédito desde una pre-venta */
-export const createCreditFromPreSale = async (preSale, createdBy) => {
+/** 🧾 Crear crédito desde una pre-venta.
+ *  options.dueDate: fecha de pago acordada con el cliente (Date|Timestamp). */
+export const createCreditFromPreSale = async (preSale, createdBy, options = {}) => {
   if (!preSale?.id) throw new Error('Pre-venta inválida');
 
   const creditRef = firestore().collection('credits').doc();
@@ -208,6 +219,8 @@ export const createCreditFromPreSale = async (preSale, createdBy) => {
   const total = Number(preSale.total) || 0;
   const customerName = buildCustomerNameFromPreSale(preSale);
   const customerId = preSale.customerId || preSale.customer?.id || null;
+  const rawDueDate = options.dueDate || preSale.creditDueDate || null;
+  const dueDate = rawDueDate ? toFirestoreTimestamp(rawDueDate) : null;
 
   const actor = (typeof createdBy === 'string' && createdBy.trim())
     ? createdBy.trim()
@@ -217,7 +230,7 @@ export const createCreditFromPreSale = async (preSale, createdBy) => {
   await firestore().runTransaction(async (tx) => {
     const preSaleSnap = await tx.get(preSaleRef);
 
-    if (!preSaleSnap.exists) {
+    if (!preSaleSnap.exists()) {
       throw new Error('La pre-venta no existe o ya fue eliminada.');
     }
 
@@ -241,6 +254,7 @@ export const createCreditFromPreSale = async (preSale, createdBy) => {
       customerId,
       customerName,
       clientName: customerName,
+      dueDate,
       total,
       paid: 0,
       pending: total,
@@ -252,6 +266,7 @@ export const createCreditFromPreSale = async (preSale, createdBy) => {
     tx.update(preSaleRef, {
       status: 'credit_pending',
       creditId: creditRef.id,
+      creditDueDate: dueDate,
       updatedAt: new Date(),
     });
   });

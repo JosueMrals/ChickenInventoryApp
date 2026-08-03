@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useContext } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, SafeAreaView, Alert, Modal, TextInput } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import auth from '@react-native-firebase/auth';
 import globalStyles from '../../../styles/globalStyles';
 import styles from '../styles/WarehouseOrderDetailStyles';
 import { getUsersByRole } from '../../../services/auth';
+import { updatePreSaleStatusGuarded } from '../../../services/preSaleService';
 import { resolveCustomerName } from '../../../utils/customerUtils';
 import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
+import { useSubmitLock } from '../../../hooks/useSubmitLock';
+import { PreSaleContext } from '../../presales/context/preSaleContext';
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
@@ -86,38 +88,32 @@ const ItemCard = React.memo(({ item, isBonus = false }) => {
 });
 
 export default function WarehouseOrderDetailScreen({ route, navigation }) {
-    const { presale: initialPresale } = route.params;
-    const [presale, setPresale] = useState(initialPresale);
+    const routePresale = route.params?.presale;
+    const [presale, setPresale] = useState(routePresale);
     const [loading, setLoading] = useState(false);
     const [entregadores, setEntregadores] = useState([]);
     const [showEntregadorPicker, setShowEntregadorPicker] = useState(false);
     const [searchText, setSearchText] = useState('');
     const [processingEntregadorId, setProcessingEntregadorId] = useState(null);
-    const [customersById, setCustomersById] = useState({});
+    const { runLocked } = useSubmitLock();
     const { bottomPadding } = useAdaptiveBottom();
-    useEffect(() => {
-        const unsub = firestore()
-          .collection('customers')
-          .onSnapshot(
-            (snapshot) => {
-              if (!snapshot) {
-                setCustomersById({});
-                return;
-              }
-              const map = snapshot.docs.reduce((acc, doc) => {
-                acc[doc.id] = { id: doc.id, ...doc.data() };
-                return acc;
-              }, {});
-              setCustomersById(map);
-            },
-            (error) => {
-              console.error('Error al escuchar customers:', error);
-              setCustomersById({});
-            }
-          );
 
-        return () => unsub();
-    }, []);
+    // Esta pantalla vive en el Drawer: es una ÚNICA instancia que NO se remonta al
+    // navegar a otra orden. `useState(routePresale)` capturaba la primera orden y
+    // nunca cambiaba → siempre se abría la misma. Sincronizamos con los params
+    // cuando cambia el id (y reseteamos el selector de entregador).
+    useEffect(() => {
+        if (routePresale?.id && routePresale.id !== presale?.id) {
+            setPresale(routePresale);
+            setShowEntregadorPicker(false);
+            setSearchText('');
+            setProcessingEntregadorId(null);
+        }
+    }, [routePresale?.id]);
+
+    // El mapa de clientes lo mantiene PreSaleProvider a nivel app. Antes cada pantalla
+    // de Bodega abría su propio listener sobre la colección `customers` completa.
+    const { customersById } = useContext(PreSaleContext);
 
     useEffect(() => {
         const fetchEntregadores = async () => {
@@ -130,7 +126,8 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
     const updateStatus = async (newStatus) => {
         setLoading(true);
         try {
-            await firestore().collection('presales').doc(presale.id).update({ status: newStatus });
+            // Guarded: relee el estado real antes de escribir. Ver updatePreSaleStatusGuarded.
+            await updatePreSaleStatusGuarded(presale.id, newStatus);
             setPresale(prev => ({ ...prev, status: newStatus }));
 
             // If ready for delivery, we don't automatically show picker anymore to prefer Bulk Handover,
@@ -139,7 +136,8 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
                 Alert.alert("Orden Lista", "La orden está lista para entrega. Puedes asignarla individualmente o usar la entrega masiva en el panel.");
             }
         } catch (error) {
-            Alert.alert('Error', 'No se pudo actualizar el estado.');
+            // El mensaje de la guarda explica el porqué (p. ej. la orden ya fue cobrada).
+            Alert.alert('Error', error?.message || 'No se pudo actualizar el estado.');
             console.error(error);
         }
         setLoading(false);
@@ -163,27 +161,36 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
             return;
         }
 
-        setProcessingEntregadorId(entregadorId);
-        try {
-            const token = await currentUser.getIdToken(true);
-            const dispatchFunction = functions().httpsCallable('dispatchPreSale');
+        // runLocked descarta el segundo toque sobre "Asignar": sin esto se
+        // llamaba dos veces a dispatchPreSale para la misma preventa.
+        // OJO: sin keepLockedOnSuccess. Esta pantalla es del Drawer (no se remonta),
+        // así que un cerrojo que no se libera tras éxito dejaba la asignación
+        // bloqueada para SIEMPRE tras el primer despacho. El cerrojo por-ref ya
+        // cubre el doble toque durante la llamada en vuelo.
+        return runLocked(async () => {
+            setProcessingEntregadorId(entregadorId);
+            try {
+                const token = await currentUser.getIdToken(true);
+                const dispatchFunction = functions().httpsCallable('dispatchPreSale');
 
-            await dispatchFunction({
-                preSaleId: presale.id,
-                entregadorId,
-                authToken: token
-            });
+                await dispatchFunction({
+                    preSaleId: presale.id,
+                    entregadorId,
+                    authToken: token
+                });
 
-            Alert.alert('Éxito', 'La pre-venta ha sido asignada y está en reparto.');
-            setSearchText('');
-            setShowEntregadorPicker(false);
-            navigation.navigate('PreparePreSales', { tab: 'list' });
-        } catch (error) {
-            console.error("❌ Error en dispatchToEntregador:", error);
-            Alert.alert('Error', error.message || 'Error al asignar.');
-        } finally {
-            setProcessingEntregadorId(null);
-        }
+                Alert.alert('Éxito', 'La pre-venta ha sido asignada y está en reparto.');
+                setSearchText('');
+                setShowEntregadorPicker(false);
+                navigation.navigate('PreparePreSales', { tab: 'list' });
+            } catch (error) {
+                console.error("❌ Error en dispatchToEntregador:", error);
+                Alert.alert('Error', error.message || 'Error al asignar.');
+                throw error;
+            } finally {
+                setProcessingEntregadorId(null);
+            }
+        }).catch(() => {});
     };
 
     const filteredEntregadores = useMemo(() => entregadores.filter(e =>
@@ -227,7 +234,7 @@ export default function WarehouseOrderDetailScreen({ route, navigation }) {
             case 'item_card': return <ItemCard item={item} isBonus={item.isBonus} />;
             default: return null;
         }
-    }, [presale]);
+    }, []); // no depende de presale: los datos llegan por `item`
 
     return (
         <SafeAreaView style={globalStyles.container}>

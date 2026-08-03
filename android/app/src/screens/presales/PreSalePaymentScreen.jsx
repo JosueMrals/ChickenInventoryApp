@@ -4,6 +4,9 @@ import Icon from "react-native-vector-icons/Ionicons";
 import styles from "../quicksalesNew/styles/quickPaymentStyles"; // Reusing styles
 import { convertPreSaleToSale } from "../../services/preSaleService";
 import { createCreditFromPreSale } from "../credits/services/creditsService";
+import CreditDueDatePicker from "./components/CreditDueDatePicker";
+import { toDateSafe } from "../../utils/creditUtils";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 
 export default function PreSalePaymentScreen({ navigation, route }) {
   const { presale } = route.params;
@@ -11,7 +14,10 @@ export default function PreSalePaymentScreen({ navigation, route }) {
 
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [amountPaid, setAmountPaid] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [creditDueDate, setCreditDueDate] = useState(toDateSafe(presale?.creditDueDate));
+  // Cerrojo por ref: `disabled` solo aplica tras el re-render y dos toques
+  // rápidos alcanzaban a cobrar dos veces la misma preventa.
+  const { submitting: loading, runLocked } = useSubmitLock();
 
   const change = useMemo(() => {
     const paid = parseFloat(amountPaid || 0);
@@ -20,17 +26,22 @@ export default function PreSalePaymentScreen({ navigation, route }) {
 
   const handlePay = async () => {
     if (paymentMethod === 'credit') {
-      setLoading(true);
-      try {
-        await createCreditFromPreSale(presale, presale?.createdBy);
-        navigation.replace("PreSaleDone", { saleId: presale.id, isCredit: true });
-      } catch (error) {
-        console.error("Failed to create credit pre-sale:", error);
-        Alert.alert("Error", "No se pudo generar el credito. Intentalo de nuevo.");
-      } finally {
-        setLoading(false);
+      if (!creditDueDate) {
+        return Alert.alert(
+          "Fecha de pago requerida",
+          "Selecciona la fecha en la que el cliente se compromete a pagar el crédito."
+        );
       }
-      return;
+      return runLocked(async () => {
+        try {
+          await createCreditFromPreSale(presale, presale?.createdBy, { dueDate: creditDueDate });
+          navigation.replace("PreSaleDone", { saleId: presale.id, isCredit: true });
+        } catch (error) {
+          console.error("Failed to create credit pre-sale:", error);
+          Alert.alert("Error", "No se pudo generar el credito. Intentalo de nuevo.");
+          throw error;
+        }
+      }, { keepLockedOnSuccess: true }).catch(() => {});
     }
 
     const paid = parseFloat(amountPaid || 0);
@@ -38,23 +49,20 @@ export default function PreSalePaymentScreen({ navigation, route }) {
       return Alert.alert("Monto Inválido", "El monto recibido debe ser mayor o igual al total.");
     }
 
-    setLoading(true);
-    try {
-      const paymentDetails = {
-        paymentMethod,
-        amountPaid: paid,
-        change,
-      };
-      
-      const newSaleId = await convertPreSaleToSale(presale, paymentDetails);
-      
-      navigation.replace("PreSaleDone", { saleId: newSaleId });
-
-    } catch (error) {
-      console.error("Failed to convert pre-sale to sale:", error);
-      Alert.alert("Error", "No se pudo procesar el pago. Inténtalo de nuevo.");
-      setLoading(false);
-    }
+    return runLocked(async () => {
+      try {
+        const newSaleId = await convertPreSaleToSale(presale, {
+          paymentMethod,
+          amountPaid: paid,
+          change,
+        });
+        navigation.replace("PreSaleDone", { saleId: newSaleId });
+      } catch (error) {
+        console.error("Failed to convert pre-sale to sale:", error);
+        Alert.alert("Error", "No se pudo procesar el pago. Inténtalo de nuevo.");
+        throw error;
+      }
+    }, { keepLockedOnSuccess: true }).catch(() => {});
   };
 
   return (
@@ -87,6 +95,12 @@ export default function PreSalePaymentScreen({ navigation, route }) {
             </TouchableOpacity>
           ))}
         </View>
+
+        {paymentMethod === 'credit' && (
+          <View style={{ paddingHorizontal: 16 }}>
+            <CreditDueDatePicker value={creditDueDate} onChange={setCreditDueDate} />
+          </View>
+        )}
 
         {paymentMethod !== 'credit' && (
           <View style={styles.payInputBox}>

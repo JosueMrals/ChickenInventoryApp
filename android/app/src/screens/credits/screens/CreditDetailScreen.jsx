@@ -3,6 +3,7 @@ import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View }
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { firestore } from '../../../services/firebaseConfig';
 import globalStyles from '../../../styles/globalStyles';
+import CreditDueInfo from '../components/CreditDueInfo';
 
 const toDate = (value) => {
   if (!value) return null;
@@ -34,7 +35,7 @@ export default function CreditDetailScreen({ navigation, route }) {
     if (!initialCredit?.id) { setLoading(false); return undefined; }
     const unsub = firestore().collection('credits').doc(initialCredit.id).onSnapshot(
       (doc) => {
-        setCredit(doc.exists ? { id: doc.id, ...doc.data() } : null);
+        setCredit(doc.exists() ? { id: doc.id, ...doc.data() } : null);
         setLoading(false);
       },
       () => setLoading(false)
@@ -94,7 +95,10 @@ export default function CreditDetailScreen({ navigation, route }) {
 
       <FlatList
         data={payments}
-        keyExtractor={(_, i) => `${credit.id}-${i}`}
+        // Clave derivada del abono, no del índice: la lista va ordenada por fecha
+        // descendente, así que un abono nuevo corre a todos los demás de posición y
+        // con claves por índice React reasigna cada fila.
+        keyExtractor={(p, i) => `${credit.id}-${toDate(p?.date)?.getTime() || i}-${p?.amount ?? i}`}
         contentContainerStyle={{ padding: 14, paddingBottom: 30 }}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
@@ -116,6 +120,9 @@ export default function CreditDetailScreen({ navigation, route }) {
                   </Text>
                 </View>
               </View>
+
+              {/* Fecha de pago acordada / atraso */}
+              {!isPaid && <CreditDueInfo credit={credit} />}
 
               {/* Progress bar */}
               <View style={s.progressWrap}>

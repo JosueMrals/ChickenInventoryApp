@@ -26,7 +26,7 @@ export default function QuickSaleDoneScreen({ navigation, route }) {
       .collection("sales")
       .doc(saleId)
       .onSnapshot((snap) => {
-        if (snap.exists) {
+        if (snap.exists()) {
           setSale({ id: snap.id, ...snap.data() });
         }
         setLoading(false);

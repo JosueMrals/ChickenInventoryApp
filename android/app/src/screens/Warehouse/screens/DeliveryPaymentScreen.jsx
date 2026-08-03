@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useContext } from 'react';
 import { View, Text, TouchableOpacity, TextInput, Alert, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import firestore from '@react-native-firebase/firestore';
 import { completePreSalePayment } from '../services/deliveryService';
 import { resolveCustomerName } from '../../../utils/customerUtils';
 import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
+import { useSubmitLock } from '../../../hooks/useSubmitLock';
+import { PreSaleContext } from '../../presales/context/preSaleContext';
 
 export default function DeliveryPaymentScreen({ navigation, route }) {
   const { delivery } = route.params;
@@ -13,32 +14,13 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
   const { bottomPadding } = useAdaptiveBottom();
 
   const [amountPaid, setAmountPaid] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [customersById, setCustomersById] = useState({});
+  // Cerrojo por ref: dos toques rápidos alcanzaban a llamar dos veces a
+  // completePreSalePayment antes de que `disabled` surtiera efecto.
+  const { submitting: loading, runLocked } = useSubmitLock();
 
-  useEffect(() => {
-    const unsub = firestore()
-      .collection('customers')
-      .onSnapshot(
-        (snapshot) => {
-          if (!snapshot) {
-            setCustomersById({});
-            return;
-          }
-          const map = snapshot.docs.reduce((acc, doc) => {
-            acc[doc.id] = { id: doc.id, ...doc.data() };
-            return acc;
-          }, {});
-          setCustomersById(map);
-        },
-        (error) => {
-          console.error('Error al escuchar customers:', error);
-          setCustomersById({});
-        }
-      );
-
-    return () => unsub();
-  }, []);
+  // El mapa de clientes lo mantiene PreSaleProvider a nivel app. Antes cada pantalla
+  // de Bodega abría su propio listener sobre la colección `customers` completa.
+  const { customersById } = useContext(PreSaleContext);
 
   const customerName = resolveCustomerName(delivery, customersById, 'Cliente');
 
@@ -73,24 +55,25 @@ export default function DeliveryPaymentScreen({ navigation, route }) {
       return Alert.alert("Monto inválido", "El monto no puede ser negativo.");
     }
 
-    setLoading(true);
-    try {
-        await completePreSalePayment(delivery.id, isNaN(paid) ? 0 : paid);
+    return runLocked(async () => {
+      try {
+          await completePreSalePayment(delivery.id, isNaN(paid) ? 0 : paid);
 
-        // Pass data to Done screen for ticket generation
-        const completedSale = {
-            ...delivery,
-            amountPaid: isNaN(paid) ? 0 : paid,
-            change: change,
-            fechaPago: isCredit && paid < total ? null : new Date(), // Local approx until refetch
-        };
+          // Pass data to Done screen for ticket generation
+          const completedSale = {
+              ...delivery,
+              amountPaid: isNaN(paid) ? 0 : paid,
+              change: change,
+              fechaPago: isCredit && paid < total ? null : new Date(), // Local approx until refetch
+          };
 
-        navigation.replace('DeliveryDone', { sale: completedSale });
-    } catch (error) {
-        setLoading(false);
-        console.error(error);
-        Alert.alert("Error", "No se pudo registrar el pago. Intenta nuevamente.");
-    }
+          navigation.replace('DeliveryDone', { sale: completedSale });
+      } catch (error) {
+          console.error(error);
+          Alert.alert("Error", "No se pudo registrar el pago. Intenta nuevamente.");
+          throw error;   // libera el cerrojo para reintentar
+      }
+    }, { keepLockedOnSuccess: true }).catch(() => {});
   };
 
   return (

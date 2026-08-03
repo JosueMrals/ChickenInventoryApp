@@ -45,7 +45,8 @@ function DailyBarChart({ timeseries = [] }) {
 
   const BAR_W   = Math.max(22, Math.min(48, (SCREEN_W - 24) / timeseries.length - 6));
   const CHART_H = 110;
-  const maxVal  = Math.max(...timeseries.map((t) => t.income), 1);
+  // reduce en vez de spread: Math.max(...array) revienta con RangeError sobre ~100k elementos.
+  const maxVal  = timeseries.reduce((m, t) => Math.max(m, t.income || 0), 1);
   const totalW  = timeseries.length * (BAR_W + 6);
 
   return (
@@ -104,15 +105,15 @@ function BreakRow({ label, value, color, bold, indent, separator }) {
 }
 
 // ─── Panel principal ─────────────────────────────────────────────────────────
-export default function FinancialPanelPRO({ dateFrom, dateTo }) {
+export default function FinancialPanelPRO({ dateFrom, dateTo, refreshKey = 0 }) {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [showTx, setShowTx]   = useState(false);
   const lastKey = useRef(null);
 
   useEffect(() => {
-    const key = `${dateFrom?.getTime?.() ?? ""}_${dateTo?.getTime?.() ?? ""}`;
-    if (lastKey.current === key && data) return;
+    const key = `${dateFrom?.getTime?.() ?? ""}_${dateTo?.getTime?.() ?? ""}_${refreshKey}`;
+    if (lastKey.current === key) return;   // la clave ya incluye rango + refreshKey
     lastKey.current = key;
 
     let mounted = true;
@@ -121,7 +122,7 @@ export default function FinancialPanelPRO({ dateFrom, dateTo }) {
       .then((r) => { if (mounted) { setData(r); setLoading(false); } })
       .catch(()  => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, refreshKey]);
 
   if (loading) {
     return (
@@ -245,8 +246,8 @@ export default function FinancialPanelPRO({ dateFrom, dateTo }) {
         <DailyBarChart timeseries={timeseries} />
         {timeseries.length > 0 && (
           <View style={f.trendFooter}>
-            <Text style={f.trendStat}>Máx: {C$(Math.max(...timeseries.map((t) => t.income)))}</Text>
-            <Text style={f.trendStat}>Min: {C$(Math.min(...timeseries.map((t) => t.income)))}</Text>
+            <Text style={f.trendStat}>Máx: {C$(timeseries.reduce((m, t) => Math.max(m, t.income || 0), 0))}</Text>
+            <Text style={f.trendStat}>Min: {C$(timeseries.reduce((m, t) => Math.min(m, t.income || 0), Infinity))}</Text>
             <Text style={f.trendStat}>Prom.: {C$(salesIncome / Math.max(timeseries.length, 1))}</Text>
           </View>
         )}

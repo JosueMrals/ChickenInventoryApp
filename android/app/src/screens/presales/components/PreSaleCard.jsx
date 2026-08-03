@@ -14,7 +14,7 @@ const formatDate = (timestamp) => {
 
 const formatCurrency = (value) => `$${(Number(value) || 0).toFixed(2)}`;
 
-export default function PreSaleCard({ presale, customerName }) {
+function PreSaleCard({ presale, customerName }) {
     const hasBonuses = presale.bonuses && presale.bonuses.length > 0;
     const displayName = customerName || resolveCustomerName(presale);
     const isCredit = presale.paymentMethod === 'credit' || presale.status === 'credit_pending';
@@ -177,3 +177,6 @@ const styles = StyleSheet.create({
         color: '#007AFF',
     },
 });
+// memo: componente de fila. Sin esto se re-renderiza en cada cambio de estado
+// del padre (tecla del buscador, cambio de filtro) aunque su item no haya cambiado.
+export default React.memo(PreSaleCard);

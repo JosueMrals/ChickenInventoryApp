@@ -1,5 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, ActivityIndicator, TouchableOpacity, StyleSheet } from 'react-native';
+import {
+  View, Text, FlatList, ActivityIndicator, TouchableOpacity, StyleSheet,
+} from 'react-native';
 import { useProductOperations } from '../hooks/useProductOperations';
 import OperationDetailModal from '../components/OperationDetailModal';
 
@@ -83,8 +85,11 @@ function getLatestChangeSummary(operation) {
   return null;
 }
 
-const ProductOperationsPanel = ({ dateRange = {} }) => {
-  const { operations, loading } = useProductOperations(dateRange.startDate, dateRange.endDate);
+// Recibe el rango ya resuelto por la pantalla (`dateFrom`/`dateTo`). Antes
+// esperaba un `dateRange.startDate/endDate` que nadie le pasaba, así que
+// ignoraba el filtro de período y listaba toda la bitácora.
+const ProductOperationsPanel = ({ dateFrom, dateTo }) => {
+  const { operations, loading } = useProductOperations(dateFrom, dateTo);
   const [selectedOperation, setSelectedOperation] = useState(null);
 
   const handleOpenModal = useCallback((operation) => {

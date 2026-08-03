@@ -84,8 +84,8 @@ android {
         applicationId "com.chickeninventoryapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 39052026
-        versionName "2.0.6"
+        versionCode 44052026
+        versionName "2.1.0"
     }
     signingConfigs {
         debug {

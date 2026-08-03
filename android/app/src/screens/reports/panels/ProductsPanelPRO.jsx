@@ -70,90 +70,103 @@ function StockBadge({ stock, isLowStock, isOutOfStock }) {
 }
 
 // ─── Tab: Más vendidos ────────────────────────────────────────────────────────
-function SalesTab({ products, search }) {
-  const maxQty = products[0]?.qtySold || 1;
-  const maxRev = Math.max(...products.map((p) => p.revenue), 1);
-  const [sortBy, setSortBy] = useState("qty"); // 'qty' | 'revenue' | 'margin'
+// ─── Filas ────────────────────────────────────────────────────────────────────
+// Antes eran .map() dentro de un ScrollView; ahora son filas de FlatList, y van
+// memoizadas porque el panel se re-renderiza con cada tecla del buscador.
 
-  const sorted = useMemo(() => {
-    const filtered = search
-      ? products.filter((pr) => pr.name?.toLowerCase().includes(search.toLowerCase()))
-      : products;
-    if (sortBy === "revenue") return [...filtered].sort((a, b) => b.revenue - a.revenue);
-    if (sortBy === "margin")  return [...filtered].sort((a, b) => b.margin - a.margin);
-    return filtered; // qty (ya viene ordenado)
-  }, [products, search, sortBy]);
-
-  if (!sorted.length) {
-    return (
-      <View style={p.emptyBox}>
-        <Icon name="cube-outline" size={38} color="#CBD5E1" />
-        <Text style={p.emptyText}>Sin ventas en este período</Text>
-      </View>
-    );
-  }
-
+const SalesRow = React.memo(function SalesRow({ item, index, ratio }) {
+  const color = colorFor(item.id);
   return (
-    <>
-      {/* Ordenar */}
-      <View style={p.sortRow}>
-        {[["qty","Unidades"],["revenue","Ingresos"],["margin","Margen"]].map(([k, l]) => (
-          <TouchableOpacity
-            key={k}
-            style={[p.sortBtn, sortBy === k && p.sortBtnActive]}
-            onPress={() => setSortBy(k)}
-            activeOpacity={0.8}
-          >
-            <Text style={[p.sortBtnText, sortBy === k && p.sortBtnTextActive]}>{l}</Text>
-          </TouchableOpacity>
-        ))}
+    <View style={p.productCard}>
+      <Text style={[p.rankBadge, { color }]}>#{index + 1}</Text>
+      <ProductAvatar product={item} />
+      <View style={{ flex: 1 }}>
+        <View style={p.rowBetween}>
+          <Text style={p.productName} numberOfLines={1}>{item.name}</Text>
+          <Text style={[p.productRevenue, { color }]}>{C$(item.revenue)}</Text>
+        </View>
+        <ProgressBar ratio={ratio} color={color} />
+        <View style={p.rowBetween}>
+          <Text style={p.productSub}>
+            <Icon name="cube-outline" size={10} color="#9CA3AF" /> {item.qtySold} uds
+            {item.category ? `  ·  ${item.category}` : ""}
+          </Text>
+          <Text style={p.productSub}>
+            Margen {pct(item.margin)}
+          </Text>
+        </View>
       </View>
+    </View>
+  );
+});
 
-      {sorted.map((item, i) => {
-        const color = colorFor(item.id);
-        const ratio = sortBy === "revenue"
-          ? item.revenue / maxRev
-          : item.qtySold / Math.max(maxQty, 1);
-        return (
-          <View key={item.id} style={p.productCard}>
-            <Text style={[p.rankBadge, { color }]}>#{i + 1}</Text>
-            <ProductAvatar product={item} />
-            <View style={{ flex: 1 }}>
-              <View style={p.rowBetween}>
-                <Text style={p.productName} numberOfLines={1}>{item.name}</Text>
-                <Text style={[p.productRevenue, { color }]}>{C$(item.revenue)}</Text>
-              </View>
-              <ProgressBar ratio={ratio} color={color} />
-              <View style={p.rowBetween}>
-                <Text style={p.productSub}>
-                  <Icon name="cube-outline" size={10} color="#9CA3AF" /> {item.qtySold} uds
-                  {item.category ? `  ·  ${item.category}` : ""}
-                </Text>
-                <Text style={p.productSub}>
-                  Margen {pct(item.margin)}
-                </Text>
-              </View>
-            </View>
+const InventoryRow = React.memo(function InventoryRow({ item }) {
+  const stockRatio = item.stock / Math.max(item.stock + 20, 1); // visual approximation
+  return (
+    <View style={p.inventoryCard}>
+      <ProductAvatar product={item} size={38} />
+      <View style={{ flex: 1 }}>
+        <View style={p.rowBetween}>
+          <Text style={p.productName} numberOfLines={1}>{item.name}</Text>
+          <StockBadge stock={item.stock} isLowStock={item.isLowStock} isOutOfStock={item.isOutOfStock} />
+        </View>
+        <View style={p.rowBetween}>
+          <Text style={p.productSub}>Costo: {C$(item.cost)}</Text>
+          <Text style={p.productSub}>Precio: {C$(item.salePrice)}</Text>
+          <Text style={p.productSub}>Valor: {C$(item.stockValue)}</Text>
+        </View>
+        {!item.isOutOfStock && (
+          <View style={[p.barBg, { marginTop: 4 }]}>
+            <View style={[p.barFill, {
+              width: `${Math.min(100, stockRatio * 100)}%`,
+              backgroundColor: item.isLowStock ? "#D97706" : "#059669",
+            }]} />
           </View>
-        );
-      })}
-    </>
+        )}
+      </View>
+    </View>
+  );
+});
+
+// ─── Derivación de filas (puro, fuera del render) ─────────────────────────────
+const sortSalesProducts = (products, search, sortBy) => {
+  const filtered = search
+    ? products.filter((pr) => pr.name?.toLowerCase().includes(search.toLowerCase()))
+    : products;
+  if (sortBy === "revenue") return [...filtered].sort((a, b) => b.revenue - a.revenue);
+  if (sortBy === "margin")  return [...filtered].sort((a, b) => b.margin - a.margin);
+  return filtered; // qty (ya viene ordenado)
+};
+
+const filterInventory = ({ allProducts, lowStock, outOfStock }, search, showSection) => {
+  const base =
+    showSection === "low" ? lowStock :
+    showSection === "out" ? outOfStock :
+    allProducts;
+  if (!search) return base;
+  return base.filter((pr) => pr.name?.toLowerCase().includes(search.toLowerCase()));
+};
+
+// Controles de orden del tab "Ventas" — van en el header de la lista.
+function SalesSortRow({ sortBy, setSortBy }) {
+  return (
+    <View style={p.sortRow}>
+      {[["qty","Unidades"],["revenue","Ingresos"],["margin","Margen"]].map(([k, l]) => (
+        <TouchableOpacity
+          key={k}
+          style={[p.sortBtn, sortBy === k && p.sortBtnActive]}
+          onPress={() => setSortBy(k)}
+          activeOpacity={0.8}
+        >
+          <Text style={[p.sortBtnText, sortBy === k && p.sortBtnTextActive]}>{l}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
   );
 }
 
-// ─── Tab: Inventario ──────────────────────────────────────────────────────────
-function InventoryTab({ allProducts, lowStock, outOfStock, totalStockValue, search }) {
-  const [showSection, setShowSection] = useState("all"); // 'all' | 'low' | 'out'
-
-  const filtered = useMemo(() => {
-    const base =
-      showSection === "low" ? lowStock :
-      showSection === "out" ? outOfStock :
-      allProducts;
-    if (!search) return base;
-    return base.filter((pr) => pr.name?.toLowerCase().includes(search.toLowerCase()));
-  }, [allProducts, lowStock, outOfStock, showSection, search]);
-
+// Mini KPIs de stock + alerta del tab "Inventario" — también en el header.
+function InventoryControls({ allProducts, lowStock, outOfStock, totalStockValue, showSection, setShowSection }) {
   return (
     <>
       {/* Mini KPIs de stock */}
@@ -182,43 +195,6 @@ function InventoryTab({ allProducts, lowStock, outOfStock, totalStockValue, sear
           <Icon name="warning-outline" size={15} color="#B91C1C" />
           <Text style={p.alertText}>{outOfStock.length} productos sin stock — revisa tu inventario</Text>
         </View>
-      )}
-
-      {/* Lista de productos */}
-      {filtered.length === 0 ? (
-        <View style={p.emptyBox}>
-          <Icon name="checkmark-circle-outline" size={38} color="#059669" />
-          <Text style={p.emptyText}>No hay productos en esta sección</Text>
-        </View>
-      ) : (
-        filtered.map((item) => {
-          const color = colorFor(item.id);
-          const stockRatio = item.stock / Math.max(item.stock + 20, 1); // visual approximation
-          return (
-            <View key={item.id} style={p.inventoryCard}>
-              <ProductAvatar product={item} size={38} />
-              <View style={{ flex: 1 }}>
-                <View style={p.rowBetween}>
-                  <Text style={p.productName} numberOfLines={1}>{item.name}</Text>
-                  <StockBadge stock={item.stock} isLowStock={item.isLowStock} isOutOfStock={item.isOutOfStock} />
-                </View>
-                <View style={p.rowBetween}>
-                  <Text style={p.productSub}>Costo: {C$(item.cost)}</Text>
-                  <Text style={p.productSub}>Precio: {C$(item.salePrice)}</Text>
-                  <Text style={p.productSub}>Valor: {C$(item.stockValue)}</Text>
-                </View>
-                {!item.isOutOfStock && (
-                  <View style={[p.barBg, { marginTop: 4 }]}>
-                    <View style={[p.barFill, {
-                      width: `${Math.min(100, stockRatio * 100)}%`,
-                      backgroundColor: item.isLowStock ? "#D97706" : "#059669",
-                    }]} />
-                  </View>
-                )}
-              </View>
-            </View>
-          );
-        })
       )}
     </>
   );
@@ -262,16 +238,20 @@ function CategoriesTab({ categories, totalRevenue }) {
 }
 
 // ─── Panel principal ──────────────────────────────────────────────────────────
-export default function ProductsPanelPRO({ dateFrom, dateTo }) {
+export default function ProductsPanelPRO({ dateFrom, dateTo, refreshKey = 0 }) {
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(true);
   const [activeTab, setActiveTab] = useState(0);
   const [search, setSearch]     = useState("");
+  // Estado subido desde SalesTab/InventoryTab: sus controles ahora viven en el
+  // header de la lista, así que el estado tiene que vivir junto a la lista.
+  const [sortBy, setSortBy]           = useState("qty");  // 'qty' | 'revenue' | 'margin'
+  const [showSection, setShowSection] = useState("all");  // 'all' | 'low' | 'out'
   const lastKey = useRef(null);
 
   useEffect(() => {
-    const key = `${dateFrom?.getTime?.() ?? ""}_${dateTo?.getTime?.() ?? ""}`;
-    if (lastKey.current === key && data) return;
+    const key = `${dateFrom?.getTime?.() ?? ""}_${dateTo?.getTime?.() ?? ""}_${refreshKey}`;
+    if (lastKey.current === key) return;   // la clave ya incluye rango + refreshKey
     lastKey.current = key;
 
     let mounted = true;
@@ -281,7 +261,40 @@ export default function ProductsPanelPRO({ dateFrom, dateTo }) {
       .then((r) => { if (mounted) { setData(r); setLoading(false); } })
       .catch(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, refreshKey]);
+
+  // Hooks antes de los early returns de loading/!data, de ahí los `?.`.
+  const salesRows = useMemo(
+    () => sortSalesProducts(data?.topBySales ?? [], search, sortBy),
+    [data, search, sortBy]
+  );
+
+  const inventoryRows = useMemo(
+    () => filterInventory(
+      {
+        allProducts: data?.allProducts ?? [],
+        lowStock: data?.lowStock ?? [],
+        outOfStock: data?.outOfStock ?? [],
+      },
+      search,
+      showSection
+    ),
+    [data, search, showSection]
+  );
+
+  // Denominadores de la barra: una pasada, no una por fila.
+  const salesRatioOf = useMemo(() => {
+    const maxQty = Math.max(data?.topBySales?.[0]?.qtySold || 1, 1);
+    const maxRev = salesRows.reduce((m, pr) => Math.max(m, pr.revenue || 0), 1);
+    return (item) => (sortBy === "revenue" ? item.revenue / maxRev : item.qtySold / maxQty);
+  }, [data, salesRows, sortBy]);
+
+  const renderRow = useCallback(({ item, index }) => {
+    if (activeTab === 0) {
+      return <SalesRow item={item} index={index} ratio={salesRatioOf(item)} />;
+    }
+    return <InventoryRow item={item} />;
+  }, [activeTab, salesRatioOf]);
 
   if (loading) {
     return (
@@ -301,15 +314,23 @@ export default function ProductsPanelPRO({ dateFrom, dateTo }) {
     );
   }
 
+  // topBySales ya no se lee acá: alimenta salesRows vía useMemo, que corre antes
+  // de estos early returns. allProducts/lowStock/outOfStock siguen usándose en los
+  // mini-KPIs de InventoryControls.
   const {
     totalProducts, totalRevenue, totalQtySold, totalStockValue,
     lowStockCount, outOfStockCount,
-    topBySales, allProducts, lowStock, outOfStock, categories,
+    allProducts, lowStock, outOfStock, categories,
   } = data;
 
-  return (
-    <ScrollView style={p.screen} contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
+  // Tab 2 (Categorías) tiene tantas filas como categorías: no se virtualiza, va
+  // completo en el header. Los tabs 0 y 1 crecen con el catálogo.
+  const rows = activeTab === 0 ? salesRows : activeTab === 1 ? inventoryRows : [];
 
+  // ELEMENTO, no función: pasar una función crearía un tipo de componente nuevo
+  // en cada render y el TextInput de búsqueda perdería el foco en cada tecla.
+  const header = (
+    <>
       {/* ── KPIs ──────────────────────────────────────────────── */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}
         contentContainerStyle={{ gap: 10, paddingHorizontal: 14 }}>
@@ -356,25 +377,51 @@ export default function ProductsPanelPRO({ dateFrom, dateTo }) {
         ))}
       </View>
 
-      {/* ── Contenido del tab activo ───────────────────────────── */}
+      {/* ── Controles del tab activo ───────────────────────────── */}
       <View style={p.tabContent}>
-        {activeTab === 0 && (
-          <SalesTab products={topBySales} search={search} />
-        )}
+        {activeTab === 0 && <SalesSortRow sortBy={sortBy} setSortBy={setSortBy} />}
         {activeTab === 1 && (
-          <InventoryTab
+          <InventoryControls
             allProducts={allProducts}
             lowStock={lowStock}
             outOfStock={outOfStock}
             totalStockValue={totalStockValue}
-            search={search}
+            showSection={showSection}
+            setShowSection={setShowSection}
           />
         )}
         {activeTab === 2 && (
           <CategoriesTab categories={categories} totalRevenue={totalRevenue} />
         )}
       </View>
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <FlatList
+      style={p.screen}
+      data={rows}
+      renderItem={renderRow}
+      keyExtractor={(item) => item.id}
+      ListHeaderComponent={header}
+      ListEmptyComponent={activeTab === 2 ? null : (
+        <View style={p.emptyBox}>
+          <Icon
+            name={activeTab === 0 ? "cube-outline" : "checkmark-circle-outline"}
+            size={38}
+            color={activeTab === 0 ? "#CBD5E1" : "#059669"}
+          />
+          <Text style={p.emptyText}>
+            {activeTab === 0 ? "Sin ventas en este período" : "No hay productos en esta sección"}
+          </Text>
+        </View>
+      )}
+      contentContainerStyle={{ paddingBottom: 32 }}
+      keyboardShouldPersistTaps="handled"
+      initialNumToRender={12}
+      windowSize={10}
+      removeClippedSubviews
+    />
   );
 }
 

@@ -13,24 +13,101 @@ function _cacheKey(from, to) {
   return `${from?.getTime?.() ?? "null"}_${to?.getTime?.() ?? "null"}`;
 }
 
-/** Invalida todas las cachés (llamar cuando se genera una nueva venta) */
-export function clearReportsCache() {
+/**
+ * Día calendario LOCAL en formato YYYY-MM-DD.
+ *
+ * No usar `toISOString().slice(0,10)`: eso convierte a UTC y Nicaragua está en
+ * UTC-6, así que toda venta después de las 18:00 se contabilizaba en el día
+ * siguiente. Las series diarias salían corridas.
+ */
+function dayKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** Fecha de un documento (`createdAt` Timestamp | Date) o null. */
+function docDate(value) {
+  if (!value) return null;
+  if (typeof value.toDate === "function") return value.toDate();
+  return value instanceof Date ? value : null;
+}
+
+/** Convierte el acumulado por día en una serie ordenada cronológicamente. */
+function buildTimeseries(dailyMap) {
+  return Object.entries(dailyMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date, income: v.income, count: v.count }));
+}
+
+/**
+ * Invalida TODAS las cachés del módulo. La usa el pull-to-refresh de la pantalla
+ * de reportes: sin esto los datos quedaban congelados hasta 5 minutos (el TTL) y
+ * no había forma de forzar una relectura tras registrar una venta.
+ *
+ * Antes existían dos limpiadores parciales (`clearReportsCache` y
+ * `clearFinancialCache`) que nadie llamaba y que además dejaban fuera las cachés
+ * de clientes y productos.
+ */
+export function clearAllReportsCaches() {
   _docsCache.clear();
   _summaryCache.clear();
   _userSalesCache.clear();
+  _financialDetailCache.clear();
+  _clientsReportCache.clear();
+  _productsReportCache.clear();
 }
 
 const extractProductId = (it) =>
   it.id || it.productId || it.product?.productId || it.product?.id || null;
 
-// Estados de pre-venta que representan una venta completada/activa
-const COMPLETED_PRESALE_STATUSES = new Set([
+/** Costo de una línea al momento de la venta, si quedó denormalizado en el documento.
+ *  Exportado para poder probar la preferencia costo-guardado vs catálogo. */
+export const lineCost = (it) => {
+  const stored = Number(it.purchasePrice);
+  return Number.isFinite(stored) && stored > 0 ? stored : null;
+};
+
+/**
+ * Precios de compra por id de producto, SOLO para los ids que no traen el costo
+ * en la propia línea (documentos anteriores a que se denormalizara).
+ *
+ * El `in` de Firestore admite 10 valores, así que hay que trocear. Los trozos son
+ * independientes: van en paralelo con Promise.all. Antes esto era un `await` dentro
+ * de un `for`, o sea N/10 viajes en serie — con 200 productos, 20 idas y vueltas
+ * encadenadas antes de poder pintar el reporte.
+ */
+async function fetchPurchasePrices(productIds) {
+  const ids = Array.from(productIds);
+  if (!ids.length) return {};
+
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));
+
+  const snapshots = await Promise.all(
+    chunks.map((chunk) =>
+      col("products").where(firestore.FieldPath.documentId(), "in", chunk).get()
+    )
+  );
+
+  const prices = {};
+  snapshots.forEach((snap) => {
+    snap.forEach((d) => { prices[d.id] = d.data().purchasePrice || 0; });
+  });
+  return prices;
+}
+
+// Estados de pre-venta que representan una venta completada/activa.
+// Array y no Set: se pasa directo al `where(..., "in", ...)` de los queries.
+const COMPLETED_PRESALE_STATUSES = [
   "paid",
   "delivered",
   "credit_pending",
   "credit_preparing",
   "credit_ready_for_delivery",
-]);
+  "credit_dispatched",
+];
 
 /**
  * Normaliza un documento de `presales` al mismo formato que usa `sales`,
@@ -65,8 +142,11 @@ async function fetchAllSalesDocs({ from, to }) {
   if (to)   qSales = qSales.where("createdAt", "<=", toTs(to));
   queries.push(qSales.get());
 
-  // --- pre-ventas: se consulta por rango de fecha y se filtra el status en memoria ---
-  let qPresales = col("presales").orderBy("createdAt");
+  // --- pre-ventas: el status va en el query. Antes se traía TODA la pre-venta del
+  // rango (canceladas, pendientes, en preparación) para descartarla en memoria. ---
+  let qPresales = col("presales")
+    .where("status", "in", COMPLETED_PRESALE_STATUSES)
+    .orderBy("createdAt");
   if (from) qPresales = qPresales.where("createdAt", ">=", toTs(from));
   if (to)   qPresales = qPresales.where("createdAt", "<=", toTs(to));
   queries.push(qPresales.get());
@@ -80,10 +160,7 @@ async function fetchAllSalesDocs({ from, to }) {
   });
 
   presalesSnap.forEach((doc) => {
-    const data = doc.data();
-    if (COMPLETED_PRESALE_STATUSES.has(data.status)) {
-      allDocs.push({ _id: doc.id, ...normalizePresale(data) });
-    }
+    allDocs.push({ _id: doc.id, ...normalizePresale(doc.data()) });
   });
 
   _docsCache.set(key, { ts: Date.now(), data: allDocs });
@@ -99,12 +176,16 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
     const allDocs = await fetchAllSalesDocs({ from, to });
 
     if (!allDocs.length) {
-      return {
+      const empty = {
         totalIncome: 0, totalCost: 0, profit: 0, avgPerSale: 0,
         totalSalesCount: 0, topProducts: [], timeseries: [],
         salesByEmployee: [], bestClients: [],
-        totalDiscounts: 0, totalSaved: 0,
+        totalDiscounts: 0,
       };
+      // También se cachea el vacío: si no, un rango sin ventas repetía las dos
+      // consultas cada vez que se entraba a la pestaña.
+      _summaryCache.set(key, { ts: Date.now(), data: empty });
+      return empty;
     }
 
     // Recopilar IDs de productos
@@ -112,35 +193,36 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
     allDocs.forEach((sale) => {
       (sale.items || []).forEach((it) => {
         const pid = extractProductId(it);
-        if (pid) productIds.add(pid);
+        // Solo se consulta el catálogo si la línea no guardó su costo.
+        if (pid && lineCost(it) === null) productIds.add(pid);
       });
     });
 
     // Precios de compra
-    const productPrices = {};
-    if (productIds.size > 0) {
-      const arr = Array.from(productIds);
-      const chunks = [];
-      for (let i = 0; i < arr.length; i += 10) chunks.push(arr.slice(i, i + 10));
-      for (const ch of chunks) {
-        const pdocs = await col("products")
-          .where(firestore.FieldPath.documentId(), "in", ch)
-          .get();
-        pdocs.forEach((d) => { productPrices[d.id] = d.data().purchasePrice || 0; });
-      }
-    }
+    const productPrices = await fetchPurchasePrices(productIds);
 
     let totalIncome = 0;
     let totalCost = 0;
     let totalDiscounts = 0;
-    let totalSaved = 0;
     const productCount = {};
     const employeeTotals = {};
     const clientTotals = {};
+    const dailySales = {};
 
     allDocs.forEach((sale) => {
       const saleTotal = Number(sale.total ?? sale.subtotal ?? 0);
       totalIncome += saleTotal;
+
+      // Serie diaria: la consume la gráfica del panel de Ventas. Antes el resumen
+      // no la devolvía, así que la gráfica y los KPIs de ese panel —que se
+      // mostraban solo si había serie— no llegaban a pintarse nunca.
+      const ts = docDate(sale.createdAt);
+      if (ts) {
+        const day = dayKey(ts);
+        if (!dailySales[day]) dailySales[day] = { income: 0, count: 0 };
+        dailySales[day].income += saleTotal;
+        dailySales[day].count += 1;
+      }
 
       // Empleado: ventas rápidas usan soldBy/cashierEmail, presales usan createdBy
       const empKey =
@@ -182,10 +264,9 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
           }
           productCount[pid].qty += qty;
           productCount[pid].total += Number(it.total || 0);
-          saleCost += (productPrices[pid] || 0) * qty;
+          saleCost += (lineCost(it) ?? productPrices[pid] ?? 0) * qty;
         }
         totalDiscounts += Number(it.discount || 0) + Number(it.autoDiscountTotal || 0);
-        totalSaved     += Number(it.discount || 0) + Number(it.autoDiscountTotal || 0);
       });
       totalCost += saleCost;
     });
@@ -196,8 +277,10 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
       profit: totalIncome - totalCost,
       avgPerSale: totalIncome / Math.max(allDocs.length, 1),
       totalSalesCount: allDocs.length,
+      // `totalDiscounts` es lo que el cliente ahorró. Antes se devolvía dos veces
+      // con nombres distintos (`totalSaved`), calculado con la misma expresión.
       totalDiscounts: Number(totalDiscounts.toFixed(2)),
-      totalSaved: Number(totalSaved.toFixed(2)),
+      timeseries: buildTimeseries(dailySales),
       topProducts: Object.values(productCount)
         .sort((a, b) => b.qty - a.qty)
         .slice(0, topN),
@@ -211,45 +294,6 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
     return result;
   } catch (e) {
     console.error("ERROR getSalesSummaryOptimized:", e);
-    return null;
-  }
-}
-
-export async function getSalesByEmployee({ from, to }) {
-  try {
-    const allDocs = await fetchAllSalesDocs({ from, to });
-    const map = {};
-    allDocs.forEach((s) => {
-      const key =
-        s.createdBy || s.soldBy || s.cashierEmail || s.cashierName || "Desconocido";
-      if (!map[key]) {
-        map[key] = { id: key, name: s.cashierName || s.soldBy || key, total: 0, count: 0 };
-      }
-      map[key].total += Number(s.total ?? 0);
-      map[key].count += 1;
-    });
-    return Object.values(map).sort((a, b) => b.total - a.total);
-  } catch (e) {
-    console.log("ERROR getSalesByEmployee:", e);
-    return [];
-  }
-}
-
-export async function getFinancialSummary({ from, to }) {
-  try {
-    let q = col("financials").orderBy("createdAt");
-    if (from) q = q.where("createdAt", ">=", toTs(from));
-    if (to)   q = q.where("createdAt", "<=", toTs(to));
-    const snap = await q.get();
-    let incomes = 0, expenses = 0;
-    snap.forEach((doc) => {
-      const f = doc.data();
-      const amount = Number(f.amount || 0);
-      if (f.type === "income")  incomes  += amount;
-      if (f.type === "expense") expenses += amount;
-    });
-    return { incomes, expenses, balance: incomes - expenses };
-  } catch (e) {
     return null;
   }
 }
@@ -282,21 +326,11 @@ export async function getFinancialDetail({ from, to }) {
     allDocs.forEach((sale) => {
       (sale.items || []).forEach((it) => {
         const pid = extractProductId(it);
-        if (pid) productIds.add(pid);
+        // Solo se consulta el catálogo si la línea no guardó su costo.
+        if (pid && lineCost(it) === null) productIds.add(pid);
       });
     });
-    const productPrices = {};
-    if (productIds.size > 0) {
-      const arr = Array.from(productIds);
-      const chunks = [];
-      for (let i = 0; i < arr.length; i += 10) chunks.push(arr.slice(i, i + 10));
-      for (const ch of chunks) {
-        const pdocs = await col("products")
-          .where(firestore.FieldPath.documentId(), "in", ch)
-          .get();
-        pdocs.forEach((d) => { productPrices[d.id] = d.data().purchasePrice || 0; });
-      }
-    }
+    const productPrices = await fetchPurchasePrices(productIds);
 
     // Métricas de ventas
     let salesIncome = 0, salesCost = 0, totalDiscounts = 0;
@@ -319,10 +353,10 @@ export async function getFinancialDetail({ from, to }) {
       paymentMethods[pm].total += saleTotal;
       paymentMethods[pm].count += 1;
 
-      // Serie diaria
-      const ts = sale.createdAt?.toDate ? sale.createdAt.toDate() : null;
+      // Serie diaria, agrupada por día LOCAL (ver dayKey).
+      const ts = docDate(sale.createdAt);
       if (ts) {
-        const day = ts.toISOString().slice(0, 10);
+        const day = dayKey(ts);
         if (!dailySales[day]) dailySales[day] = { income: 0, count: 0 };
         dailySales[day].income += saleTotal;
         dailySales[day].count  += 1;
@@ -334,7 +368,7 @@ export async function getFinancialDetail({ from, to }) {
         const qty = Number(it.quantity ?? it.qty ?? 0);
         const pid = extractProductId(it);
         if (pid && qty > 0)
-          saleCost += (productPrices[pid] || 0) * qty;
+          saleCost += (lineCost(it) ?? productPrices[pid] ?? 0) * qty;
         totalDiscounts +=
           Number(it.discount || 0) + Number(it.autoDiscountTotal || 0);
       });
@@ -353,9 +387,7 @@ export async function getFinancialDetail({ from, to }) {
     });
 
     // Timeseries ordenada por fecha
-    const timeseries = Object.entries(dailySales)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, v]) => ({ date, income: v.income, count: v.count }));
+    const timeseries = buildTimeseries(dailySales);
 
     const grossProfit = salesIncome - salesCost;
     const netProfit   = grossProfit + extIncomes - extExpenses;
@@ -391,15 +423,10 @@ export async function getFinancialDetail({ from, to }) {
   }
 }
 
-/** Invalida las cachés financieras (llámalo junto con clearReportsCache) */
-export function clearFinancialCache() {
-  _financialDetailCache.clear();
-}
-
-/** Obtiene todos los usuarios del sistema con su actividad reciente */
+/** Usuarios del sistema, en vivo, para el panel de monitoreo. */
 export function subscribeUsersActivity(callback) {
   return col("users").onSnapshot(
-    async (snap) => {
+    (snap) => {
       const users = snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
       callback(users);
     },
@@ -455,22 +482,24 @@ export async function getSalesPage({ cursors = {}, from, to, limit = 20 }) {
 
   for (const c of collections) {
     try {
-      let q = col(c.col)
-        .orderBy("createdAt", "desc")
-        .limit(limit);
+      // El status va ANTES del limit. Filtrarlo después significaba que una página
+      // de 10 podía devolver 2 filas útiles, y el consumidor lo interpretaba como
+      // "se acabaron los datos" (useReportsData mira el largo para decidir hasMore).
+      let q = col(c.col);
+      if (c.col === "presales") {
+        q = q.where("status", "in", COMPLETED_PRESALE_STATUSES);
+      }
+      q = q.orderBy("createdAt", "desc");
       if (from) q = q.where("createdAt", ">=", toTs(from));
       if (to)   q = q.where("createdAt", "<=", toTs(to));
       if (cursors[c.col]) q = q.startAfter(cursors[c.col]);
+      q = q.limit(limit);
 
       const snap = await q.get();
       if (!snap.empty) {
         newCursors[c.col] = snap.docs[snap.docs.length - 1];
         snap.docs.forEach((doc) => {
           const data = doc.data();
-          // Para presales, solo las completadas
-          if (c.col === "presales" && !COMPLETED_PRESALE_STATUSES.has(data.status)) {
-            return;
-          }
           results.push({
             id: doc.id,
             ...data,
@@ -491,55 +520,6 @@ export async function getSalesPage({ cursors = {}, from, to, limit = 20 }) {
   );
 
   return { items: results, cursors: newCursors };
-}
-
-export async function getActivityFeedPage({ cursors = {}, from, to, limit = 10 }) {
-  const results = [];
-
-  const collections = [
-    { col: "sales",              kind: "sale"      },
-    { col: "presales",           kind: "presale"   },
-    { col: "inventoryMovements", kind: "inventory" },
-    { col: "financials",         kind: "financial" },
-  ];
-
-  let newCursors = { ...cursors };
-
-  for (const c of collections) {
-    try {
-      let q = col(c.col).orderBy("createdAt", "desc").limit(limit);
-      if (from) q = q.where("createdAt", ">=", toTs(from));
-      if (to)   q = q.where("createdAt", "<=", toTs(to));
-      if (cursors[c.col]) q = q.startAfter(cursors[c.col]);
-
-      const snap = await q.get();
-      if (!snap.empty) {
-        newCursors[c.col] = snap.docs[snap.docs.length - 1];
-        snap.docs.forEach((doc) => {
-          const data = doc.data();
-          if (c.col === "presales" && !COMPLETED_PRESALE_STATUSES.has(data.status)) {
-            return;
-          }
-          results.push({
-            id: doc.id,
-            ...data,
-            __kind: c.kind,
-            _uid: `${c.kind}_${doc.id}`,
-          });
-        });
-      }
-    } catch (e) {
-      // Un fallo en una colección no bloquea las demás
-      console.error(`ERROR getActivityFeedPage [${c.col}]:`, e);
-    }
-  }
-
-  results.sort(
-    (a, b) =>
-      (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
-  );
-
-  return { items: results.slice(0, limit), cursors: newCursors };
 }
 
 // ─── Caché de reporte de clientes ────────────────────────────────────────────
@@ -633,9 +613,13 @@ export async function getClientsReport({ from, to }) {
       };
     });
 
-    // Clientes sin ID en catálogo (ventas con nombre libre)
+    // Ventas que no corresponden a ningún cliente del catálogo: o se registraron
+    // con nombre libre (sin `customerId`), o el cliente se eliminó después. En
+    // ambos casos no aparecen en la lista de clientes y su importe se perdía de
+    // vista. Antes el filtro exigía `customerId`, así que las de nombre libre
+    // —justamente las que el contador dice medir— nunca se contaban.
     const anonymousSales = Object.values(salesMap).filter(
-      (s) => s.customerId && !catalog[s.customerId]
+      (s) => !s.customerId || !catalog[s.customerId]
     );
 
     // Agrupación por tipo

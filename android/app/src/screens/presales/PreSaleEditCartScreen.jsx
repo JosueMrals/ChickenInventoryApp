@@ -7,6 +7,9 @@ import DiscountModal from "../../components/common/DiscountModal";
 import styles from "../quicksalesNew/styles/quickCartStyles";
 import globalStyles from "../../styles/globalStyles";
 import AddProductModal from "./components/AddProductModal";
+import CreditDueDatePicker from "./components/CreditDueDatePicker";
+import { getEffectiveCreditLimit, toDateSafe } from "../../utils/creditUtils";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 
@@ -24,16 +27,26 @@ const formatPreSaleError = (error) => {
 export default function PreSaleEditCartScreen({ navigation }) {
   const { 
     customer, setCustomer, 
-    submitPreSale, resetPreSale, loading,
+    submitPreSale, resetPreSale, loading: contextLoading,
     editCart, updateEditCart, removeFromEditCart, addItemToEditCart,
     editingPreSale
   } = useContext(PreSaleContext);
+
+  // Ver useSubmitLock: `disabled` llega tarde para frenar un doble toque.
+  const { submitting, runLocked } = useSubmitLock();
+  const loading = contextLoading || submitting;
   
   const allowExitRef = useRef(false);
   const [discountModal, setDiscountModal] = useState({ visible: false, product: null });
   const [addProductModalVisible, setAddProductModalVisible] = useState(false);
   const [isCredit, setIsCredit] = useState(false);
+  const [creditDueDate, setCreditDueDate] = useState(null);
   const creditWarningShownRef = useRef(false);
+
+  // Precargar la fecha de pago ya acordada en la preventa que se edita.
+  useEffect(() => {
+    setCreditDueDate(toDateSafe(editingPreSale?.creditDueDate));
+  }, [editingPreSale]);
 
   const displayData = useMemo(() => {
     const normalItems = editCart.filter(i => !i.isBonus);
@@ -67,7 +80,9 @@ export default function PreSaleEditCartScreen({ navigation }) {
   );
   const total = subtotal - totalDiscount;
   const showSummaryBreakdown = totalDiscount > 0;
-  const customerCreditLimit = Number(customer?.creditLimit) || 0;
+  // Límite efectivo: límite base + sobregiro configurado en el cliente.
+  const effectiveCredit = getEffectiveCreditLimit(customer);
+  const customerCreditLimit = effectiveCredit.total;
   const canUseCredit = customerCreditLimit > 0;
   const creditExceeded = canUseCredit && total > customerCreditLimit;
   const creditAvailable = canUseCredit ? Math.max(customerCreditLimit - total, 0) : 0;
@@ -144,22 +159,34 @@ export default function PreSaleEditCartScreen({ navigation }) {
           `El crédito permitido es C$${customerCreditLimit.toFixed(2)} y el total es C$${total.toFixed(2)}.`
         );
       }
+      if (!creditDueDate) {
+        return Alert.alert(
+          "Fecha de pago requerida",
+          "Selecciona la fecha en la que el cliente se compromete a pagar el crédito."
+        );
+      }
     }
 
     const paymentMethod = mustForceCash ? 'cash' : (isCredit ? 'credit' : 'cash');
 
-    try {
-      await submitPreSale({ paymentMethod });
-      Alert.alert("Pre-Venta Actualizada", "Los cambios han sido guardados.", [
-        { text: "OK", onPress: () => {
-            allowExitRef.current = true;
-            resetPreSale();
-            navigation.navigate("PreSalesList");
-        }}
-      ]);
-    } catch (error) {
-      Alert.alert("Error", formatPreSaleError(error));
-    }
+    return runLocked(async () => {
+      try {
+        await submitPreSale({
+          paymentMethod,
+          creditDueDate: paymentMethod === 'credit' ? creditDueDate : null,
+        });
+        Alert.alert("Pre-Venta Actualizada", "Los cambios han sido guardados.", [
+          { text: "OK", onPress: () => {
+              allowExitRef.current = true;
+              resetPreSale();
+              navigation.navigate("PreSalesList");
+          }}
+        ]);
+      } catch (error) {
+        Alert.alert("Error", formatPreSaleError(error));
+        throw error;
+      }
+    }, { keepLockedOnSuccess: true }).catch(() => {});
   };
 
   useEffect(() => {
@@ -272,7 +299,9 @@ export default function PreSaleEditCartScreen({ navigation }) {
                 <View style={localStyles.creditInfo}>
                   <Text style={localStyles.paymentLabel}>Crédito</Text>
                   <Text style={localStyles.creditHint}>
-                    Límite: {formatCurrency(customerCreditLimit)} · Disponible: {formatCurrency(creditAvailable)}
+                    Límite: {formatCurrency(customerCreditLimit)}
+                    {effectiveCredit.extra > 0 ? ` (incluye sobregiro ${formatCurrency(effectiveCredit.extra)})` : ''}
+                    {' · '}Disponible: {formatCurrency(creditAvailable)}
                   </Text>
                   {!hasValidTotal && (
                     <Text style={localStyles.creditWarning}>El total debe ser mayor que 0.</Text>
@@ -297,7 +326,11 @@ export default function PreSaleEditCartScreen({ navigation }) {
                 </TouchableOpacity>
               </View>
             )}
-            
+
+            {isCredit && (
+              <CreditDueDatePicker value={creditDueDate} onChange={setCreditDueDate} />
+            )}
+
             <View style={localStyles.footerButtons}>
               <TouchableOpacity style={[styles.checkoutBtn, {flex: 1, marginRight: 5, backgroundColor: '#007AFF'}]} onPress={() => setAddProductModalVisible(true)}>
                   <Text style={styles.checkoutText}>Agregar Producto</Text>

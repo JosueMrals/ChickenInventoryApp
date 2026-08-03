@@ -10,6 +10,7 @@ const STATUS_CONFIG = {
   ready_for_delivery:         { label: 'Lista',           bg: '#D1FAE5', color: '#065F46', icon: 'checkmark-circle-outline' },
   credit_ready_for_delivery:  { label: 'Lista Crédito',   bg: '#D1FAE5', color: '#065F46', icon: 'checkmark-circle-outline' },
   dispatched:                 { label: 'En Reparto',      bg: '#E0E7FF', color: '#3730A3', icon: 'bicycle-outline' },
+  credit_dispatched:          { label: 'Crédito por Cobrar', bg: '#EDE9FE', color: '#5B21B6', icon: 'card-outline' },
   paid:                       { label: 'Pagada',          bg: '#D1FAE5', color: '#065F46', icon: 'cash-outline' },
 };
 

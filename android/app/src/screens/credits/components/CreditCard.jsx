@@ -2,8 +2,9 @@ import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import styles from '../styles/creditsStyles';
+import CreditDueInfo from './CreditDueInfo';
 
-export default function CreditCard({ item, role, onAbonar, onDelete, onEditPreSale, onViewDetail }) {
+function CreditCard({ item, role, onAbonar, onDelete, onEditPreSale, onViewDetail }) {
   const name = item.customerName || item.clientName || 'Cliente';
   const total = Number(item.total) || 0;
   const paid = Number(item.paid) || 0;
@@ -42,6 +43,9 @@ export default function CreditCard({ item, role, onAbonar, onDelete, onEditPreSa
           </Text>
         </View>
       </View>
+
+      {/* Fecha de pago acordada / atraso */}
+      {!isPaid && <CreditDueInfo credit={item} compact />}
 
       {/* Progress bar */}
       <View style={styles.progressWrap}>
@@ -104,3 +108,7 @@ export default function CreditCard({ item, role, onAbonar, onDelete, onEditPreSa
     </View>
   );
 }
+
+// memo: componente de fila. Sin esto se re-renderiza en cada cambio de estado
+// del padre (tecla del buscador, cambio de filtro) aunque su item no haya cambiado.
+export default React.memo(CreditCard);

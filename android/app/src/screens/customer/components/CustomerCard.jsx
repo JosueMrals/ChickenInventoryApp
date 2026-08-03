@@ -3,13 +3,15 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
-export default function CustomerCard({
+function CustomerCard({
   customer,
   role,
   onEdit,
   onViewHistory,
   onCreateSale,
   onDelete,
+  readOnly = false,
+  onViewInfo,
 }) {
   const {
     firstName,
@@ -22,10 +24,11 @@ export default function CustomerCard({
     discount = 0,
   } = customer;
 
-  const canEdit = role === 'admin' || role === 'vendedor';
+  const canEdit = !readOnly && (role === 'admin' || role === 'vendedor');
   const initials = `${(firstName || '?')[0]}${(lastName || '?')[0]}`.toUpperCase();
 
   const handleCardPress = () => {
+    if (readOnly) { onViewInfo?.(customer); return; }
     if (canEdit && onEdit) { onEdit(customer); return; }
     if (onViewHistory) { onViewHistory(customer); }
   };
@@ -76,15 +79,24 @@ export default function CustomerCard({
 
       {/* Divider + actions */}
       <View style={s.divider} />
+
+      {/* Solo consulta (entregador): una acción directa, sin botones inertes. */}
+      {readOnly ? (
+        <TouchableOpacity style={s.infoBtn} onPress={() => onViewInfo?.(customer)} activeOpacity={0.85}>
+          <Icon name="account-details-outline" size={18} color="#007AFF" />
+          <Text style={s.infoBtnText}>Ver información</Text>
+          <Icon name="chevron-right" size={18} color="#007AFF" />
+        </TouchableOpacity>
+      ) : (
       <View style={s.actions}>
         <TouchableOpacity style={[s.actionBtn, s.actionDisabled]} disabled>
           <Icon name="cart-plus" size={18} color="#C7C7CC" />
           <Text style={[s.actionLabel, { color: '#C7C7CC' }]}>Venta</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[s.actionBtn, s.actionDisabled]} disabled>
-          <Icon name="history" size={18} color="#C7C7CC" />
-          <Text style={[s.actionLabel, { color: '#C7C7CC' }]}>Historial</Text>
+        <TouchableOpacity style={s.actionBtn} onPress={() => onViewHistory?.(customer)}>
+          <Icon name="history" size={18} color="#007AFF" />
+          <Text style={[s.actionLabel, { color: '#007AFF' }]}>Historial</Text>
         </TouchableOpacity>
 
         {canEdit && (
@@ -101,9 +113,14 @@ export default function CustomerCard({
           </TouchableOpacity>
         )}
       </View>
+      )}
     </TouchableOpacity>
   );
 }
+
+// memo: la lista de clientes re-renderiza en cada tecla del buscador. Sin esto,
+// cada fila montada se vuelve a renderizar aunque su `customer` no haya cambiado.
+export default React.memo(CustomerCard);
 
 const s = StyleSheet.create({
   card: {
@@ -217,5 +234,19 @@ const s = StyleSheet.create({
   },
   actionDisabled: {
     opacity: 0.4,
+  },
+  infoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#F2F6FF',
+  },
+  infoBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#007AFF',
   },
 });

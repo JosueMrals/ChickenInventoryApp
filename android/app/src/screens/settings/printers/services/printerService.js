@@ -477,6 +477,29 @@ function buildDeliveryReceiptText(sale, layout = {}) {
     text += "\n";
   }
 
+  // ── Devoluciones aprobadas (compacto) ────────────────────────────────────
+  // Los ítems y totales de arriba ya vienen recalculados; esto detalla qué salió.
+  const returnedLines = Array.isArray(sale.returnedSummary) ? sale.returnedSummary : [];
+  if (returnedLines.length > 0) {
+    text += SEP + "\n";
+    text += "[[B]]DEVOLUCIONES\n";
+    returnedLines.forEach((line) => {
+      const rQty = Number(line.quantity || 0);
+      const rName = sanitize(line.productName || "Item") + (line.isBonus ? " (regalo)" : "");
+      const rTotal = Number(line.total || 0);
+      const totalStr = (rTotal > 0 ? `-C$${rTotal.toFixed(2)}` : "").padStart(columns.totalWidth);
+      const nameLines = splitTextByWidth(`-${rQty} ${rName}`, columns.nameWidth);
+      text += `${(nameLines[0] || "").padEnd(columns.nameWidth)} ${totalStr}\n`;
+      nameLines.slice(1).forEach((linePart) => {
+        text += `${linePart.padEnd(columns.nameWidth)} ${"".padStart(columns.totalWidth)}\n`;
+      });
+    });
+    const returnedTotal = Number(sale.returnedTotal || 0);
+    if (returnedTotal > 0) {
+      text += `${"Total devuelto".padEnd(columns.nameWidth)} ${`-C$${returnedTotal.toFixed(2)}`.padStart(columns.totalWidth)}\n`;
+    }
+  }
+
   text += SEP + "\n";
 
   const total = (sale.total || 0).toFixed(2);

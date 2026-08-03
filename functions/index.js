@@ -1,4 +1,10 @@
-const functions = require('firebase-functions');
+// API v1 explícita. Desde firebase-functions v7 el import raíz ('firebase-functions')
+// apunta a la v2, cuyo onCall entrega un solo argumento (request) en vez de
+// (data, context). Con el import raíz, el `context` de cada handler dejaba de ser
+// el CallableContext, `context.app` era siempre undefined y TODAS las funciones
+// respondían "App Check requerido" por más que la consola estuviera bien.
+// Este archivo está escrito en estilo v1 (data, context), así que se importa v1.
+const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 admin.initializeApp();
 
@@ -41,17 +47,26 @@ const ensureAppCheck = (context) => {
     }
 };
 
+const VALID_ROLES = ['admin', 'vendedor', 'entregador', 'bodeguero'];
+
 // Middleware de autenticación y rol de administrador
 const ensureAdmin = async (context, data) => {
     let uid;
+    let tokenRole;
     if (context.auth) {
         uid = context.auth.uid;
+        tokenRole = context.auth.token && context.auth.token.role;
     } else if (data && data.authToken) {
         const decoded = await admin.auth().verifyIdToken(data.authToken);
         uid = decoded.uid;
+        tokenRole = decoded.role;
     } else {
         throw new functions.https.HttpsError('unauthenticated', 'Se requiere autenticación.');
     }
+
+    // El custom claim evita la lectura del documento. Se cae al documento solo
+    // mientras haya tokens emitidos antes de la migración (vigencia máxima 1 h).
+    if (tokenRole === 'admin') return uid;
 
     const userDoc = await db.collection('users').doc(uid).get();
     if (!userDoc.exists || userDoc.data().role !== 'admin') {
@@ -76,6 +91,10 @@ exports.createUser = functions.https.onCall(async (reqData, context) => {
     if (password.length < 6) {
         throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
     }
+    const normalizedRole = role.trim().toLowerCase();
+    if (!VALID_ROLES.includes(normalizedRole)) {
+        throw new functions.https.HttpsError('invalid-argument', `Rol inválido: ${role}. Válidos: ${VALID_ROLES.join(', ')}.`);
+    }
 
     let userRecord = null;
 
@@ -94,7 +113,7 @@ exports.createUser = functions.https.onCall(async (reqData, context) => {
             nombre:    nombre.trim(),
             apellido:  apellido.trim(),
             user:      user.trim(),
-            role:      role.trim().toLowerCase(),
+            role:      normalizedRole,
             verified:  true,        // Pre-verificado por el admin
             uid:       userRecord.uid,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -104,7 +123,12 @@ exports.createUser = functions.https.onCall(async (reqData, context) => {
         if (cedula  && typeof cedula  === 'string' && cedula.trim())  firestoreData.cedula  = cedula.trim();
         if (telefono && typeof telefono === 'string' && telefono.trim()) firestoreData.telefono = telefono.trim();
 
-        // 3. Crear documento en Firestore usando el UID como ID
+        // 3. Claim de rol antes del documento: el trigger syncUserRoleClaim también
+        //    lo pondría, pero hacerlo aquí evita la ventana en que el usuario recién
+        //    creado ya puede autenticarse y todavía no tiene rol en su token.
+        await admin.auth().setCustomUserClaims(userRecord.uid, { role: normalizedRole });
+
+        // 4. Crear documento en Firestore usando el UID como ID
         await db.collection('users').doc(userRecord.uid).set(firestoreData);
 
         return { success: true, message: `Usuario ${email} creado exitosamente.`, uid: userRecord.uid };
@@ -127,6 +151,66 @@ exports.createUser = functions.https.onCall(async (reqData, context) => {
 
         throw new functions.https.HttpsError('invalid-argument', message);
     }
+});
+
+// Mantiene el custom claim `role` en sincronía con users/{uid}.role.
+//
+// El rol se escribe desde el cliente en varios lugares (userService.js,
+// EditUserModal, EditUserScreen), y un cliente no puede setear claims. Este
+// trigger es el único punto por donde pasan todas esas escrituras, así que la
+// sincronización vive aquí y no en cada llamador.
+//
+// El claim es lo que consultan firestore.rules: sin él, cada evaluación de regla
+// hacía un get() a users/{uid} — una lectura extra facturada por cada request,
+// en todas las colecciones.
+exports.syncUserRoleClaim = functions.firestore
+    .document('users/{uid}')
+    .onWrite(async (change, context) => {
+        const { uid } = context.params;
+        const before = change.before.exists ? change.before.data().role : null;
+        const after  = change.after.exists  ? change.after.data().role  : null;
+
+        if (before === after) return null; // el rol no cambió
+
+        const claim = VALID_ROLES.includes(after) ? { role: after } : null;
+
+        try {
+            await admin.auth().setCustomUserClaims(uid, claim);
+        } catch (error) {
+            // El documento puede sobrevivir a la cuenta de Auth (o precederla).
+            if (error.code === 'auth/user-not-found') return null;
+            throw error;
+        }
+        return null;
+    });
+
+// Backfill de una sola vez: puebla el claim de los usuarios que ya existían
+// antes del trigger. Sin esto, un usuario que nunca vuelva a editarse se queda
+// sin claim y depende del fallback de las reglas para siempre.
+exports.syncAllRoleClaims = functions.https.onCall(async (reqData, context) => {
+    ensureAppCheck(context);
+    const data = getPayload(reqData);
+    await ensureAdmin(context, data);
+
+    const snapshot = await db.collection('users').get();
+    let updated = 0;
+    const skipped = [];
+
+    for (const doc of snapshot.docs) {
+        const role = doc.data().role;
+        if (!VALID_ROLES.includes(role)) {
+            skipped.push({ uid: doc.id, reason: `rol inválido: ${role}` });
+            continue;
+        }
+        try {
+            await admin.auth().setCustomUserClaims(doc.id, { role });
+            updated += 1;
+        } catch (error) {
+            skipped.push({ uid: doc.id, reason: error.code || error.message });
+        }
+    }
+
+    return { success: true, total: snapshot.size, updated, skipped };
 });
 
 exports.deleteUser = functions.https.onCall(async (reqData, context) => {
@@ -270,11 +354,48 @@ exports.dispatchPreSale = functions.https.onCall(async (reqData, context) => {
     }
 
     const { preSaleId, entregadorId } = data;
-    const preSaleRef = db.collection('presales').doc(preSaleId);
-    await preSaleRef.update({
-        status: 'dispatched',
-        entregadorId,
-        fechaEntregaRepartidor: admin.firestore.FieldValue.serverTimestamp()
+    const safePreSaleId = sanitizeDocId(preSaleId);
+    if (!safePreSaleId) {
+        throw new functions.https.HttpsError('invalid-argument', 'preSaleId inválido');
+    }
+
+    const preSaleRef = db.collection('presales').doc(safePreSaleId);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const DISPATCHABLE = new Set(['ready_for_delivery', 'credit_ready_for_delivery']);
+
+    // Transacción con relectura: un `.update()` ciego se reproduce tal cual desde
+    // la cola offline del cliente y puede pisar una orden que, mientras tanto, ya
+    // fue cobrada o devuelta. Mismo patrón que completePreSalePayment más abajo.
+    await db.runTransaction(async (t) => {
+        const doc = await t.get(preSaleRef);
+        if (!doc.exists) throw new functions.https.HttpsError('not-found', 'Pre-venta no encontrada');
+        const pData = doc.data();
+
+        // Reintento del mismo despacho (doble tap, reconexión offline): no falla,
+        // no vuelve a escribir.
+        if (pData.status === 'dispatched' && pData.entregadorId === entregadorId) {
+            return;
+        }
+
+        if (!DISPATCHABLE.has(pData.status)) {
+            throw new functions.https.HttpsError(
+                'failed-precondition',
+                `No se puede asignar: la orden está en estado "${pData.status}".`
+            );
+        }
+
+        t.update(preSaleRef, {
+            status: 'dispatched',
+            entregadorId,
+            // `dispatchedAt`/`dispatchedBy` son los campos canónicos del historial de
+            // entregas bodega→entregador; `fechaEntregaRepartidor` se mantiene porque
+            // lo leen Mis Entregas y el contador de asignadas del panel de bodega.
+            // Antes esta vía solo escribía el segundo y la masiva solo el primero: no
+            // había un campo común por el cual consultar el historial.
+            dispatchedAt: now,
+            dispatchedBy: uid,
+            fechaEntregaRepartidor: now
+        });
     });
     return { success: true };
 });
@@ -379,13 +500,17 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
                 creditId = creditRef.id;
                 const newPending = Math.max(total - applyAmount, 0);
                 const creditStatus = newPending <= 0 ? 'paid' : 'pending';
-                nextStatus = newPending <= 0 ? 'paid' : 'credit_pending';
+                // 'credit_dispatched': entregada al cliente con saldo pendiente.
+                // No usar 'credit_pending' aquí: ese estado pertenece a bodega y
+                // haría reaparecer la orden en la lista de preparación.
+                nextStatus = newPending <= 0 ? 'paid' : 'credit_dispatched';
 
                 t.set(creditRef, {
                     preSaleId: safePreSaleId,
                     customerId: pData.customerId || pData.customer?.id || null,
                     customerName: buildCustomerName(pData),
                     clientName: buildCustomerName(pData),
+                    dueDate: pData.creditDueDate || null,
                     total,
                     paid: applyAmount,
                     pending: newPending,
@@ -404,7 +529,8 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
                 const newPaid = currentPaid + toApply;
                 const newPending = Math.max(currentPending - toApply, 0);
                 const creditStatus = newPending <= 0 ? 'paid' : 'pending';
-                nextStatus = newPending <= 0 ? 'paid' : 'credit_pending';
+                // Ver nota arriba: la entrega con saldo queda como 'credit_dispatched'.
+                nextStatus = newPending <= 0 ? 'paid' : 'credit_dispatched';
 
                 const creditUpdate = {
                     paid: newPaid,
@@ -458,47 +584,59 @@ exports.getDashboardStats = functions.https.onCall(async (reqData, context) => {
         throw new functions.https.HttpsError('unauthenticated', 'Auth required');
     }
 
-    const userDoc = await db.collection('users').doc(uid).get();
-    if (!userDoc.exists) throw new functions.https.HttpsError('not-found', 'User not found');
-    const role = userDoc.data().role;
+    // El rol sale del claim; solo se lee el documento si el token es previo a la migración.
+    let role = context.auth && context.auth.token && context.auth.token.role;
+    if (!role) {
+        const userDoc = await db.collection('users').doc(uid).get();
+        if (!userDoc.exists) throw new functions.https.HttpsError('not-found', 'User not found');
+        role = userDoc.data().role;
+    }
+
+    // Todo esto son conteos y sumas: se resuelven con agregados, que no transfieren
+    // documentos. Antes se llamaba a count() y se DESCARTABA el resultado para
+    // re-ejecutar las mismas consultas como .get() completos y contar snapshot.size,
+    // o sea que cada carga del tablero leía products y users enteras, dos veces.
+    const countOf = (query) => query.count().get().then((s) => s.data().count);
+    const sumOf = (query, field) =>
+        query.aggregate({ value: admin.firestore.AggregateField.sum(field) })
+            .get()
+            .then((s) => s.data().value || 0);
+
+    const products = db.collection('products');
+    const presales = db.collection('presales');
 
     let stats = {};
     if (role === 'admin') {
-        const [p, l, u] = await Promise.all([
-            db.collection('products').count().get(),
-            db.collection('products').where('stock', '<=', 5).count().get(),
-            db.collection('users').count().get()
+        const [productCount, lowStock, userCount, verifiedUsers] = await Promise.all([
+            countOf(products),
+            countOf(products.where('stock', '<=', 5)),
+            countOf(db.collection('users')),
+            // El documento de usuario guarda `verified` (ver createUser), no
+            // `emailVerified`: el conteo anterior daba 0 siempre.
+            countOf(db.collection('users').where('verified', '==', true)),
         ]);
-        // Note: .count() is newer, if not supported use .get().size
-        // Using .get().size for compatibility with older admin SDKs if needed, but count() is efficient.
-        // Assuming environment supports it. If not, revert to get().size.
-        // To be safe and match previous logic:
-        const pSnap = await db.collection('products').get();
-        const lSnap = await db.collection('products').where('stock', '<=', 5).get();
-        const uSnap = await db.collection('users').get();
-
-        stats = {
-            products: pSnap.size,
-            lowStock: lSnap.size,
-            users: uSnap.size,
-            verifiedUsers: uSnap.docs.filter(d => d.data().emailVerified).length
-        };
+        stats = { products: productCount, lowStock, users: userCount, verifiedUsers };
     } else if (role === 'bodeguero') {
-        const [pSnap, rSnap] = await Promise.all([
-            db.collection('presales').where('status', '==', 'pending').get(),
-            db.collection('presales').where('status', '==', 'ready_for_delivery').get()
+        const [pendingPreSales, readyForDelivery] = await Promise.all([
+            countOf(presales.where('status', '==', 'pending')),
+            countOf(presales.where('status', '==', 'ready_for_delivery')),
         ]);
-        stats = { pendingPreSales: pSnap.size, readyForDelivery: rSnap.size };
+        stats = { pendingPreSales, readyForDelivery };
     } else if (role === 'entregador') {
-        const aSnap = await db.collection('presales').where('entregadorId', '==', uid).where('status', '==', 'dispatched').get();
-        stats = {
-            assignedDeliveries: aSnap.size,
-            totalToCollect: aSnap.docs.reduce((s, d) => s + (d.data().total || 0), 0)
-        };
+        const assigned = presales
+            .where('entregadorId', '==', uid)
+            .where('status', '==', 'dispatched');
+        const [assignedDeliveries, totalToCollect] = await Promise.all([
+            countOf(assigned),
+            sumOf(assigned, 'total'),
+        ]);
+        stats = { assignedDeliveries, totalToCollect };
     } else {
-        const pSnap = await db.collection('products').get();
-        const lSnap = await db.collection('products').where('stock', '<=', 5).get();
-        stats = { products: pSnap.size, lowStock: lSnap.size };
+        const [productCount, lowStock] = await Promise.all([
+            countOf(products),
+            countOf(products.where('stock', '<=', 5)),
+        ]);
+        stats = { products: productCount, lowStock };
     }
     return stats;
 });

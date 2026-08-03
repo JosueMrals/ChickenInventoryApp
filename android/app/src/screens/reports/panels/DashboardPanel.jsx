@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, ScrollView, ActivityIndicator, StyleSheet } from "react-native";
+import { View, Text, ScrollView, ActivityIndicator, RefreshControl, StyleSheet } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 
 function KpiCard({ icon, label, value, sub, iconColor, bg }) {
@@ -57,7 +57,7 @@ function TopEmployeeRow({ emp, max, index }) {
   );
 }
 
-export default function DashboardPanel({ data, loading, dateLabel }) {
+export default function DashboardPanel({ data, loading, error, dateLabel, refreshing, onRefresh }) {
   if (loading) {
     return (
       <View style={dash.center}>
@@ -68,10 +68,15 @@ export default function DashboardPanel({ data, loading, dateLabel }) {
   }
 
   if (!data) {
+    // Distinguir "falló la consulta" de "no hubo ventas": antes ambos casos
+    // mostraban el mismo "Sin datos", y un error de red parecía un período vacío.
     return (
       <View style={dash.center}>
         <Icon name="alert-circle-outline" size={48} color="#D1D5DB" />
-        <Text style={dash.emptyText}>Sin datos para mostrar</Text>
+        <Text style={dash.emptyText}>{error || 'Sin datos para mostrar'}</Text>
+        {!!onRefresh && (
+          <Text style={dash.retryHint} onPress={onRefresh}>Toca para reintentar</Text>
+        )}
       </View>
     );
   }
@@ -81,7 +86,9 @@ export default function DashboardPanel({ data, loading, dateLabel }) {
   const profit = Number(data.profit || 0);
   const salesCount = Number(data.totalSalesCount || 0);
   const avgPerSale = Number(data.avgPerSale || 0);
-  const saved = Number(data.totalSaved || 0);
+  // El servicio devolvía este mismo número dos veces (`totalSaved` y
+  // `totalDiscounts`); ahora hay un solo campo.
+  const saved = Number(data.totalDiscounts || 0);
   const margin = income > 0 ? (profit / income) * 100 : 0;
 
   const topEmployees = Array.isArray(data.salesByEmployee) ? data.salesByEmployee.slice(0, 5) : [];
@@ -90,7 +97,15 @@ export default function DashboardPanel({ data, loading, dateLabel }) {
   const topClients = Array.isArray(data.bestClients) ? data.bestClients.slice(0, 5) : [];
 
   return (
-    <ScrollView style={dash.container} contentContainerStyle={{ paddingBottom: 30 }}>
+    <ScrollView
+      style={dash.container}
+      contentContainerStyle={{ paddingBottom: 30 }}
+      refreshControl={
+        onRefresh
+          ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} colors={['#007AFF']} tintColor="#007AFF" />
+          : undefined
+      }
+    >
       {/* ── Periodo ─────────────────────────────────── */}
       {dateLabel ? (
         <View style={dash.periodBadge}>
@@ -183,7 +198,8 @@ const dash = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F6FA' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, padding: 40 },
   loadingText: { color: '#9CA3AF', fontSize: 14, marginTop: 8 },
-  emptyText: { color: '#9CA3AF', fontSize: 15, marginTop: 8 },
+  emptyText: { color: '#9CA3AF', fontSize: 15, marginTop: 8, textAlign: 'center' },
+  retryHint: { color: '#007AFF', fontSize: 13, fontWeight: '700', marginTop: 12 },
 
   periodBadge: {
     flexDirection: 'row', alignItems: 'center',

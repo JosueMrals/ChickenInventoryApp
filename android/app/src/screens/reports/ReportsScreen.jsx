@@ -10,6 +10,7 @@ import { useNavigation } from "@react-navigation/native";
 import globalStyles from "../../styles/globalStyles";
 import { getQuickRange, makeRange } from "./utils/dateRanges";
 import { useReportsData } from "./hooks/useReportsData";
+import { clearAllReportsCaches } from "./services/reportsService";
 
 // Paneles
 import DashboardPanel from "./panels/DashboardPanel";
@@ -29,6 +30,9 @@ const TABS = [
   { id: "product-operations", label: "Ops.",       icon: "swap-horizontal"   },
   { id: "financial",          label: "Finanzas",   icon: "cash-outline"      },
   { id: "products",           label: "Productos",  icon: "cube-outline"      },
+  // El panel de vendedores existía y estaba completo, pero no tenía pestaña:
+  // `renderPanel` traía un case "employees" al que nunca se podía llegar.
+  { id: "employees",          label: "Vendedores", icon: "people-outline"    },
   { id: "clients",            label: "Clientes",   icon: "person-outline"    },
   { id: "users-monitor",      label: "Usuarios",   icon: "shield-outline"    },
 ];
@@ -165,8 +169,23 @@ export default function ReportsScreen() {
   const slideX = useRef(new Animated.Value(0)).current;
   const currentIndex = TABS.findIndex((t) => t.id === activeTab);
 
-  const { summary, operations, loading, loadingMore, loadMoreOperations, hasMore } =
-    useReportsData(dateFrom, dateTo);
+  // Se incrementa en el pull-to-refresh. Los hooks y paneles lo reciben como
+  // parte de su clave de rango, así que vuelven a consultar aunque el período
+  // sea el mismo. Sin esto, tras registrar una venta el reporte seguía mostrando
+  // los números viejos hasta que expirara la caché de 5 minutos.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const { summary, loading, error } = useReportsData(dateFrom, dateTo, refreshKey);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    clearAllReportsCaches();
+    setRefreshKey((k) => k + 1);
+    // Los paneles recargan por su cuenta al cambiar `refreshKey`; el indicador
+    // solo acompaña el gesto.
+    setTimeout(() => setRefreshing(false), 600);
+  }, []);
 
   // Label del período activo
   const dateLabel =
@@ -177,10 +196,10 @@ export default function ReportsScreen() {
     activeRange === "month"     ? "Este mes"     :
     activeRange === "year"      ? "Este año"     : "—";
 
+  // Los paneles se montan solo cuando su pestaña se visita por primera vez, y a
+  // partir de ahí quedan montados para que el deslizamiento sea instantáneo.
   useEffect(() => {
-    if (!loadedTabs.includes(activeTab)) {
-      setLoadedTabs((prev) => [...prev, activeTab]);
-    }
+    setLoadedTabs((prev) => (prev.includes(activeTab) ? prev : [...prev, activeTab]));
   }, [activeTab]);
 
   useEffect(() => {
@@ -189,7 +208,7 @@ export default function ReportsScreen() {
       useNativeDriver: true,
       tension: 60, friction: 10,
     }).start();
-  }, [currentIndex]);
+  }, [currentIndex, slideX]);
 
   const handleRangeSelect = useCallback((key) => {
     setActiveRange(key);
@@ -228,28 +247,39 @@ export default function ReportsScreen() {
     }
     switch (id) {
       case "dashboard":
-        return <DashboardPanel data={summary} loading={loading} dateLabel={dateLabel} />;
+        return (
+          <DashboardPanel
+            data={summary}
+            loading={loading}
+            error={error}
+            dateLabel={dateLabel}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+          />
+        );
       case "sales":
         return (
           <SalesPanel
-            data={{ summary }}
-            loading={loading}
+            summary={summary}
+            loadingSummary={loading}
             dateFrom={dateFrom}
             dateTo={dateTo}
+            refreshKey={refreshKey}
           />
         );
       case "financial":
-        return <FinancialPanelPRO dateFrom={dateFrom} dateTo={dateTo} />;
+        return <FinancialPanelPRO dateFrom={dateFrom} dateTo={dateTo} refreshKey={refreshKey} />;
       case "products":
-        return <ProductsPanelPRO dateFrom={dateFrom} dateTo={dateTo} />;
+        return <ProductsPanelPRO dateFrom={dateFrom} dateTo={dateTo} refreshKey={refreshKey} />;
       case "employees":
         return <EmployeesPanelPRO data={summary?.salesByEmployee} loading={loading} />;
       case "clients":
-        return <ClientsPanelPRO dateFrom={dateFrom} dateTo={dateTo} />;
+        return <ClientsPanelPRO dateFrom={dateFrom} dateTo={dateTo} refreshKey={refreshKey} />;
       case "users-monitor":
-        return <UsersMonitorPanel dateFrom={dateFrom} dateTo={dateTo} />;
+        return <UsersMonitorPanel dateFrom={dateFrom} dateTo={dateTo} refreshKey={refreshKey} />;
       case "product-operations":
-        return <ProductOperationsPanel operations={operations} loading={loading} />;
+        // El panel resuelve sus propios datos; solo necesita el período.
+        return <ProductOperationsPanel dateFrom={dateFrom} dateTo={dateTo} />;
       default:
         return null;
     }

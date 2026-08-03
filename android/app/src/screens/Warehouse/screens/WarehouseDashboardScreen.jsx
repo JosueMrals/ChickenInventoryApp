@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useContext } from 'react';
 import {
   View,
   Text,
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
@@ -16,18 +17,11 @@ import PreSaleItem from '../components/PreSaleItem';
 import { useRoute } from '../../../context/RouteContext';
 import { resolveCustomerName } from '../../../utils/customerUtils';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
-import { updateAggregateProductStatus } from '../../../services/preSaleService';
+import { updateAggregateProductStatus, updatePreSaleStatusGuarded } from '../../../services/preSaleService';
+import { PreSaleContext } from '../../presales/context/preSaleContext';
 
-// ── Habilitar caché offline de Firestore para carga inmediata al abrir la pantalla
-// (persistencia habilitada por defecto en React Native Firebase, configuramos tamaño)
-try {
-  firestore().settings({
-    cacheSizeBytes: firestore.CACHE_SIZE_UNLIMITED,
-    persistence: true,
-  });
-} catch (_) {
-  // Ignorar si ya fue configurado (solo puede llamarse una vez)
-}
+// La caché offline de Firestore se configura en services/firebase.js, importado de
+// primero en index.js (settings() solo admite una llamada, antes del primer uso).
 
 export default function WarehouseDashboardScreen({ navigation, user, role }) {
   const [preSales, setPreSales] = useState([]);
@@ -46,7 +40,9 @@ export default function WarehouseDashboardScreen({ navigation, user, role }) {
       return unsubscribe;
     }
   }, [navigation]);
-  const [customersById, setCustomersById] = useState({});
+  // El mapa de clientes lo mantiene PreSaleProvider a nivel app. Antes cada pantalla
+  // de Bodega abría su propio listener sobre la colección `customers` completa.
+  const { customersById } = useContext(PreSaleContext);
   const [todayPaidTotal, setTodayPaidTotal] = useState(0);
   const [todayAssignedCount, setTodayAssignedCount] = useState(0);
   const { selectedRoute } = useRoute();
@@ -75,7 +71,14 @@ export default function WarehouseDashboardScreen({ navigation, user, role }) {
 
     const subscriber = query.onSnapshot(querySnapshot => {
         const sales = [];
-        querySnapshot.forEach(doc => sales.push({ id: doc.id, ...doc.data() }));
+        querySnapshot.forEach(doc => {
+            const data = doc.data();
+            // Compatibilidad con datos previos al fix de créditos: una preventa que ya
+            // fue entregada al repartidor (dispatchedAt) no debe reaparecer en bodega
+            // aunque su estado haya regresado a credit_* por un cobro parcial antiguo.
+            if (data.dispatchedAt && String(data.status || '').startsWith('credit_')) return;
+            sales.push({ id: doc.id, ...data });
+        });
 
         // Ordenar localmente para evitar índices complejos innecesarios por ahora
         sales.sort((a, b) => {
@@ -93,29 +96,6 @@ export default function WarehouseDashboardScreen({ navigation, user, role }) {
     return () => subscriber();
   }, [selectedRoute, routeMissing]); // Recargar si cambia la ruta
 
-  useEffect(() => {
-    const unsub = firestore()
-      .collection('customers')
-      .onSnapshot(
-        (snapshot) => {
-          if (!snapshot) {
-            setCustomersById({});
-            return;
-          }
-          const map = snapshot.docs.reduce((acc, doc) => {
-            acc[doc.id] = { id: doc.id, ...doc.data() };
-            return acc;
-          }, {});
-          setCustomersById(map);
-        },
-        (error) => {
-          console.error('Error al escuchar customers:', error);
-          setCustomersById({});
-        }
-      );
-
-    return () => unsub();
-  }, []);
 
   useEffect(() => {
     const user = auth().currentUser;
@@ -184,8 +164,26 @@ export default function WarehouseDashboardScreen({ navigation, user, role }) {
    * 2. Dispara la escritura en Firestore en segundo plano → garantiza persistencia.
    * 3. Si Firestore falla, el próximo onSnapshot reconcilia el estado real automáticamente.
    */
+  // `productName` puede ser un nombre o un arreglo (mover una categoría completa
+  // o toda la etapa de una vez).
   const handleProductStatusChange = useCallback((productName, fromStatus, toStatus) => {
     const selectedRouteId = selectedRoute?.id || null;
+    const targetNames = new Set(
+      (Array.isArray(productName) ? productName : [productName]).filter(Boolean)
+    );
+    if (targetNames.size === 0) return;
+
+    // Órdenes candidatas según los datos EN VIVO del listener: el servicio abre
+    // transacciones solo sobre estas, sin repetir la consulta de toda la ruta.
+    const matchesMove = (item) => {
+      const name = item.productName || item.name;
+      return targetNames.has(name) && (item.status || 'pending') === fromStatus;
+    };
+    const candidateIds = preSales
+      .filter(sale => (!selectedRouteId || sale.routeId === selectedRouteId) &&
+        [...(sale.items || []), ...(sale.bonuses || [])].some(matchesMove))
+      .map(sale => sale.id);
+
     // Paso 1: Actualización optimista — reflejo inmediato en la UI
     setPreSales(prev => prev.map(sale => {
       if (selectedRouteId && sale.routeId !== selectedRouteId) return sale;
@@ -193,7 +191,7 @@ export default function WarehouseDashboardScreen({ navigation, user, role }) {
       const updateItem = (item) => {
         const name = item.productName || item.name;
         const itemStatus = item.status || 'pending';
-        if (name === productName && itemStatus === fromStatus) {
+        if (targetNames.has(name) && itemStatus === fromStatus) {
           return { ...item, status: toStatus };
         }
         return item;
@@ -224,9 +222,10 @@ export default function WarehouseDashboardScreen({ navigation, user, role }) {
     // Paso 2: Sincronización con Firestore en segundo plano
     updateAggregateProductStatus(productName, toStatus, fromStatus, {
       routeId: selectedRouteId,
+      candidateIds,
     })
       .catch(err => console.error('[Warehouse] Error sincronizando estado de producto:', err));
-  }, [selectedRoute?.id]);
+  }, [selectedRoute?.id, preSales]);
 
   const handleHandoverPress = () => {
       // Filter orders that are ready_for_delivery OR preparing (to allow forced partial handover with warning)
@@ -237,7 +236,12 @@ export default function WarehouseDashboardScreen({ navigation, user, role }) {
   };
 
   const handleUpdateStatus = (id, newStatus) => {
-      firestore().collection('presales').doc(id).update({ status: newStatus });
+      // Guarded: relee el estado real antes de escribir, para no pisar una orden
+      // que ya fue cobrada o devuelta. Ver updatePreSaleStatusGuarded.
+      updatePreSaleStatusGuarded(id, newStatus).catch((error) => {
+          console.error('[Warehouse] Error actualizando estado:', error);
+          Alert.alert('No se pudo actualizar', error?.message || 'Intenta nuevamente.');
+      });
   };
 
   const renderSwipeableItem = ({ item }) => {
@@ -378,7 +382,12 @@ export default function WarehouseDashboardScreen({ navigation, user, role }) {
 
           <Text style={globalStyles.title}>Bodega - Preparar Productos</Text>
 
-          <View style={{ width: 28 }} />
+          <TouchableOpacity
+              onPress={() => navigation.navigate('HandoverHistory', { user, role })}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+              <Icon name="time-outline" size={26} color="#FFF" />
+          </TouchableOpacity>
       </View>
 
       {/* Route Banner */}

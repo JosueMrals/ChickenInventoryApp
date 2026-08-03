@@ -1,77 +1,63 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   getSalesSummaryOptimized,
-  getActivityFeedPage,
   getSalesPage,
   subscribeUsersActivity,
   getSalesByUserInRange,
 } from '../services/reportsService';
 
-export const useReportsData = (dateFrom, dateTo) => {
-  const [summary, setSummary]         = useState(null);
-  const [operations, setOperations]   = useState([]);
-  const [cursors, setCursors]         = useState({});
-  const [hasMore, setHasMore]         = useState(true);
-  const [loading, setLoading]         = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
+/**
+ * Resumen del período para el panel Resumen y los KPIs del panel de Ventas.
+ *
+ * `refreshKey` fuerza una relectura aunque el rango no cambie: la pantalla lo
+ * incrementa en el pull-to-refresh, después de vaciar las cachés del servicio.
+ */
+export const useReportsData = (dateFrom, dateTo, refreshKey = 0) => {
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState(null);
 
-  // Ref para evitar re-fetch cuando las fechas son las mismas
+  // Evita repetir la consulta cuando el rango no cambió.
   const lastRangeRef = useRef(null);
 
   useEffect(() => {
-    const fromKey = dateFrom?.getTime?.() ?? null;
-    const toKey   = dateTo?.getTime?.()   ?? null;
-    const rangeKey = `${fromKey}_${toKey}`;
-
-    // Si ya cargamos este rango y hay datos, no volvemos a hacer la query
-    if (lastRangeRef.current === rangeKey && summary !== null) return;
+    const rangeKey = `${dateFrom?.getTime?.() ?? null}_${dateTo?.getTime?.() ?? null}_${refreshKey}`;
+    if (lastRangeRef.current === rangeKey) return;
     lastRangeRef.current = rangeKey;
+
+    let mounted = true;
 
     const load = async () => {
       setLoading(true);
-      setOperations([]);
-      setCursors({});
-      setHasMore(true);
-
-      const [salesData, activityData] = await Promise.all([
-        getSalesSummaryOptimized({ from: dateFrom, to: dateTo }),
-        getActivityFeedPage({ from: dateFrom, to: dateTo, limit: 10 }),
-      ]);
-
-      setSummary(salesData);
-
-      if (activityData.items.length > 0) {
-        setOperations(activityData.items);
-        setCursors(activityData.cursors);
-      } else {
-        setOperations([]);
-        setHasMore(false);
+      setError(null);
+      try {
+        const salesData = await getSalesSummaryOptimized({ from: dateFrom, to: dateTo });
+        if (!mounted) return;
+        // El servicio devuelve null si la consulta falló.
+        if (salesData === null) setError('No se pudo calcular el resumen del período.');
+        setSummary(salesData);
+      } catch (e) {
+        // Sin este catch, un fallo dejaba `loading` en true para siempre y la
+        // pestaña se quedaba en "Calculando resumen…" sin datos ni mensaje.
+        console.error('[useReportsData]', e);
+        if (mounted) {
+          setError(e?.message || 'No se pudo cargar el resumen.');
+          setSummary(null);
+        }
+      } finally {
+        if (mounted) setLoading(false);
       }
-
-      setLoading(false);
     };
 
     load();
-  }, [dateFrom, dateTo]);
+    return () => { mounted = false; };
+  }, [dateFrom, dateTo, refreshKey]);
 
-  const loadMoreOperations = useCallback(async () => {
-    if (loadingMore || !hasMore) return;
-    setLoadingMore(true);
-    const activityData = await getActivityFeedPage({ from: dateFrom, to: dateTo, cursors, limit: 10 });
-    if (activityData.items.length > 0) {
-      setOperations((prev) => [...prev, ...activityData.items]);
-      setCursors(activityData.cursors);
-    } else {
-      setHasMore(false);
-    }
-    setLoadingMore(false);
-  }, [loadingMore, hasMore, dateFrom, dateTo, cursors]);
-
-  return { summary, operations, loading, loadingMore, loadMoreOperations, hasMore };
+  return { summary, loading, error };
 };
 
 /** Hook para monitoreo de usuarios en tiempo real + ventas en rango */
-export const useUsersMonitor = (dateFrom, dateTo) => {
+export const useUsersMonitor = (dateFrom, dateTo, refreshKey = 0) => {
   const [users, setUsers]             = useState([]);
   const [salesByUser, setSalesByUser] = useState({});
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -88,23 +74,38 @@ export const useUsersMonitor = (dateFrom, dateTo) => {
   // Ventas por usuario — respeta la caché del servicio
   const lastRangeRef = useRef(null);
   useEffect(() => {
-    const key = `${dateFrom?.getTime?.() ?? ''}_${dateTo?.getTime?.() ?? ''}`;
+    const key = `${dateFrom?.getTime?.() ?? ''}_${dateTo?.getTime?.() ?? ''}_${refreshKey}`;
     if (lastRangeRef.current === key) return;
     lastRangeRef.current = key;
-    getSalesByUserInRange({ from: dateFrom, to: dateTo }).then(setSalesByUser);
-  }, [dateFrom, dateTo]);
 
-  // Fusionar usuarios con sus ventas
-  const usersWithStats = users.map((u) => {
-    const key   = u.email || u.uid;
-    const stats = salesByUser[key] || {};
-    return {
-      ...u,
-      salesTotal: stats.total  || 0,
-      salesCount: stats.count  || 0,
-      lastSale:   stats.lastSale || null,
-    };
-  }).sort((a, b) => b.salesTotal - a.salesTotal);
+    let mounted = true;
+    getSalesByUserInRange({ from: dateFrom, to: dateTo })
+      .then((map) => { if (mounted) setSalesByUser(map); })
+      .catch((e) => {
+        console.error('[useUsersMonitor]', e);
+        if (mounted) setSalesByUser({});
+      });
+    return () => { mounted = false; };
+  }, [dateFrom, dateTo, refreshKey]);
+
+  // Fusionar usuarios con sus ventas. useMemo: el panel re-renderiza con cada
+  // cambio del listener de usuarios, y esto reconstruía y reordenaba la lista
+  // completa en cada uno.
+  const usersWithStats = useMemo(
+    () => users
+      .map((u) => {
+        const key   = u.email || u.uid;
+        const stats = salesByUser[key] || {};
+        return {
+          ...u,
+          salesTotal: stats.total  || 0,
+          salesCount: stats.count  || 0,
+          lastSale:   stats.lastSale || null,
+        };
+      })
+      .sort((a, b) => b.salesTotal - a.salesTotal),
+    [users, salesByUser],
+  );
 
   return { usersWithStats, loadingUsers };
 };
@@ -114,51 +115,67 @@ export const useUsersMonitor = (dateFrom, dateTo) => {
  * Usa getSalesPage (solo sales + presales) para evitar que fallos en otras
  * colecciones (inventoryMovements, financials) oculten las ventas.
  */
-export const useSalesData = (dateFrom, dateTo) => {
+export const useSalesData = (dateFrom, dateTo, refreshKey = 0) => {
   const [sales, setSales]         = useState([]);
   const [cursors, setCursors]     = useState({});
   const [hasMore, setHasMore]     = useState(true);
   const [loading, setLoading]     = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError]         = useState(null);
   const lastRangeRef = useRef(null);
 
   useEffect(() => {
-    const fromKey  = dateFrom?.getTime?.() ?? null;
-    const toKey    = dateTo?.getTime?.()   ?? null;
-    const rangeKey = `${fromKey}_${toKey}`;
-
+    const rangeKey = `${dateFrom?.getTime?.() ?? null}_${dateTo?.getTime?.() ?? null}_${refreshKey}`;
     if (lastRangeRef.current === rangeKey) return;
     lastRangeRef.current = rangeKey;
 
+    let mounted = true;
+
     const load = async () => {
       setLoading(true);
+      setError(null);
       setSales([]);
       setCursors({});
       setHasMore(true);
 
-      const result = await getSalesPage({ from: dateFrom, to: dateTo, limit: 20 });
-      setSales(result.items);
-      setCursors(result.cursors);
-      setHasMore(result.items.length >= 20);
-      setLoading(false);
+      try {
+        const result = await getSalesPage({ from: dateFrom, to: dateTo, limit: 20 });
+        if (!mounted) return;
+        setSales(result.items);
+        setCursors(result.cursors);
+        setHasMore(result.items.length >= 20);
+      } catch (e) {
+        console.error('[useSalesData]', e);
+        if (mounted) setError(e?.message || 'No se pudieron cargar las ventas.');
+      } finally {
+        if (mounted) setLoading(false);
+      }
     };
 
     load();
-  }, [dateFrom, dateTo]);
+    return () => { mounted = false; };
+  }, [dateFrom, dateTo, refreshKey]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
-    const result = await getSalesPage({ from: dateFrom, to: dateTo, cursors, limit: 20 });
-    if (result.items.length > 0) {
-      setSales((prev) => [...prev, ...result.items]);
-      setCursors(result.cursors);
-      setHasMore(result.items.length >= 20);
-    } else {
-      setHasMore(false);
+    try {
+      const result = await getSalesPage({ from: dateFrom, to: dateTo, cursors, limit: 20 });
+      if (result.items.length > 0) {
+        setSales((prev) => [...prev, ...result.items]);
+        setCursors(result.cursors);
+        setHasMore(result.items.length >= 20);
+      } else {
+        setHasMore(false);
+      }
+    } catch (e) {
+      // Sin el finally, un fallo dejaba `loadingMore` en true y la lista ya no
+      // volvía a pedir página: el scroll infinito se quedaba muerto.
+      console.error('[useSalesData.loadMore]', e);
+    } finally {
+      setLoadingMore(false);
     }
-    setLoadingMore(false);
   }, [loadingMore, hasMore, dateFrom, dateTo, cursors]);
 
-  return { sales, loading, loadingMore, loadMore, hasMore };
+  return { sales, loading, loadingMore, loadMore, hasMore, error };
 };

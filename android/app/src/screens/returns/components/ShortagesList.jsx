@@ -8,7 +8,7 @@ import { getUsersByRole } from '../../../services/auth';
 import { formatTimestamp } from '../utils/format';
 
 // ── Tarjeta de faltante ───────────────────────────────────────────────────────
-function ShortageCard({ shortage, entregadorName, onFulfill, fulfilling }) {
+function ShortageCard({ shortage, entregadorName, onFulfill, fulfilling, readOnly }) {
   const isFulfilled = shortage.status === 'fulfilled';
   return (
     <View style={[s.card, isFulfilled && s.cardFulfilled]}>
@@ -53,6 +53,14 @@ function ShortageCard({ shortage, entregadorName, onFulfill, fulfilling }) {
             Entregado por {shortage.fulfilledBy} · {formatTimestamp(shortage.fulfilledAt)}
           </Text>
         </View>
+      ) : readOnly ? (
+        // El entregador ve su deuda de producto; darla por entregada es de bodega.
+        <View style={s.pendingRow}>
+          <Icon name="alert-circle-outline" size={14} color="#B45309" />
+          <Text style={s.pendingText}>
+            Pendiente de entregar a bodega. Bodega lo confirma al recibirlo.
+          </Text>
+        </View>
       ) : (
         <TouchableOpacity style={s.fulfillBtn} onPress={() => onFulfill(shortage)} disabled={fulfilling}>
           {fulfilling ? (
@@ -70,7 +78,7 @@ function ShortageCard({ shortage, entregadorName, onFulfill, fulfilling }) {
 }
 
 // ── Lista principal ───────────────────────────────────────────────────────────
-export default function ShortagesList({ routeId = null }) {
+export default function ShortagesList({ routeId = null, entregadorId = null, readOnly = false }) {
   const [shortages, setShortages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [namesByUid, setNamesByUid] = useState({});
@@ -81,9 +89,9 @@ export default function ShortagesList({ routeId = null }) {
     const unsub = subscribeDeliveryShortages((docs) => {
       setShortages(docs);
       setLoading(false);
-    }, routeId);
+    }, routeId, entregadorId);
     return () => unsub();
-  }, [routeId]);
+  }, [routeId, entregadorId]);
 
   useEffect(() => {
     getUsersByRole('entregador').then((users) => {
@@ -141,6 +149,7 @@ export default function ShortagesList({ routeId = null }) {
           entregadorName={resolveName(item)}
           onFulfill={handleFulfill}
           fulfilling={fulfillingId === item.id}
+          readOnly={readOnly}
         />
       )}
       contentContainerStyle={s.list}
@@ -148,7 +157,9 @@ export default function ShortagesList({ routeId = null }) {
         <View style={s.center}>
           <Icon name="shield-checkmark-outline" size={64} color="#D1D5DB" />
           <Text style={s.emptyText}>
-            No hay faltantes registrados. Todas las devoluciones fueron entregadas completas.
+            {readOnly
+              ? 'No tienes faltantes registrados. Entregaste completas todas tus devoluciones.'
+              : 'No hay faltantes registrados. Todas las devoluciones fueron entregadas completas.'}
           </Text>
         </View>
       }
@@ -230,4 +241,14 @@ const s = StyleSheet.create({
     borderTopColor: '#F3F4F6',
   },
   fulfilledText: { fontSize: 11, fontWeight: '600', color: '#16A34A', flex: 1 },
+  pendingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  pendingText: { fontSize: 11, fontWeight: '600', color: '#B45309', flex: 1 },
 });

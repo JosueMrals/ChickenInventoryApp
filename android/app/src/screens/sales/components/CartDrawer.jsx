@@ -4,8 +4,9 @@ import CartItem from './CartItem';
 import CartTotals from './CartTotals';
 import styles from '../styles/cartStyles';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { registerSale } from '../services/saleService';
+import { registerQuickSaleFull } from '../../quicksalesNew/services/quickSaleService';
 import PaymentSelector from './PaymentSelector';
+import { getEffectiveCreditLimit } from '../../../utils/creditUtils';
 
 
 export default function CartDrawer({
@@ -30,50 +31,58 @@ export default function CartDrawer({
   const customerDiscount = (customer && customer.discount) ? Number(customer.discount) : 0;
   const discountAmount = +(subtotal * (customerDiscount / 100)).toFixed(2);
   const total = +(subtotal - discountAmount).toFixed(2);
+  // Descuento manual de la venta (%): PaymentSelector lo cobra sobre `total`,
+  // así que el cobro real es este finalTotal, no `total`.
+  const saleDiscountPct = parseFloat(saleDiscount || 0);
+  const saleDiscountAmount = +(total * (saleDiscountPct / 100)).toFixed(2);
+  const finalTotal = +(total - saleDiscountAmount).toFixed(2);
   const paid = parseFloat(paidAmount || 0);
-  const pending = +(total - paid).toFixed(2);
+  const pending = +Math.max(finalTotal - paid, 0).toFixed(2);
+  const change = +Math.max(paid - finalTotal, 0).toFixed(2);
 
   const validateCreditAndRegister = async () => {
-    if (!customer) {
-      Alert.alert('Selecciona un cliente', 'Debes seleccionar un cliente para cobrar a crédito.');
+    if (cart.totals.items.length === 0) {
+      Alert.alert('Carrito vacío', 'Agrega al menos un producto para registrar la venta.');
       return;
     }
 
-    // verificar límite de crédito
-    const creditLimit = Number(customer.creditLimit || 0);
-    const currentCredit = Number(customer.currentCredit || 0); // si tienes este campo
-    const remaining = Math.max(creditLimit - currentCredit, 0);
+    // Solo lo que queda pendiente es crédito: exige cliente y valida su límite.
+    if (pending > 0) {
+      if (!customer) {
+        Alert.alert('Selecciona un cliente', 'Debes seleccionar un cliente para cobrar a crédito.');
+        return;
+      }
 
-    // si pending > remaining => bloquear si no permitido (assume not allowed)
-    if (pending > remaining) {
-      Alert.alert('Crédito insuficiente', `El cliente tiene límite disponible C${remaining.toFixed(2)}. Ajusta el pago.`);
-      return;
+      // Límite efectivo: límite base + sobregiro configurado en el cliente.
+      const creditLimit = getEffectiveCreditLimit(customer).total;
+      const currentCredit = Number(customer.currentCredit || 0);
+      const remaining = Math.max(creditLimit - currentCredit, 0);
+
+      if (pending > remaining) {
+        Alert.alert('Crédito insuficiente', `El cliente tiene límite disponible C$${remaining.toFixed(2)}. Ajusta el pago.`);
+        return;
+      }
     }
-
-    // preparar payload
-    const payload = {
-      customerId: customer.id,
-      items: cart.totals.items.map((it) => ({
-        productId: it.productId,
-        name: it.product.name,
-        quantity: it.qty,
-        unitPrice: it.priceApplied,
-        subtotal: it.subtotal,
-      })),
-      subtotal,
-      discountApplied: discountAmount,
-      total,
-      paymentType: paymentMethod,
-      paidAmount: paid,
-      pendingAmount: pending,
-      discountPercent: saleDiscount,
-      discountAmount,
-      finalTotal,
-      date: new Date(),
-    };
 
     try {
-      await registerSale(payload);
+      await registerQuickSaleFull({
+        cart: cart.totals.items.map((it) => ({
+          id: it.productId,
+          product: it.product,
+          quantity: it.qty,
+          unitPrice: it.priceApplied,
+          discount: 0,
+          total: it.subtotal,
+          isBonus: false,
+        })),
+        subtotal,
+        total: finalTotal,
+        paymentMethod,
+        amountPaid: paid,
+        change,
+        transferNumber,
+        customer,
+      });
       Alert.alert('✅ Venta registrada');
       clearCart();
       onSaleComplete && onSaleComplete();
@@ -131,7 +140,7 @@ export default function CartDrawer({
               </TouchableOpacity>
 
               <TouchableOpacity onPress={validateCreditAndRegister} style={[styles.btn, styles.btnPrimary]}>
-                <Text style={styles.btnText}>Confirmar C${total.toFixed(2)}</Text>
+                <Text style={styles.btnText}>Confirmar C${finalTotal.toFixed(2)}</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -11,7 +11,7 @@ async function getNextSaleNumber() {
     const doc = await transaction.get(counterRef);
 
     let next = 1;
-    if (doc.exists && doc.data()?.lastNumber) {
+    if (doc.exists() && doc.data()?.lastNumber) {
       next = doc.data().lastNumber + 1;
     }
 
@@ -62,18 +62,23 @@ export async function registerSale(product, customer, quantity, form) {
   };
 
   try {
-    // Guardar venta
-    const saleRef = await firestore().collection('sales').add(saleData);
+    // Venta, stock y crédito se escriben en un solo batch atómico: si algo falla
+    // no queda una venta registrada con el stock sin descontar.
+    const batch = firestore().batch();
 
-    // Reducir stock
-    await firestore().collection('products').doc(product.id).update({
-      stock: Math.max(product.stock - quantity, 0),
+    const saleRef = firestore().collection('sales').doc();
+    batch.set(saleRef, saleData);
+
+    // increment() en vez de restar sobre product.stock (lectura del cliente, ya obsoleta):
+    // evita la actualización perdida cuando dos ventas del mismo producto coinciden.
+    batch.update(firestore().collection('products').doc(product.id), {
+      stock: firestore.FieldValue.increment(-quantity),
       updatedAt: new Date(),
     });
 
     // Si hay saldo pendiente → registrar crédito
     if (pending > 0) {
-      await firestore().collection('credits').add({
+      batch.set(firestore().collection('credits').doc(), {
         saleId: saleRef.id,
         clientId: customer.id,
         clientName: saleData.clientName,
@@ -85,6 +90,7 @@ export async function registerSale(product, customer, quantity, form) {
       });
     }
 
+    await batch.commit();
     return saleRef.id;
   } catch (e) {
     console.error('🔥 Error al crear venta:', e);

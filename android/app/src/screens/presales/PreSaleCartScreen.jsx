@@ -7,6 +7,9 @@ import CartItem from "../quicksalesNew/components/CartItem";
 import DiscountModal from "../../components/common/DiscountModal";
 import styles from "../quicksalesNew/styles/quickCartStyles";
 import globalStyles from "../../styles/globalStyles";
+import CreditDueDatePicker from "./components/CreditDueDatePicker";
+import { getEffectiveCreditLimit, toDateSafe } from "../../utils/creditUtils";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 const roundTo2 = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
@@ -27,12 +30,19 @@ export default function PreSaleCartScreen({ navigation }) {
     cart, updateCart, removeFromCart,
     editCart, updateEditCart, removeFromEditCart,
     customer, setCustomer,
-    submitPreSale, resetPreSale, loading, editingPreSale
+    submitPreSale, resetPreSale, loading: contextLoading, editingPreSale
   } = useContext(PreSaleContext);
+
+  // El `loading` del contexto llega tarde para frenar un doble toque (solo cambia
+  // tras el re-render). El cerrojo por ref sí bloquea el segundo tap al instante.
+  const { submitting, runLocked } = useSubmitLock();
+  const loading = contextLoading || submitting;
 
   const { selectedRoute } = useRoute();
   const [discountModal, setDiscountModal] = useState({ visible: false, product: null });
   const [isCredit, setIsCredit] = useState(false);
+  // Fecha de pago acordada; en edición se precarga la de la preventa.
+  const [creditDueDate, setCreditDueDate] = useState(null);
   const creditWarningShownRef = useRef(false);
   const totalWarningShownRef = useRef(false);
 
@@ -41,8 +51,17 @@ export default function PreSaleCartScreen({ navigation }) {
   const updateCartFn = isEditing ? updateEditCart : updateCart;
   const removeFromCartFn = isEditing ? removeFromEditCart : removeFromCart;
 
-  const customerCreditLimit = Number(customer?.creditLimit) || 0;
+  // Límite efectivo: límite base + sobregiro configurado en el cliente.
+  const effectiveCredit = getEffectiveCreditLimit(customer);
+  const customerCreditLimit = effectiveCredit.total;
   const canUseCredit = customerCreditLimit > 0;
+
+  useEffect(() => {
+    if (editingPreSale?.paymentMethod === 'credit') {
+      setIsCredit(true);
+      setCreditDueDate(toDateSafe(editingPreSale.creditDueDate));
+    }
+  }, [editingPreSale]);
 
   const displayData = useMemo(() => {
     const normalItems = cartToDisplay.filter(i => !i.isBonus);
@@ -146,22 +165,36 @@ export default function PreSaleCartScreen({ navigation }) {
           `El crédito permitido es C$${customerCreditLimit.toFixed(2)} y el total es C$${total.toFixed(2)}.`
         );
       }
+      if (!creditDueDate) {
+        return Alert.alert(
+          "Fecha de pago requerida",
+          "Selecciona la fecha en la que el cliente se compromete a pagar el crédito."
+        );
+      }
     }
 
-    try {
-      await submitPreSale({ paymentMethod: isCredit ? 'credit' : 'cash' });
-      Alert.alert(
-        isEditing ? "Pre-Venta Actualizada" : "Pre-Venta Guardada",
-        isEditing ? "Los cambios han sido guardados." : `La pre-venta ha sido creada exitosamente para la ruta: ${selectedRoute.name}`,
-        [{ text: "OK", onPress: () => {
-            resetPreSale();
-            // Navega a la lista, asegurando que se actualice.
-            navigation.navigate("PreSalesList", { refresh: true });
-        }}]
-      );
-    } catch (error) {
-      Alert.alert("Error", formatPreSaleError(error));
-    }
+    // runLocked: descarta el segundo toque. Sin esto se creaban DOS preventas,
+    // con doble descuento de inventario.
+    return runLocked(async () => {
+      try {
+        await submitPreSale({
+          paymentMethod: isCredit ? 'credit' : 'cash',
+          creditDueDate: isCredit ? creditDueDate : null,
+        });
+        Alert.alert(
+          isEditing ? "Pre-Venta Actualizada" : "Pre-Venta Guardada",
+          isEditing ? "Los cambios han sido guardados." : `La pre-venta ha sido creada exitosamente para la ruta: ${selectedRoute.name}`,
+          [{ text: "OK", onPress: () => {
+              resetPreSale();
+              // Navega a la lista, asegurando que se actualice.
+              navigation.navigate("PreSalesList", { refresh: true });
+          }}]
+        );
+      } catch (error) {
+        Alert.alert("Error", formatPreSaleError(error));
+        throw error;
+      }
+    }, { keepLockedOnSuccess: true }).catch(() => {});
   };
 
   const openDiscount = (item) => {
@@ -272,7 +305,9 @@ export default function PreSaleCartScreen({ navigation }) {
                 <View style={localStyles.creditInfo}>
                   <Text style={localStyles.paymentLabel}>Crédito</Text>
                   <Text style={localStyles.creditHint}>
-                    Límite: {formatCurrency(customerCreditLimit)} · Disponible: {formatCurrency(creditAvailable)}
+                    Límite: {formatCurrency(customerCreditLimit)}
+                    {effectiveCredit.extra > 0 ? ` (incluye sobregiro ${formatCurrency(effectiveCredit.extra)})` : ''}
+                    {' · '}Disponible: {formatCurrency(creditAvailable)}
                   </Text>
                   {!hasValidTotal && (
                     <Text style={localStyles.creditWarning}>El total debe ser mayor que 0.</Text>
@@ -296,6 +331,10 @@ export default function PreSaleCartScreen({ navigation }) {
                   </Text>
                 </TouchableOpacity>
               </View>
+            )}
+
+            {isCredit && (
+              <CreditDueDatePicker value={creditDueDate} onChange={setCreditDueDate} />
             )}
 
             <TouchableOpacity style={[styles.checkoutBtn, loading && styles.disabledButton]} onPress={handleSubmit} disabled={loading}>

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator, FlatList, Platform, UIManager,
-  View, Alert, Text, TextInput,
+  View, Alert, Text, TextInput, TouchableOpacity,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -26,7 +26,7 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
   const [search, setSearch] = useState('');
 
   const {
-    loading, filter, setFilter, filteredCredits, totals,
+    loading, loadError, filter, setFilter, credits, filteredCredits, totals,
     selectedCredit, paymentAmount, setPaymentAmount,
     modalVisible, openModal, closeModal, animValue,
     handleAbono, handleDelete, submittingPayment,
@@ -58,19 +58,51 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
     });
   }, [filteredCredits, search]);
 
-  // Counts per status for filter chips
+  // Counts per status for filter chips (sobre todos los créditos, no solo el filtro activo)
   const filterCounts = useMemo(() => {
-    const all = filteredCredits.length;
-    const pending = filteredCredits.filter(c => c.status !== 'paid').length;
-    const paid = filteredCredits.filter(c => c.status === 'paid').length;
-    return { all, pending, paid };
-  }, [filteredCredits]);
+    const pending = credits.filter(c => c.status !== 'paid').length;
+    const paid = credits.filter(c => c.status === 'paid').length;
+    return { pending, paid };
+  }, [credits]);
 
   if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F2F3F7' }}>
         <ActivityIndicator size="large" color="#007AFF" />
         <Text style={{ marginTop: 10, color: '#6B7280', fontSize: 13 }}>Cargando créditos...</Text>
+      </View>
+    );
+  }
+
+  // Antes un query fallido dejaba la pantalla girando para siempre; ahora se
+  // explica el motivo en vez de aparentar que no hay créditos.
+  if (loadError) {
+    const isBuildingIndex = String(loadError?.message || '').includes('index');
+    return (
+      <View style={globalStyles.container}>
+        <CreditsHeader
+          totals={totals}
+          onBack={() => navigation.goBack()}
+          onOpenHistory={() => navigation.navigate('CreditsHistory', { user, role })}
+        />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 }}>
+          <Icon name="alert-circle-outline" size={56} color="#FF3B30" />
+          <Text style={{ marginTop: 12, fontSize: 15, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' }}>
+            No se pudieron cargar los créditos
+          </Text>
+          <Text style={{ marginTop: 6, fontSize: 13, color: '#8E8E93', textAlign: 'center' }}>
+            {isBuildingIndex
+              ? 'La base de datos está terminando de preparar un índice. Vuelve a intentarlo en unos minutos.'
+              : (loadError?.message || 'Revisa tu conexión e intenta de nuevo.')}
+          </Text>
+          <TouchableOpacity
+            style={{ marginTop: 20, backgroundColor: '#007AFF', borderRadius: 30, paddingVertical: 12, paddingHorizontal: 26 }}
+            onPress={() => setFilter(filter)}
+            activeOpacity={0.85}
+          >
+            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }

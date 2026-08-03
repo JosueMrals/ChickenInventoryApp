@@ -99,7 +99,7 @@ export default function PreSaleDoneScreen({ navigation, route }: Props): React.J
       .collection('sales')
       .doc(saleId)
       .onSnapshot((snap) => {
-        if (snap.exists) {
+        if (snap.exists()) {
           const data = snap.data() as Omit<Sale, 'id'>;
           setSale({
             id: snap.id,

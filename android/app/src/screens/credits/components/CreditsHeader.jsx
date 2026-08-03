@@ -3,8 +3,15 @@ import { Text, View, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import globalStyles from '../../../styles/globalStyles';
 
+// Los totales pueden venir en null si el agregado del servidor falló: se muestra
+// "—" en vez de un C$0.00 que se leería como "no hay saldo pendiente".
+const money = (value) =>
+  Number.isFinite(value) ? `C$${value.toFixed(2)}` : '—';
+
 export default function CreditsHeader({ totals, onBack, onOpenHistory }) {
-  const total = (totals.paid + totals.pending) || 0;
+  const total = Number.isFinite(totals.paid) && Number.isFinite(totals.pending)
+    ? totals.paid + totals.pending
+    : null;
 
   return (
     <View>
@@ -36,7 +43,7 @@ export default function CreditsHeader({ totals, onBack, onOpenHistory }) {
         ].map(({ label, value, bg, color }) => (
           <View key={label} style={{ flex: 1, backgroundColor: bg, borderRadius: 10, paddingVertical: 7, alignItems: 'center' }}>
             <Text style={{ fontSize: 9, fontWeight: '700', color, textTransform: 'uppercase', letterSpacing: 0.3, opacity: 0.7 }}>{label}</Text>
-            <Text style={{ fontSize: 13, fontWeight: '800', color, marginTop: 1 }}>C${value.toFixed(2)}</Text>
+            <Text style={{ fontSize: 13, fontWeight: '800', color, marginTop: 1 }}>{money(value)}</Text>
           </View>
         ))}
       </View>

@@ -5,7 +5,7 @@ import styles from "../styles/cartItemStyles";
 
 const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
 
-export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
+function CartItem({ item, onUpdate, onDiscount, onRemove }) {
   const product = item.product || { name: 'Producto no disponible' };
   const quantity = Number(item.quantity) || 0;
   
@@ -136,3 +136,7 @@ export default function CartItem({ item, onUpdate, onDiscount, onRemove }) {
 
   return item.isBonus ? <BonusItem /> : <NormalItem />;
 }
+
+// memo: componente de fila. Sin esto se re-renderiza en cada cambio de estado
+// del padre (tecla del buscador, cambio de filtro) aunque su item no haya cambiado.
+export default React.memo(CartItem);

@@ -1,25 +1,55 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useContext } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput } from 'react-native';
 import firestore from '@react-native-firebase/firestore';
 import Icon from 'react-native-vector-icons/Ionicons';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { startOfDay, endOfDay, format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { useNavigation } from '@react-navigation/native';
 import globalStyles from '../../../styles/globalStyles';
 import { useRoute } from '../../../context/RouteContext';
 import { resolveCustomerName } from '../../../utils/customerUtils';
 import StatCardGrid from '../../dashboard/components/StatCardGrid';
+import { getDaysOverdue } from '../../../utils/creditUtils';
+import { PreSaleContext } from '../../presales/context/preSaleContext';
+
+// Una factura cobrada sigue siendo del entregador aunque tenga devoluciones.
+// 'credit_dispatched': crédito ya entregado pero sin saldar; se mantiene en el
+// historial con su saldo en vivo hasta que el crédito se pague por completo.
+const HISTORY_STATUSES = ['paid', 'partially_returned', 'returned', 'credit_dispatched'];
 
 const isCreditSale = (item) =>
   item?.paymentMethod === 'credit' || String(item?.status || '').startsWith('credit_');
 
+// Devoluciones aprobadas sobre la factura (returnService.applyReturnToPresale).
+const getReturnSummary = (sale) => {
+  const lines = sale?.returnedSummary;
+  if (!Array.isArray(lines) || lines.length === 0) return null;
+  return {
+    label: lines
+      .map((l) => `${Number(l.quantity || 0)} ${l.productName}${l.isBonus ? ' (regalo)' : ''}`)
+      .join(' · '),
+    amount: Number(sale.returnedTotal) || 0,
+    isFull: sale.status === 'returned',
+  };
+};
+
 // Efectivo realmente recibido: el vuelto no cuenta, y un crédito puede abonarse parcial.
-const getCollectedAmount = (item) => {
+// Para créditos sin saldar el dato vivo es el crédito (suma de abonos), no la preventa.
+const getCollectedAmount = (item, credit) => {
   const total = Number(item?.total) || 0;
+  if (item?.status === 'credit_dispatched') {
+    const creditPaid = Number(credit?.paid);
+    if (Number.isFinite(creditPaid)) return Math.min(creditPaid, total);
+  }
   const paid = Number(item?.amountPaid);
   return Number.isFinite(paid) && paid > 0 ? Math.min(paid, total) : total;
 };
 
 // Componente para cada Entrega (Versión Resumida)
-const DeliveryItem = ({ item, onGoToPayment, customerName }) => {
+// memo: fila de lista. El padre re-renderiza en cada tecla del buscador y en cada
+// cambio de filtro; sin esto se vuelve a renderizar toda la lista montada.
+const DeliveryItem = React.memo(({ item, onGoToPayment, customerName }) => {
   const isCredit = isCreditSale(item);
 
   const createdDate = item.createdAt
@@ -54,7 +84,7 @@ const DeliveryItem = ({ item, onGoToPayment, customerName }) => {
         </TouchableOpacity>
     </View>
   );
-};
+});
 
 const formatTimestamp = (date) => {
   if (!date) return '---';
@@ -83,9 +113,23 @@ const matchesFilter = (item, query, customerName) => {
   return haystack.includes(query);
 };
 
+const toDate = (value) => (typeof value?.toDate === 'function' ? value.toDate() : new Date(value));
+
+// Rango personalizado del calendario. Con solo 'from' filtra ese día exacto;
+// con ambas fechas, el rango completo. Los límites se estiran al día entero para
+// que una entrega de las 14:00 del día 'hasta' no quede fuera.
+const isWithinCustomRange = (date, from, to) => {
+  if (!from && !to) return true;
+  if (!date) return false;
+  const value = toDate(date);
+  const start = startOfDay(from || to);
+  const end = endOfDay(to || from);
+  return value >= start && value <= end;
+};
+
 const isWithinRange = (date, rangeKey) => {
   if (!date || !rangeKey) return true;
-  const baseDate = typeof date.toDate === 'function' ? date.toDate() : new Date(date);
+  const baseDate = toDate(date);
   const now = new Date();
 
   if (rangeKey === 'today') {
@@ -117,6 +161,7 @@ const DATE_CHIPS = [
   { key: 'yesterday', label: 'Ayer' },
   { key: 'week', label: '7 dias' },
   { key: 'month', label: 'Mes' },
+  { key: 'custom', label: 'Fecha', icon: 'calendar-outline' },
 ];
 
 const METHOD_CHIPS = [
@@ -133,17 +178,57 @@ const matchesMethod = (item, methodKey) => {
 
 const FilterChips = ({ chips, value, onChange }) => (
   <View style={styles.filterChips}>
-    {chips.map((chip) => (
-      <TouchableOpacity
-        key={chip.key}
-        style={[styles.chip, value === chip.key && styles.chipActive]}
-        onPress={() => onChange(chip.key)}
-      >
-        <Text style={[styles.chipText, value === chip.key && styles.chipTextActive]}>{chip.label}</Text>
-      </TouchableOpacity>
-    ))}
+    {chips.map((chip) => {
+      const active = value === chip.key;
+      return (
+        <TouchableOpacity
+          key={chip.key}
+          style={[styles.chip, active && styles.chipActive]}
+          onPress={() => onChange(chip.key)}
+        >
+          {!!chip.icon && (
+            <Icon name={chip.icon} size={13} color={active ? '#FFFFFF' : '#333333'} />
+          )}
+          <Text style={[styles.chipText, active && styles.chipTextActive]}>{chip.label}</Text>
+        </TouchableOpacity>
+      );
+    })}
   </View>
 );
+
+// Selector de fecha/rango del historial. Un solo día = elegir "Desde" y dejar
+// "Hasta" vacío; el resumen de arriba refleja siempre lo que se está viendo.
+const DateRangeFilter = ({ from, to, onPick, onClear }) => {
+  const label = (date, fallback) => (date ? format(date, "d 'de' MMM yyyy", { locale: es }) : fallback);
+  return (
+    <View style={styles.rangeBox}>
+      <View style={styles.rangeRow}>
+        <TouchableOpacity style={styles.rangeBtn} onPress={() => onPick('from')} activeOpacity={0.85}>
+          <Icon name="calendar-outline" size={15} color="#007AFF" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rangeLabel}>Desde</Text>
+            <Text style={styles.rangeValue} numberOfLines={1}>{label(from, 'Elegir fecha')}</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.rangeBtn} onPress={() => onPick('to')} activeOpacity={0.85}>
+          <Icon name="calendar-outline" size={15} color="#007AFF" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rangeLabel}>Hasta</Text>
+            <Text style={styles.rangeValue} numberOfLines={1}>{label(to, 'Mismo día')}</Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      {(from || to) && (
+        <TouchableOpacity style={styles.rangeClear} onPress={onClear}>
+          <Icon name="close-circle" size={14} color="#8E8E93" />
+          <Text style={styles.rangeClearText}>Quitar fechas</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+};
 
 const getBonusSummary = (sale) => {
   const bonuses = sale?.bonusesAwarded || sale?.bonuses || [];
@@ -169,9 +254,20 @@ const getBonusSummary = (sale) => {
   };
 };
 
-const HistoryItem = ({ item, onOpen, customerName }) => {
-  const paidDate = formatTimestamp(item.fechaPago || item.fechaEntregaRepartidor);
+// memo: ver DeliveryItem.
+const HistoryItem = React.memo(({ item, onOpen, customerName, credit }) => {
+  const paidDate = formatTimestamp(item.fechaPago || item.dispatchedAt || item.fechaEntregaRepartidor);
   const bonusSummary = getBonusSummary(item);
+  const returnSummary = getReturnSummary(item);
+  const isUnsettledCredit = item.status === 'credit_dispatched';
+  // Saldo en vivo del crédito; si aún no carga el listener, aproximar con la preventa.
+  const creditPending = isUnsettledCredit
+    ? (Number.isFinite(Number(credit?.pending))
+        ? Number(credit.pending)
+        : Math.max((Number(item.total) || 0) - (Number(item.amountPaid) || 0), 0))
+    : 0;
+  const creditPaid = isUnsettledCredit ? getCollectedAmount(item, credit) : 0;
+  const daysOverdue = isUnsettledCredit ? getDaysOverdue(credit || { dueDate: item.creditDueDate }) : 0;
   return (
     <TouchableOpacity style={styles.historyCard} onPress={() => onOpen(item)}>
       <View style={styles.historyRow}>
@@ -181,10 +277,40 @@ const HistoryItem = ({ item, onOpen, customerName }) => {
           <Text style={styles.historyMeta}>{paidDate}</Text>
         </View>
         <View style={styles.historyRight}>
-          <Text style={styles.historyTotal}>${item.total?.toFixed(2)}</Text>
+          <Text style={[styles.historyTotal, isUnsettledCredit && styles.historyTotalPending]}>
+            C${(Number(item.total) || 0).toFixed(2)}
+          </Text>
           <Icon name="chevron-forward" size={20} color="#94A3B8" />
         </View>
       </View>
+
+      {/* Crédito sin saldar: saldo y abonos en vivo desde el módulo de créditos. */}
+      {isUnsettledCredit && (
+        <View style={styles.historyCreditRow}>
+          <Icon name="card-outline" size={14} color="#5856D6" />
+          <Text style={styles.historyCreditText}>
+            Por cobrar: ${creditPending.toFixed(2)}
+            {creditPaid > 0 ? ` · Abonado: $${creditPaid.toFixed(2)}` : ' · Sin abonos'}
+          </Text>
+          {daysOverdue > 0 && (
+            <Text style={styles.historyCreditOverdue}>{daysOverdue}d atraso</Text>
+          )}
+        </View>
+      )}
+
+      {/* Devolución aprobada: qué salió de la factura y cuánto se descontó. */}
+      {returnSummary && (
+        <View style={styles.historyReturnRow}>
+          <Icon name="return-up-back-outline" size={14} color="#FF3B30" />
+          <Text style={styles.historyReturnText} numberOfLines={2}>
+            {returnSummary.isFull ? 'Devuelta: ' : 'Devuelto: '}
+            {returnSummary.label}
+          </Text>
+          {returnSummary.amount > 0 && (
+            <Text style={styles.historyReturnAmount}>-${returnSummary.amount.toFixed(2)}</Text>
+          )}
+        </View>
+      )}
 
       {bonusSummary.hasBonuses && (
         <View style={styles.historyBonusRow}>
@@ -198,13 +324,13 @@ const HistoryItem = ({ item, onOpen, customerName }) => {
       {isCreditSale(item) && (
         <View style={styles.historyBadgeRow}>
           <View style={styles.creditBadge}>
-            <Text style={styles.creditBadgeText}>Crédito</Text>
+            <Text style={styles.creditBadgeText}>{isUnsettledCredit ? 'Crédito sin saldar' : 'Crédito'}</Text>
           </View>
         </View>
       )}
     </TouchableOpacity>
   );
-};
+});
 
 export default function MyDeliveriesScreen({ user, role }) {
   const [deliveries, setDeliveries] = useState([]);
@@ -216,40 +342,23 @@ export default function MyDeliveriesScreen({ user, role }) {
   const [historyFilter, setHistoryFilter] = useState('');
   const [historyDateFilter, setHistoryDateFilter] = useState('all');
   const [historyMethodFilter, setHistoryMethodFilter] = useState('all');
+  const [customFrom, setCustomFrom] = useState(null);
+  const [customTo, setCustomTo] = useState(null);
+  const [pickerTarget, setPickerTarget] = useState(null);   // 'from' | 'to' | null
   const [activePanel, setActivePanel] = useState('pending');
   const [showFilters, setShowFilters] = useState(false);
-  const [customersById, setCustomersById] = useState({});
+  const [creditsByPreSaleId, setCreditsByPreSaleId] = useState({});
   const navigation = useNavigation();
   const { selectedRoute } = useRoute();
+
+  // El mapa de clientes lo mantiene PreSaleProvider a nivel app. Antes cada pantalla
+  // de Bodega abría su propio listener sobre la colección `customers` completa.
+  const { customersById } = useContext(PreSaleContext);
 
   const isAdmin = role === 'admin';
   // El entregador siempre trabaja sobre una ruta seleccionada, igual que el
   // bodeguero en WarehouseDashboardScreen; admin puede ver todas.
   const routeMissing = !isAdmin && !selectedRoute?.id;
-
-  useEffect(() => {
-    const unsub = firestore()
-      .collection('customers')
-      .onSnapshot(
-        (snapshot) => {
-          if (!snapshot) {
-            setCustomersById({});
-            return;
-          }
-          const map = snapshot.docs.reduce((acc, doc) => {
-            acc[doc.id] = { id: doc.id, ...doc.data() };
-            return acc;
-          }, {});
-          setCustomersById(map);
-        },
-        (error) => {
-          console.error('Error al escuchar customers:', error);
-          setCustomersById({});
-        }
-      );
-
-    return () => unsub();
-  }, []);
 
   useEffect(() => {
     if (!user || !user.uid) {
@@ -304,10 +413,12 @@ export default function MyDeliveriesScreen({ user, role }) {
         setLoading(false);
       });
 
-    // Historial de entregas pagadas por el repartidor
+    // Historial de entregas pagadas por el repartidor. Una devolución aprobada
+    // cambia el status a returned/partially_returned: la factura sigue siendo del
+    // entregador, así que se mantiene en el historial con sus totales ya recalculados.
     let historyQuery = firestore()
       .collection('presales')
-      .where('status', '==', 'paid');
+      .where('status', 'in', HISTORY_STATUSES);
 
     if (!isAdmin) {
       historyQuery = historyQuery.where('entregadorId', '==', user.uid);
@@ -326,11 +437,11 @@ export default function MyDeliveriesScreen({ user, role }) {
         const sales = [];
         querySnapshot.forEach(doc => sales.push({ id: doc.id, ...doc.data() }));
 
-        sales.sort((a, b) => {
-          const dateA = a.fechaPago ? a.fechaPago.toMillis() : 0;
-          const dateB = b.fechaPago ? b.fechaPago.toMillis() : 0;
-          return dateB - dateA;
-        });
+        const sortDate = (s) => {
+          const ts = s.fechaPago || s.dispatchedAt || s.fechaEntregaRepartidor;
+          return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0;
+        };
+        sales.sort((a, b) => sortDate(b) - sortDate(a));
 
         setHistory(sales);
         setLoadingHistory(false);
@@ -340,19 +451,60 @@ export default function MyDeliveriesScreen({ user, role }) {
         setLoadingHistory(false);
       });
 
+    // Saldo en vivo de los créditos sin saldar: cada abono registrado en el módulo
+    // de créditos se refleja aquí sin recargar (los saldados cambian la preventa a 'paid').
+    const creditsSubscriber = firestore()
+      .collection('credits')
+      .where('status', '==', 'pending')
+      .onSnapshot(querySnapshot => {
+        if (!querySnapshot) {
+          setCreditsByPreSaleId({});
+          return;
+        }
+        const map = {};
+        querySnapshot.forEach(doc => {
+          const data = doc.data() || {};
+          if (data.preSaleId) map[data.preSaleId] = { id: doc.id, ...data };
+        });
+        setCreditsByPreSaleId(map);
+      }, error => {
+        console.error('Error al escuchar créditos pendientes:', error);
+        setCreditsByPreSaleId({});
+      });
+
     return () => {
       subscriber();
       historySubscriber();
+      creditsSubscriber();
     };
   }, [user, isAdmin, selectedRoute, routeMissing]);
 
-  const handleGoToPayment = (item) => {
+  const handleGoToPayment = useCallback((item) => {
       navigation.navigate('DeliveryPayment', { delivery: item });
-  };
+  }, [navigation]);
 
   const openHistory = useCallback((item) => {
     navigation.navigate('DeliveryDone', { sale: item });
   }, [navigation]);
+
+  // renderItem con identidad estable: si se declara inline en el JSX, cada render
+  // crea una función nueva y React.memo en las filas no sirve de nada.
+  const renderDelivery = useCallback(({ item }) => (
+    <DeliveryItem
+      item={item}
+      onGoToPayment={handleGoToPayment}
+      customerName={resolveCustomerName(item, customersById)}
+    />
+  ), [handleGoToPayment, customersById]);
+
+  const renderHistory = useCallback(({ item }) => (
+    <HistoryItem
+      item={item}
+      onOpen={openHistory}
+      customerName={resolveCustomerName(item, customersById)}
+      credit={creditsByPreSaleId[item.id]}
+    />
+  ), [openHistory, customersById, creditsByPreSaleId]);
 
   const filteredDeliveries = useMemo(() => {
     const query = normalizeQuery(deliveryFilter);
@@ -365,14 +517,37 @@ export default function MyDeliveriesScreen({ user, role }) {
 
   const filteredHistory = useMemo(() => {
     const query = normalizeQuery(historyFilter);
-    const rangeKey = historyDateFilter === 'all' ? '' : historyDateFilter;
+    const isCustom = historyDateFilter === 'custom';
+    const rangeKey = historyDateFilter === 'all' || isCustom ? '' : historyDateFilter;
     return history.filter((item) => {
       const customerName = resolveCustomerName(item, customersById);
       if (!matchesFilter(item, query, customerName)) return false;
       if (!matchesMethod(item, historyMethodFilter)) return false;
-      return isWithinRange(item.fechaPago || item.fechaEntregaRepartidor, rangeKey);
+      const date = item.fechaPago || item.dispatchedAt || item.fechaEntregaRepartidor;
+      return isCustom
+        ? isWithinCustomRange(date, customFrom, customTo)
+        : isWithinRange(date, rangeKey);
     });
-  }, [history, historyFilter, historyDateFilter, historyMethodFilter, customersById]);
+  }, [history, historyFilter, historyDateFilter, historyMethodFilter, customersById, customFrom, customTo]);
+
+  const handlePickDate = useCallback((target) => setPickerTarget(target), []);
+
+  const handleConfirmDate = useCallback((date) => {
+    // Fechas invertidas: se arrastra el otro extremo en vez de rechazar la selección.
+    if (pickerTarget === 'from') {
+      setCustomFrom(date);
+      setCustomTo((prev) => (prev && prev < date ? date : prev));
+    } else {
+      setCustomTo(date);
+      setCustomFrom((prev) => (prev && prev > date ? date : prev));
+    }
+    setPickerTarget(null);
+  }, [pickerTarget]);
+
+  const handleClearDates = useCallback(() => {
+    setCustomFrom(null);
+    setCustomTo(null);
+  }, []);
 
   // Efectivo vs credito: lo que el entregador debe traer en mano no incluye el credito.
   const pendingTotals = useMemo(() => {
@@ -390,14 +565,14 @@ export default function MyDeliveriesScreen({ user, role }) {
   const collectedTotals = useMemo(() => {
     return filteredHistory.reduce(
       (acc, item) => {
-        const amount = getCollectedAmount(item);
+        const amount = getCollectedAmount(item, creditsByPreSaleId[item.id]);
         if (isCreditSale(item)) acc.credit += amount;
         else acc.cash += amount;
         return acc;
       },
       { cash: 0, credit: 0 }
     );
-  }, [filteredHistory]);
+  }, [filteredHistory, creditsByPreSaleId]);
 
   const isPending = activePanel === 'pending';
   const searchValue = isPending ? deliveryFilter : historyFilter;
@@ -405,11 +580,16 @@ export default function MyDeliveriesScreen({ user, role }) {
     ? 'Administrador: todas las rutas'
     : `Ruta: ${selectedRoute?.name || '---'}`;
 
+  // 'custom' sin fechas elegidas todavia no filtra nada, así que no cuenta como activo.
+  const hasDateFilter = historyDateFilter === 'custom'
+    ? !!(customFrom || customTo)
+    : historyDateFilter !== 'all';
+
   // Chips activos (distintos del valor por defecto) para avisar que la lista viene filtrada
   // aunque el panel de filtros este colapsado.
   const activeFilterCount = isPending
     ? Number(deliveryMethodFilter !== 'all')
-    : Number(historyMethodFilter !== 'all') + Number(historyDateFilter !== 'all');
+    : Number(historyMethodFilter !== 'all') + Number(hasDateFilter);
 
   // Gate: el entregador debe seleccionar una ruta antes de ver sus entregas.
   // Mismo patrón que WarehouseDashboardScreen para el bodeguero.
@@ -533,13 +713,13 @@ export default function MyDeliveriesScreen({ user, role }) {
                           icon: 'cash-outline',
                           color: '#007AFF',
                           title: 'Efectivo por cobrar',
-                          value: `$${pendingTotals.cash.toFixed(2)}`,
+                          value: `C$${pendingTotals.cash.toFixed(2)}`,
                         },
                         pendingCredit: {
                           icon: 'card-outline',
                           color: '#5856D6',
                           title: 'Credito por cobrar',
-                          value: `$${pendingTotals.credit.toFixed(2)}`,
+                          value: `C$${pendingTotals.credit.toFixed(2)}`,
                         },
                       }}
                       layout={[[
@@ -549,13 +729,7 @@ export default function MyDeliveriesScreen({ user, role }) {
                     />
                   </View>
                 )}
-                renderItem={({ item }) => (
-                  <DeliveryItem
-                    item={item}
-                    onGoToPayment={handleGoToPayment}
-                    customerName={resolveCustomerName(item, customersById)}
-                  />
-                )}
+                renderItem={renderDelivery}
                 ListEmptyComponent={(
                   <View style={styles.centerContainer}>
                     <Icon name="bicycle-outline" size={64} color="#E0E0E0" />
@@ -584,6 +758,14 @@ export default function MyDeliveriesScreen({ user, role }) {
                         value={historyDateFilter}
                         onChange={setHistoryDateFilter}
                       />
+                      {historyDateFilter === 'custom' && (
+                        <DateRangeFilter
+                          from={customFrom}
+                          to={customTo}
+                          onPick={handlePickDate}
+                          onClear={handleClearDates}
+                        />
+                      )}
                       <FilterChips
                         chips={METHOD_CHIPS}
                         value={historyMethodFilter}
@@ -598,13 +780,13 @@ export default function MyDeliveriesScreen({ user, role }) {
                         icon: 'cash-outline',
                         color: '#34C759',
                         title: 'Efectivo cobrado',
-                        value: `$${collectedTotals.cash.toFixed(2)}`,
+                        value: `C$${collectedTotals.cash.toFixed(2)}`,
                       },
                       creditCollected: {
                         icon: 'card-outline',
                         color: '#5856D6',
                         title: 'Credito cobrado',
-                        value: `$${collectedTotals.credit.toFixed(2)}`,
+                        value: `C$${collectedTotals.credit.toFixed(2)}`,
                       },
                     }}
                     layout={[[
@@ -614,17 +796,15 @@ export default function MyDeliveriesScreen({ user, role }) {
                   />
                 </View>
               )}
-              renderItem={({ item }) => (
-                <HistoryItem
-                  item={item}
-                  onOpen={openHistory}
-                  customerName={resolveCustomerName(item, customersById)}
-                />
-              )}
+              renderItem={renderHistory}
               ListEmptyComponent={(
                 <View style={styles.centerContainer}>
                   <Icon name="receipt-outline" size={64} color="#E0E0E0" />
-                  <Text style={styles.emptyText}>No tienes entregas cobradas.</Text>
+                  <Text style={styles.emptyText}>
+                    {hasDateFilter
+                      ? 'No hay entregas cobradas en las fechas seleccionadas.'
+                      : 'No tienes entregas cobradas.'}
+                  </Text>
                 </View>
               )}
               contentContainerStyle={styles.listContent}
@@ -632,6 +812,19 @@ export default function MyDeliveriesScreen({ user, role }) {
           )}
         </View>
       </View>
+
+      {/* Calendario del filtro por fecha (historial) */}
+      <DateTimePickerModal
+        isVisible={!!pickerTarget}
+        mode="date"
+        locale="es"
+        date={(pickerTarget === 'from' ? customFrom : customTo) || new Date()}
+        maximumDate={new Date()}
+        confirmTextIOS="Aceptar"
+        cancelTextIOS="Cancelar"
+        onConfirm={handleConfirmDate}
+        onCancel={() => setPickerTarget(null)}
+      />
     </View>
   );
 }
@@ -692,6 +885,9 @@ const styles = StyleSheet.create({
   filterToggleBadge: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
   filterChips: { flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
@@ -701,6 +897,37 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 12, color: '#333333', fontWeight: '600' },
   chipTextActive: { color: '#FFFFFF' },
   routeHint: { fontSize: 11, fontWeight: '500', color: '#8E8E93', marginBottom: 6 },
+
+  // Selector de rango: contenedor anidado sobre el lienzo, radio 12 del sistema.
+  rangeBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    padding: 8,
+    marginBottom: 8,
+  },
+  rangeRow: { flexDirection: 'row', gap: 8 },
+  rangeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F5F6FA',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  rangeLabel: { fontSize: 10, fontWeight: '600', color: '#8E8E93' },
+  rangeValue: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+  rangeClear: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingTop: 8,
+  },
+  rangeClearText: { fontSize: 12, fontWeight: '600', color: '#8E8E93' },
   listContent: { paddingBottom: 20, flexGrow: 1 },
 
   // Card Lift: la unica receta de sombra del sistema.
@@ -798,6 +1025,23 @@ const styles = StyleSheet.create({
   historyRight: { alignItems: 'flex-end', gap: 4, flexShrink: 0, minWidth: 74 },
   // Cobrado: verde semantico, aqui si corresponde.
   historyTotal: { fontSize: 16, fontWeight: '800', color: '#34C759', lineHeight: 20 },
+  // Credito sin saldar: todavia no es dinero cobrado, va en tinta.
+  historyTotalPending: { color: '#1A1A1A' },
+  // Credito sin saldar: morado #5856D6, mismo codigo de color que el badge de credito.
+  historyCreditRow: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: '#5856D615',
+    borderWidth: 1,
+    borderColor: '#5856D630',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historyCreditText: { flex: 1, color: '#5856D6', fontSize: 12, fontWeight: '600' },
+  historyCreditOverdue: { color: '#FF3B30', fontSize: 12, fontWeight: '800' },
   historyBadgeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8, flexShrink: 0 },
   historyBonusRow: {
     marginTop: 8,
@@ -812,4 +1056,19 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   historyBonusText: { color: '#5856D6', fontSize: 12, fontWeight: '600' },
+  // Devolucion: rojo semantico (dinero que sale de la factura), no decorativo.
+  historyReturnRow: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: '#FF3B3010',
+    borderWidth: 1,
+    borderColor: '#FF3B3030',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historyReturnText: { flex: 1, color: '#FF3B30', fontSize: 12, fontWeight: '600' },
+  historyReturnAmount: { color: '#FF3B30', fontSize: 12, fontWeight: '800' },
 });

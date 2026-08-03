@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const RouteContext = createContext();
@@ -24,7 +24,7 @@ export const RouteProvider = ({ children }) => {
     }
   };
 
-  const updateRoute = async (route) => {
+  const updateRoute = useCallback(async (route) => {
     try {
       if (route) {
         await AsyncStorage.setItem('selected_route', JSON.stringify(route));
@@ -35,13 +35,17 @@ export const RouteProvider = ({ children }) => {
     } catch (e) {
       console.error('Failed to save route', e);
     }
-  };
+  }, []);
 
-  return (
-    <RouteContext.Provider value={{ selectedRoute, updateRoute, loadingRoute }}>
-      {children}
-    </RouteContext.Provider>
+  // value memoizado: varias pantallas usan `selectedRoute` como dependencia de
+  // useEffect para montar listeners de Firestore. Un objeto nuevo por render
+  // los desmontaría y volvería a montar sin que la ruta haya cambiado.
+  const value = useMemo(
+    () => ({ selectedRoute, updateRoute, loadingRoute }),
+    [selectedRoute, updateRoute, loadingRoute],
   );
+
+  return <RouteContext.Provider value={value}>{children}</RouteContext.Provider>;
 };
 
 export const useRoute = () => useContext(RouteContext);

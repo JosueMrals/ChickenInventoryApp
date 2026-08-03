@@ -3,8 +3,8 @@ import { Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import styles from '../styles/creditsStyles';
 
+// Solo Pendientes y Pagados: la vista completa vive en el Historial de créditos.
 const FILTERS = [
-  { id: 'all', label: 'Todos', icon: 'view-list-outline' },
   { id: 'pending', label: 'Pendientes', icon: 'clock-outline' },
   { id: 'paid', label: 'Pagados', icon: 'check-circle-outline' },
 ];

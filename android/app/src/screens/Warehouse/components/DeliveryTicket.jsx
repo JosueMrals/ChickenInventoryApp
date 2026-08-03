@@ -176,6 +176,10 @@ const DeliveryTicket = ({ sale, settings }) => {
     return bucket;
   };
 
+  // Devoluciones aprobadas sobre esta factura (returnService.applyReturnToPresale)
+  const returnedLines = Array.isArray(sale.returnedSummary) ? sale.returnedSummary : [];
+  const returnedTotal = Number(sale.returnedTotal) || 0;
+
   // Número de recibo
   const receiptNum = sale.receiptNumber || sale.saleNumber || sale.preSaleNumber || null;
   const preSaleRef = sale.id ? sale.id.substring(0, 8).toUpperCase() : '---';
@@ -325,6 +329,39 @@ const DeliveryTicket = ({ sale, settings }) => {
               +{Number(bonus.__qty || 0)} {bonus.__name}
             </Text>
           ))}
+        </View>
+      )}
+
+      {/* Devoluciones aprobadas: qué salió de la factura, en compacto.
+          Los ítems y totales de arriba ya vienen recalculados desde Firestore. */}
+      {returnedLines.length > 0 && (
+        <View style={styles.returnBox}>
+          <Text style={[styles.returnTitle, { fontFamily, fontSize: baseFontSize - 2 }]}>
+            ↩ DEVOLUCIONES
+          </Text>
+          {returnedLines.map((line, idx) => (
+            <View key={`ret_${idx}`} style={styles.returnRow}>
+              <Text
+                style={[styles.returnName, { fontFamily, fontSize: baseFontSize - 2 }]}
+                numberOfLines={2}>
+                -{Number(line.quantity || 0)} {line.productName || 'Producto'}
+                {line.isBonus ? ' (regalo)' : ''}
+              </Text>
+              <Text style={[styles.returnValue, { fontFamily, fontSize: baseFontSize - 2 }]}>
+                {Number(line.total || 0) > 0 ? `-C$${Number(line.total).toFixed(2)}` : '—'}
+              </Text>
+            </View>
+          ))}
+          {returnedTotal > 0 && (
+            <View style={styles.returnTotalRow}>
+              <Text style={[styles.returnTitle, { fontFamily, fontSize: baseFontSize - 2 }]}>
+                Total devuelto
+              </Text>
+              <Text style={[styles.returnValue, { fontFamily, fontSize: baseFontSize - 2 }]}>
+                -C${returnedTotal.toFixed(2)}
+              </Text>
+            </View>
+          )}
         </View>
       )}
 
@@ -486,6 +523,29 @@ const styles = StyleSheet.create({
   },
   unlinkedBonusTitle: { color: '#9A3412', fontWeight: '800', marginBottom: 3 },
   unlinkedBonusText: { color: '#7C2D12', fontWeight: '600' },
+  // Devoluciones (rojo semantico: dinero que sale de la factura)
+  returnBox: {
+    marginTop: 6,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    gap: 3,
+  },
+  returnTitle: { color: '#B91C1C', fontWeight: '800' },
+  returnRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 },
+  returnName: { flex: 1, color: '#7F1D1D', fontWeight: '600' },
+  returnValue: { color: '#B91C1C', fontWeight: '800' },
+  returnTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#FECACA',
+  },
   // Resumen
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   subTotalLabel: { fontSize: 14, color: '#374151' },

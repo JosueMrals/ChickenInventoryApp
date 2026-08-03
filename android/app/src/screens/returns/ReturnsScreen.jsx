@@ -3,8 +3,12 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import globalStyles from '../../styles/globalStyles';
 import { useRoute } from '../../context/RouteContext';
-import { subscribePendingReturnRequests } from '../../services/returnService';
+import {
+  subscribePendingReturnRequests,
+  subscribeMyPendingReturnRequests,
+} from '../../services/returnService';
 import PendingReturnsList from './components/PendingReturnsList';
+import MyReturnsList from './components/MyReturnsList';
 import ReturnHistoryList from './components/ReturnHistoryList';
 import ShortagesList from './components/ShortagesList';
 
@@ -14,20 +18,33 @@ const TABS = [
   { id: 'shortages', label: 'Faltantes', icon: 'alert-circle-outline' },
 ];
 
+// El entregador solicita; bodega/admin resuelven. Por eso la primera pestaña
+// cambia de "bandeja por aprobar" a "mis solicitudes en revisión".
+const ENTREGADOR_TABS = [
+  { id: 'pending', label: 'Mis solicitudes', icon: 'return-up-back-outline' },
+  { id: 'history', label: 'Historial', icon: 'time-outline' },
+  { id: 'shortages', label: 'Mis faltantes', icon: 'alert-circle-outline' },
+];
+
 export default function ReturnsScreen({ navigation, user, role }) {
   const { selectedRoute } = useRoute();
   const [activeTab, setActiveTab] = useState('pending');
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Admin supervisa todas las rutas; bodeguero trabaja sobre su ruta seleccionada
-  const routeId = role === 'admin' ? null : (selectedRoute?.id || null);
+  const isEntregador = role === 'entregador';
+  const uid = user?.uid || null;
+
+  // Admin supervisa todas las rutas; bodeguero trabaja sobre su ruta seleccionada.
+  // El entregador se filtra por su propio uid, no por ruta.
+  const routeId = role === 'admin' || isEntregador ? null : (selectedRoute?.id || null);
+  const tabs = isEntregador ? ENTREGADOR_TABS : TABS;
 
   useEffect(() => {
-    const unsub = subscribePendingReturnRequests((docs) => {
-      setPendingCount(docs.length);
-    }, routeId);
+    const unsub = isEntregador
+      ? subscribeMyPendingReturnRequests(uid, (docs) => setPendingCount(docs.length))
+      : subscribePendingReturnRequests((docs) => setPendingCount(docs.length), routeId);
     return () => unsub();
-  }, [routeId]);
+  }, [routeId, isEntregador, uid]);
 
   return (
     <View style={s.container}>
@@ -47,7 +64,7 @@ export default function ReturnsScreen({ navigation, user, role }) {
       )}
 
       <View style={s.tabBar}>
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const active = activeTab === tab.id;
           return (
             <TouchableOpacity
@@ -70,9 +87,21 @@ export default function ReturnsScreen({ navigation, user, role }) {
       </View>
 
       <View style={{ flex: 1 }}>
-        {activeTab === 'pending' && <PendingReturnsList routeId={routeId} />}
-        {activeTab === 'history' && <ReturnHistoryList routeId={routeId} />}
-        {activeTab === 'shortages' && <ShortagesList routeId={routeId} />}
+        {activeTab === 'pending' && (
+          isEntregador
+            ? <MyReturnsList uid={uid} />
+            : <PendingReturnsList routeId={routeId} />
+        )}
+        {activeTab === 'history' && (
+          <ReturnHistoryList routeId={routeId} requestedByUid={isEntregador ? uid : null} />
+        )}
+        {activeTab === 'shortages' && (
+          <ShortagesList
+            routeId={routeId}
+            entregadorId={isEntregador ? uid : null}
+            readOnly={isEntregador}
+          />
+        )}
       </View>
     </View>
   );

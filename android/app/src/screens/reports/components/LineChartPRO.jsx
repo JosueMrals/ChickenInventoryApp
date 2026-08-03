@@ -6,6 +6,16 @@ const { width } = Dimensions.get("window");
 const CHART_HEIGHT = 180;
 const CHART_WIDTH = width - 60;
 
+/**
+ * Acepta tanto un arreglo de números como la serie diaria del servicio
+ * (`{ date, income, count }`). Antes solo contemplaba números: al pasarle la
+ * serie, `Number({...})` daba NaN y la línea se dibujaba plana en cero.
+ */
+const toValue = (point) => {
+  if (point && typeof point === "object") return Number(point.income ?? point.value ?? 0) || 0;
+  return Number(point) || 0;
+};
+
 export default function LineChartPRO({ data = [] }) {
   if (!data || data.length === 0) {
     return (
@@ -26,11 +36,12 @@ export default function LineChartPRO({ data = [] }) {
     );
   }
 
-  // Convertir datos a números
-  const cleanData = data.map((v) => Number(v) || 0);
+  const cleanData = data.map(toValue);
 
-  const max = Math.max(...cleanData) || 1;
-  const min = Math.min(...cleanData);
+  // reduce en vez de Math.max(...array): con series largas el spread revienta
+  // con RangeError por exceso de argumentos.
+  const max = cleanData.reduce((m, v) => (v > m ? v : m), -Infinity) || 1;
+  const min = cleanData.reduce((m, v) => (v < m ? v : m), Infinity);
 
   const stepX = CHART_WIDTH / Math.max(1, cleanData.length - 1);
   const normalizeY = (value) =>

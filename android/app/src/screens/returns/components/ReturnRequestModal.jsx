@@ -37,7 +37,28 @@ function SelectRow({ line, qty, onChange, disabled, isBonus }) {
   );
 }
 
-export default function ReturnRequestModal({ visible, sale, onClose, onSubmit, submitting }) {
+// Clave de emparejamiento entre la línea de la venta y la línea ya solicitada.
+const lineKey = (line) => String(line?.productId || line?.id || line?.productName || line?.name || '');
+
+// Cantidades ya solicitadas, indexadas por posición en la lista de la venta.
+const presetQtyByIndex = (saleLines, presetLines) => {
+  const requested = (presetLines || []).reduce((acc, line) => {
+    acc[lineKey(line)] = Number(line.quantity) || 0;
+    return acc;
+  }, {});
+  return (saleLines || []).reduce((acc, line, index) => {
+    const qty = requested[lineKey(line)];
+    if (qty > 0) acc[index] = Math.min(qty, Number(line.quantity) || 0);
+    return acc;
+  }, {});
+};
+
+export default function ReturnRequestModal({
+  visible, sale, onClose, onSubmit, submitting,
+  preset = null,                       // solicitud existente → el modal edita en vez de crear
+  title = 'Solicitar Devolución',
+  submitLabel = 'Enviar solicitud',
+}) {
   const items = useMemo(() => (sale?.items || []), [sale]);
   const bonuses = useMemo(() => (sale?.bonusesAwarded || sale?.bonuses || []), [sale]);
 
@@ -50,8 +71,14 @@ export default function ReturnRequestModal({ visible, sale, onClose, onSubmit, s
       setReason('');
       setItemQty({});
       setBonusQty({});
+      return;
     }
-  }, [visible]);
+    if (preset) {
+      setReason(preset.reason || '');
+      setItemQty(presetQtyByIndex(items, preset.items));
+      setBonusQty(presetQtyByIndex(bonuses, preset.bonuses));
+    }
+  }, [visible, preset, items, bonuses]);
 
   const totalSelected =
     Object.values(itemQty).reduce((a, b) => a + b, 0) +
@@ -63,6 +90,9 @@ export default function ReturnRequestModal({ visible, sale, onClose, onSubmit, s
   };
 
   const handleSubmit = () => {
+    // Doble red: el padre ya usa useSubmitLock, pero `submitting` llega aquí
+    // como prop y no debe reenviar mientras el envío anterior sigue en vuelo.
+    if (submitting) return;
     if (totalSelected <= 0) {
       Alert.alert('Selecciona productos', 'Elige al menos un producto y una cantidad para devolver.');
       return;
@@ -85,7 +115,7 @@ export default function ReturnRequestModal({ visible, sale, onClose, onSubmit, s
       <View style={s.backdrop}>
         <View style={s.card}>
           <View style={s.header}>
-            <Text style={s.title}>Solicitar Devolución</Text>
+            <Text style={s.title}>{title}</Text>
             <TouchableOpacity onPress={onClose} disabled={submitting}>
               <Icon name="close" size={22} color="#6B7280" />
             </TouchableOpacity>
@@ -145,7 +175,7 @@ export default function ReturnRequestModal({ visible, sale, onClose, onSubmit, s
             <TouchableOpacity style={s.submitBtn} onPress={handleSubmit} disabled={submitting}>
               {submitting
                 ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={s.submitText}>Enviar solicitud ({totalSelected})</Text>}
+                : <Text style={s.submitText}>{submitLabel} ({totalSelected})</Text>}
             </TouchableOpacity>
           </View>
         </View>

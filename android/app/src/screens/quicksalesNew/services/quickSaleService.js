@@ -21,6 +21,7 @@ export async function registerQuickSaleFull({
   paymentMethod,
   amountPaid,
   change,
+  transferNumber = "",
   customer = null,
 }) {
   if (!cart.length) throw new Error("El carrito está vacío.");
@@ -35,12 +36,26 @@ export async function registerQuickSaleFull({
   const normalItems = cart.filter(item => !item.isBonus);
   const bonusItems = cart.filter(item => item.isBonus);
   
-  const productIds = [...new Set(cart.map(item => item.product.id || item.id))];
-
-  const productsSnapshot = await firestore().collection('products').where(firestore.FieldPath.documentId(), 'in', productIds).get();
+  // Solo las bonificaciones necesitan los datos del producto (ver movimientos abajo).
+  // Sin bonificaciones no se lee nada, y el `in` se trocea porque Firestore lo limita a 10.
+  const bonusProductIds = [...new Set(bonusItems.map(item => item.product.id || item.id))];
   const productsData = {};
-  productsSnapshot.forEach(doc => {
+  const idChunks = [];
+  for (let i = 0; i < bonusProductIds.length; i += 10) {
+    idChunks.push(bonusProductIds.slice(i, i + 10));
+  }
+  const chunkSnapshots = await Promise.all(
+    idChunks.map(chunk =>
+      firestore()
+        .collection('products')
+        .where(firestore.FieldPath.documentId(), 'in', chunk)
+        .get()
+    )
+  );
+  chunkSnapshots.forEach(snapshot => {
+    snapshot.forEach(doc => {
       productsData[doc.id] = doc.data();
+    });
   });
 
   const saleData = {
@@ -51,6 +66,7 @@ export async function registerQuickSaleFull({
     amountPaid,
     change,
     paymentMethod,
+    transferNumber,
     items: normalItems.map(item => ({
       id: item.id,
       name: item.product.name,
@@ -58,6 +74,9 @@ export async function registerQuickSaleFull({
       unitPrice: item.unitPrice,
       discount: item.discount,
       total: item.total,
+      // Costo AL MOMENTO de la venta: los reportes históricos no deben calcular
+      // el margen contra el precio de compra actual del catálogo.
+      purchasePrice: Number(item.product?.purchasePrice) || 0,
     })),
     createdAt,
     soldBy: user?.email || "",

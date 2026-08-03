@@ -19,18 +19,26 @@ function extractCategory(data = {}) {
   return '';
 }
 
-export const useProductOperations = (dateFrom, dateTo) => {
+/**
+ * Bitácora de cambios en productos (`product_movements`) dentro del rango.
+ *
+ * `limit` es obligatorio: es una colección de auditoría que solo crece y antes
+ * se leía entera —y en vivo— porque la pantalla tampoco le pasaba el rango de
+ * fechas. Cada apertura de la pestaña descargaba todo el historial del negocio.
+ */
+export const useProductOperations = (dateFrom, dateTo, limit = 100) => {
   const [operations, setOperations] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    
+
     let query = db.collection('product_movements').orderBy('timestamp', 'desc');
 
     if (dateFrom && dateTo) {
       query = query.where('timestamp', '>=', dateFrom).where('timestamp', '<=', dateTo);
     }
+    query = query.limit(limit);
 
     const unsubscribe = query.onSnapshot(
       (snapshot) => {
@@ -53,7 +61,7 @@ export const useProductOperations = (dateFrom, dateTo) => {
     );
 
     return () => unsubscribe(); // Cleanup listener on unmount
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, limit]);
 
   return { operations, loading };
 };

@@ -56,6 +56,30 @@ const Separator = ({ dashed = false }) => (
 
 // ── Componente principal ──────────────────────────────────────────────────────
 export default function SaleReceipt({ sale, bonuses = [], ticketSettings, usersById = {} }) {
+  // Las bonificaciones se calculan ANTES de descartar el render: con el
+  // `if (!sale) return null` arriba, los useMemo de más abajo quedaban detrás de
+  // un return condicional y el orden de hooks cambiaba al pasar de null a venta
+  // —justo lo que las Reglas de Hooks prohíben—.
+  const saleBonuses = useMemo(
+    () => (Array.isArray(sale?.bonuses) ? sale.bonuses : []),
+    [sale]
+  );
+  const allBonuses = useMemo(() => {
+    const seen = new Set();
+    return [...saleBonuses, ...bonuses].filter((b) => {
+      const key = `${b.productName || b.name}_${b.quantity}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [saleBonuses, bonuses]);
+
+  // Bonificaciones sin ítem padre identificado (se listan al final)
+  const orphanBonuses = useMemo(
+    () => allBonuses.filter((b) => !b.triggerProductName && !b.triggerProductId),
+    [allBonuses]
+  );
+
   if (!sale) return null;
 
   const ticketHeaderUri = ticketSettings?.headerImageUri
@@ -76,32 +100,6 @@ export default function SaleReceipt({ sale, bonuses = [], ticketSettings, usersB
     month: "numeric",
     year: "numeric",
   })}, ${saleDate.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}`;
-
-  // Mergeamos bonificaciones sin duplicados
-  const saleBonuses = useMemo(
-    () => (Array.isArray(sale?.bonuses) ? sale.bonuses : []),
-    [sale]
-  );
-  const allBonuses = useMemo(() => {
-    const seen = new Set();
-    return [...saleBonuses, ...bonuses].filter((b) => {
-      const key = `${b.productName || b.name}_${b.quantity}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [saleBonuses, bonuses]);
-
-  // Bonificaciones sin ítem padre identificado (se listan al final)
-  const orphanBonuses = useMemo(
-    () =>
-      allBonuses.filter(
-        (b) =>
-          !b.triggerProductName &&
-          !b.triggerProductId
-      ),
-    [allBonuses]
-  );
 
   // ── Totales desde el documento (ya incluyen todos los descuentos aplicados) ──────
   // sale.total = sum(item.total) = sum(qty × unitPrice − manualDiscount)

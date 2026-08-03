@@ -1,6 +1,8 @@
-import React, { useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, Animated, StatusBar } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, ActivityIndicator, Animated, StatusBar, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import firestore from '@react-native-firebase/firestore';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useDashboardStats } from './hooks/useDashboardStats';
@@ -16,8 +18,8 @@ const MODULE_GROUPS_BY_ROLE = {
   admin: [
     { label: 'Ventas', keys: ['pre-sale', 'products-new'] },
     { label: 'Clientes y Créditos', keys: ['customers', 'credits'] },
-    { label: 'Operaciones', keys: ['routes', 'prepare-presales', 'returns', 'my-deliveries'] },
-    { label: 'Administración', keys: ['reports', 'users', 'settings'] },
+    { label: 'Operaciones', keys: ['routes', 'prepare-presales', 'returns', 'my-deliveries', 'staff-purchase'] },
+    { label: 'Administración', keys: ['reports', 'users', 'payroll', 'settings'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   vendedor: [
@@ -26,12 +28,13 @@ const MODULE_GROUPS_BY_ROLE = {
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   bodeguero: [
-    { label: 'Almacén', keys: ['prepare-presales', 'returns', 'products-new'] },
+    { label: 'Almacén', keys: ['prepare-presales', 'returns', 'products-new', 'staff-purchase'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   entregador: [
-    { label: 'Mis Entregas', keys: ['my-deliveries'] },
-    { label: 'Otros', keys: ['credits', 'settings'] },
+    { label: 'Mis Entregas', keys: ['my-deliveries', 'returns'] },
+    { label: 'Consulta', keys: ['customers', 'credits'] },
+    { label: 'Otros', keys: ['settings'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
 };
@@ -42,12 +45,53 @@ const STAT_KEYS_BY_ROLE = {
 };
 
 export default function DashboardScreen({ user, role, navigation }) {
-  const { stats, loading } = useDashboardStats(role, user);
+  const { stats, loading, refreshing, refresh } = useDashboardStats(role, user);
   const insets = useSafeAreaInsets();
   const { selectedRoute } = useRoute();
   const [userProfile, setUserProfile] = useState(null);
 
   const scrollY = useRef(new Animated.Value(0)).current;
+
+  // Las tarjetas se calculan con agregados de servidor (count/sum), que son
+  // consultas puntuales y no suscripciones: sin un disparador explícito los
+  // números se quedarían congelados desde que se montó la pantalla.
+  //
+  // Al volver el foco: se entra al tablero justo después de cobrar o despachar,
+  // que es cuando los números cambiaron. El pull-to-refresh de abajo permite
+  // forzarlo sin salir y entrar.
+  //
+  // `refreshing` lo expone el hook (no es estado local) porque quien sabe cuándo
+  // terminaron los agregados es el hook; con un flag local el indicador se
+  // apagaría apenas se dispara la consulta, no cuando llegan los datos.
+  // Se salta el primer foco: el hook ya calcula al montarse, y refrescar ahí
+  // dispararía la segunda tanda de agregados sin que nada haya cambiado.
+  const skipFirstFocus = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (skipFirstFocus.current) {
+        skipFirstFocus.current = false;
+        return;
+      }
+      refresh();
+    }, [refresh])
+  );
+
+  // El saludo se arma con el doc de `users`, no con el displayName de Auth (que
+  // no está seteado en todas las cuentas y hacía caer el nombre al inicio del correo).
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    const unsubscribe = firestore()
+      .collection('users')
+      .doc(user.uid)
+      .onSnapshot(
+        (snap) => setUserProfile(snap?.exists() ? snap.data() : null),
+        (error) => {
+          console.error('[Dashboard] perfil de usuario:', error);
+          setUserProfile(null);
+        }
+      );
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   const firstName = (userProfile?.nombre || user?.nombre || user?.name || user?.displayName || user?.email?.split('@')?.[0] || 'Usuario').trim();
   const lastName = (userProfile?.apellido || user?.apellido || '').trim();
@@ -77,15 +121,18 @@ export default function DashboardScreen({ user, role, navigation }) {
     const allModules = [
       { key: 'products-new', label: 'Inventario', icon: 'cube-outline', color: '#007AFF', screen: 'ProductsStack', roles: ['admin', 'vendedor', 'bodeguero'] },
       { key: 'pre-sale', label: 'Pre-Venta', icon: 'cart-outline', color: '#4CAF50', screen: 'PreSales', roles: ['admin', 'vendedor'] },
-      { key: 'customers', label: 'Clientes', icon: 'person-sharp', color: '#FF9500', screen: 'Customer', roles: ['admin', 'vendedor'] },
+      // El entregador entra en modo consulta (sin crear/editar/eliminar).
+      { key: 'customers', label: 'Clientes', icon: 'person-sharp', color: '#FF9500', screen: 'Customer', roles: ['admin', 'vendedor', 'entregador'] },
       { key: 'credits', label: 'Créditos', icon: 'card-outline', color: '#FF3B30', screen: 'Credits', roles: ['admin', 'vendedor', 'entregador'] },
       { key: 'reports', label: 'Reportes', icon: 'bar-chart-outline', color: '#5856D6', screen: 'Reports', roles: ['admin'] },
       { key: 'users', label: 'Usuarios', icon: 'people-outline', color: '#34C759', screen: 'Register', roles: ['admin'] },
       { key: 'settings', label: 'Configuración', icon: 'settings-outline', color: '#8E8E93', screen: 'Settings', roles: ['admin', 'entregador'] },
       { key: 'routes', label: 'Rutas', icon: 'location-outline', color: '#E91E63', screen: 'Routes', roles: ['admin'] },
       { key: 'prepare-presales', label: 'Preparar Pre-Ventas', icon: 'file-tray-stacked-outline', color: '#F2C94C', screen: 'PreparePreSales', roles: ['admin', 'bodeguero'] },
-      { key: 'returns', label: 'Devoluciones', icon: 'return-up-back-outline', color: '#E67E22', screen: 'Returns', roles: ['admin', 'bodeguero'] },
+      { key: 'returns', label: 'Devoluciones', icon: 'return-up-back-outline', color: '#E67E22', screen: 'Returns', roles: ['admin', 'bodeguero', 'entregador'] },
       { key: 'my-deliveries', label: 'Mis Entregas', icon: 'bicycle-outline', color: '#2DCE89', screen: 'MyDeliveries', roles: ['admin', 'entregador'] },
+      { key: 'payroll', label: 'Nómina', icon: 'wallet-outline', color: '#007AFF', screen: 'Payroll', roles: ['admin'] },
+      { key: 'staff-purchase', label: 'Entrega a Personal', icon: 'bag-handle-outline', color: '#5856D6', screen: 'StaffPurchase', roles: ['admin', 'bodeguero'] },
       { key: 'profile', label: 'Mi Perfil', icon: 'person-circle-outline', color: '#5AC8FA', screen: 'Profile', roles: ['admin', 'vendedor', 'bodeguero', 'entregador', 'user'] },
     ];
 
@@ -132,6 +179,15 @@ export default function DashboardScreen({ user, role, navigation }) {
         )}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refresh}
+            colors={['#007AFF']}
+            tintColor="#007AFF"
+            progressViewOffset={insets.top + NAV_BAR_HEIGHT}
+          />
+        }
       >
         <View style={styles.largeTitleBlock}>
           <Text style={styles.largeTitleGreeting}>Hola, {displayName} 👋</Text>

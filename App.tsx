@@ -6,7 +6,6 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
-import appCheck from '@react-native-firebase/app-check'; // Importar App Check
 
 import LoginScreen from './android/app/src/screens/LoginScreen';
 import Sidebar from './android/app/src/components/Sidebar';
@@ -17,6 +16,7 @@ import UsersStack from './android/app/src/screens/users/UsersStack';
 import SalesScreen from './android/app/src/screens/sales/SalesScreen';
 import CustomersScreen from './android/app/src/screens/customer/CustomerListScreen';
 import CustomerFormModal from './android/app/src/screens/customer/CustomerFormModal';
+import CustomerDetailScreen from './android/app/src/screens/customer/CustomerDetailScreen';
 import DashboardScreen from './android/app/src/screens/dashboard/DashboardScreen';
 import ProductList from './android/app/src/screens/ProductList';
 import CreditsScreen from './android/app/src/screens/credits/screens/CreditsScreen';
@@ -36,10 +36,18 @@ import WarehouseDashboardScreen from './android/app/src/screens/Warehouse/screen
 import WarehouseOrderDetailScreen from './android/app/src/screens/Warehouse/screens/WarehouseOrderDetailScreen';
 import ProductHandoverScreen from './android/app/src/screens/Warehouse/screens/ProductHandoverScreen';
 import MyDeliveriesScreen from './android/app/src/screens/Warehouse/screens/MyDeliveriesScreen';
+import HandoverHistoryScreen from './android/app/src/screens/Warehouse/screens/HandoverHistoryScreen';
 import ReturnsScreen from './android/app/src/screens/returns/ReturnsScreen';
 import DeliveryPaymentScreen from './android/app/src/screens/Warehouse/screens/DeliveryPaymentScreen';
 import DeliveryDoneScreen from './android/app/src/screens/Warehouse/screens/DeliveryDoneScreen';
 // ------------------------------------
+
+// --- PAYROLL / NÓMINA ---
+import PayrollScreen from './android/app/src/screens/payroll/screens/PayrollScreen';
+import StaffAccountScreen from './android/app/src/screens/payroll/screens/StaffAccountScreen';
+import PayrollHistoryScreen from './android/app/src/screens/payroll/screens/PayrollHistoryScreen';
+import StaffPurchaseScreen from './android/app/src/screens/payroll/screens/StaffPurchaseScreen';
+// ------------------------
 
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
 import ProductsStack from './android/app/src/navigation/ProductsStack';
@@ -75,8 +83,11 @@ const CustomersScreenAny = CustomersScreen as React.ComponentType<any>;
 const CreditsScreenAny = CreditsScreen as React.ComponentType<any>;
 const CreditsHistoryScreenAny = CreditsHistoryScreen as React.ComponentType<any>;
 const MyDeliveriesScreenAny = MyDeliveriesScreen as React.ComponentType<any>;
+const HandoverHistoryScreenAny = HandoverHistoryScreen as React.ComponentType<any>;
 const ReturnsScreenAny = ReturnsScreen as React.ComponentType<any>;
 const WarehouseDashboardScreenAny = WarehouseDashboardScreen as React.ComponentType<any>;
+const PayrollScreenAny = PayrollScreen as React.ComponentType<any>;
+const StaffPurchaseScreenAny = StaffPurchaseScreen as React.ComponentType<any>;
 
 function AppDrawer({ route, navigation }: any) {
   const { role, user, screen } = route?.params || {};
@@ -238,6 +249,10 @@ function AppDrawer({ route, navigation }: any) {
         options={{ title: "Entregar Carga" }}
       />
 
+      <Drawer.Screen name="HandoverHistory" options={{ title: "Historial de Entregas" }}>
+        {(props) => <HandoverHistoryScreenAny {...props} user={user} role={role} />}
+      </Drawer.Screen>
+
       <Drawer.Screen name="MyDeliveries">
         {(props) => <MyDeliveriesScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
@@ -266,6 +281,24 @@ function AppDrawer({ route, navigation }: any) {
             }}
         initialParams={{ role, user }}
 	  />
+
+      {/* PAYROLL MODULE — salarios, adelantos y deducciones */}
+      <Drawer.Screen name="Payroll" options={{ headerShown: false, drawerLabel: 'Nómina' }}>
+        {(props) => <PayrollScreenAny {...props} user={user} role={role} />}
+      </Drawer.Screen>
+      <Drawer.Screen
+        name="StaffAccount"
+        component={StaffAccountScreen}
+        options={{ headerShown: false, drawerItemStyle: { display: 'none' } }}
+      />
+      <Drawer.Screen
+        name="PayrollHistory"
+        component={PayrollHistoryScreen}
+        options={{ headerShown: false, drawerItemStyle: { display: 'none' } }}
+      />
+      <Drawer.Screen name="StaffPurchase" options={{ headerShown: false, drawerLabel: 'Entrega a Personal' }}>
+        {(props) => <StaffPurchaseScreenAny {...props} user={user} role={role} />}
+      </Drawer.Screen>
 
       {/* ROUTES MODULE */}
       <Drawer.Screen
@@ -337,36 +370,9 @@ export default function App() {
     checkUpdates();
   }, []);
 
-  // Inicializar App Check con proveedor de depuración
-  useEffect(() => {
-    const initAppCheck = async () => {
-      try {
-        // En desarrollo usamos el proveedor de depuración.
-        // En producción se usaría 'playIntegrity' en Android.
-        const provider = appCheck().newReactNativeFirebaseAppCheckProvider();
-
-        provider.configure({
-          android: {
-            provider: __DEV__ ? 'debug' : 'playIntegrity',
-          },
-          apple: {
-            provider: __DEV__ ? 'debug' : 'appAttestWithDeviceCheckFallback',
-          },
-        });
-
-        await appCheck().initializeAppCheck({
-          provider: provider,
-          isTokenAutoRefreshEnabled: true,
-        });
-
-        console.log('App Check initialized');
-      } catch (error) {
-        console.log('App Check init error:', error);
-      }
-    };
-
-    initAppCheck();
-  }, []);
+  // App Check se inicializa una sola vez en index.js, antes de que se monte la app.
+  // Re-inicializarlo aquí (en un useEffect, ya con pantallas montadas) creaba un
+  // segundo proveedor y podía pisar el token del primero.
 
   useSessionTimeout(() => {
       // Callback cuando expira la sesión
@@ -407,6 +413,7 @@ export default function App() {
                     <Stack.Screen name="RouteSelection" component={RouteSelectionScreen} />
                     <Stack.Screen name="AppDrawer" component={AppDrawer} />
                     <Stack.Screen name="CustomerForm" component={CustomerFormModal} />
+                    <Stack.Screen name="CustomerDetail" component={CustomerDetailScreen} />
                     {/* Pantallas globales accesibles desde Settings */}
                     <Stack.Screen name="PrintersScreen" component={PrintersScreen} />
                     <Stack.Screen name="TicketCustomizationScreen" component={TicketCustomizationScreen} />

@@ -57,7 +57,9 @@ export const getSavedAccounts = async () => {
   }
 };
 
-export const saveAccount = async (user, password, role) => {
+// `displayName` viene del perfil de Firestore (nombre + apellido). El displayName
+// de Auth solo está seteado en algunas cuentas, por eso queda como último recurso.
+export const saveAccount = async (user, password, role, displayName = null) => {
   try {
     const currentAccounts = await getSavedAccounts();
 
@@ -67,7 +69,7 @@ export const saveAccount = async (user, password, role) => {
     const newAccount = {
       uid: user.uid,
       email: user.email,
-      displayName: user.displayName || user.email.split('@')[0],
+      displayName: displayName || user.displayName || user.email.split('@')[0],
       role: role || 'user',
       password,
       lastLogin: new Date().toISOString(),

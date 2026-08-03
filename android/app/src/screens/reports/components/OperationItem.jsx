@@ -14,6 +14,7 @@ const OperationItem = ({ item, onPress }) => {
           credit_pending: 'Crédito pendiente',
           credit_preparing: 'Crédito en preparación',
           credit_ready_for_delivery: 'Crédito listo para entregar',
+          credit_dispatched: 'Crédito por cobrar',
         };
         const statusLabel = statusLabels[item.status] || item.status || '';
         const customer = item.customerName || 'Cliente';

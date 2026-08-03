@@ -5,11 +5,14 @@ import {
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useUsersMonitor } from '../hooks/useReportsData';
 
+// Los cuatro roles reales del sistema (ver firestore.rules y AuthContext).
+// Antes esta tabla listaba `manager`/`cashier`/`delivery`, que no existen en la
+// app: todo vendedor, entregador y bodeguero caía en el genérico "Usuario".
 const ROLE_CONFIG = {
   admin:      { label: 'Admin',      color: '#7C3AED', bg: '#EDE9FE', icon: 'shield-checkmark' },
-  manager:    { label: 'Gerente',    color: '#0369A1', bg: '#E0F2FE', icon: 'briefcase' },
-  cashier:    { label: 'Cajero',     color: '#059669', bg: '#ECFDF5', icon: 'cash' },
-  delivery:   { label: 'Entregador', color: '#D97706', bg: '#FEF3C7', icon: 'bicycle' },
+  vendedor:   { label: 'Vendedor',   color: '#0369A1', bg: '#E0F2FE', icon: 'cart' },
+  entregador: { label: 'Entregador', color: '#D97706', bg: '#FEF3C7', icon: 'bicycle' },
+  bodeguero:  { label: 'Bodeguero',  color: '#059669', bg: '#ECFDF5', icon: 'cube' },
   user:       { label: 'Usuario',    color: '#6B7280', bg: '#F3F4F6', icon: 'person' },
 };
 
@@ -102,8 +105,8 @@ function UserCard({ user, rank }) {
   );
 }
 
-export default function UsersMonitorPanel({ dateFrom, dateTo }) {
-  const { usersWithStats, loadingUsers } = useUsersMonitor(dateFrom, dateTo);
+export default function UsersMonitorPanel({ dateFrom, dateTo, refreshKey = 0 }) {
+  const { usersWithStats, loadingUsers } = useUsersMonitor(dateFrom, dateTo, refreshKey);
 
   if (loadingUsers) {
     return (

@@ -37,43 +37,58 @@ export const loginUser = async (email, password) => {
   }
 };
 
-// 🔹 Obtener rol del usuario desde Firestore (Robustecido)
-export const getUserRole = async (uid, email = null) => {
+// 🔹 Perfil del usuario desde Firestore (Robustecido)
+// El doc de `users` es la fuente de verdad del nombre: el displayName de Auth
+// solo está seteado en algunas cuentas, por eso no se usa para mostrar nombres.
+export const getUserProfile = async (uid, email = null) => {
   try {
-    console.log(`🔍 Intentando obtener rol para UID: ${uid}`);
-
     // 1. Intento principal: Buscar por ID del documento
     const docSnap = await firestore().collection('users').doc(uid).get();
-
-    if (docSnap.exists) {
-      const data = docSnap.data();
-      if (data && data.role) {
-        console.log('✅ Rol encontrado por UID:', data.role);
-        return data.role;
-      }
+    if (docSnap.exists()) {
+      return { uid, ...docSnap.data() };
     }
 
     // 2. Intento secundario: Si falló por UID y tenemos email, buscar por email
     if (email) {
-        console.log(`⚠️ No se encontró por UID, buscando por email: ${email}`);
-        const querySnap = await firestore().collection('users').where('email', '==', email).limit(1).get();
-
-        if (!querySnap.empty) {
-            const userDoc = querySnap.docs[0];
-            const data = userDoc.data();
-            if (data && data.role) {
-                console.log('✅ Rol encontrado por Email:', data.role);
-                return data.role;
-            }
-        }
+      console.log('⚠️ No se encontró perfil por UID, buscando por email');
+      const querySnap = await firestore().collection('users').where('email', '==', email).limit(1).get();
+      if (!querySnap.empty) {
+        const userDoc = querySnap.docs[0];
+        return { uid: userDoc.id, ...userDoc.data() };
+      }
     }
 
-    console.log('⚠️ No se encontró documento de usuario o campo rol. Asignando "user".');
-    return 'user';
+    console.log('⚠️ No se encontró documento de usuario.');
+    return null;
   } catch (error) {
-    console.log('🔥 Error obteniendo rol:', error);
-    return 'user';
+    console.log('🔥 Error obteniendo perfil:', error);
+    return null;
   }
+};
+
+// 🔹 Nombre completo para mostrar. Sin nombre en Firestore, cae al inicio del correo.
+export const getDisplayName = (profile, email = null) => {
+  const fullName = [profile?.nombre, profile?.apellido]
+    .map((part) => (part || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  if (fullName) return fullName;
+  return email ? String(email).split('@')[0] : '';
+};
+
+// 🔹 Obtener rol del usuario
+// Para el usuario autenticado el rol sale del custom claim del token (sin lectura
+// a Firestore). Para cualquier otro uid, o si el claim aún no está puesto, se cae
+// al perfil como antes. Ver syncUserRoleClaim / syncAllRoleClaims en functions/.
+export const getUserRole = async (uid, email = null) => {
+  const currentUser = auth().currentUser;
+  if (currentUser && currentUser.uid === uid) {
+    const { claims } = await currentUser.getIdTokenResult();
+    if (claims.role) return claims.role;
+  }
+
+  const profile = await getUserProfile(uid, email);
+  return profile?.role || 'user';
 };
 
 // 🔹 Obtener lista de usuarios por rol
@@ -105,7 +120,7 @@ export const updateVerificationStatus = async (uid) => {
     const userRef = firestore().collection('users').doc(uid);
     const docSnap = await userRef.get();
 
-    if (docSnap.exists) {
+    if (docSnap.exists()) {
       const userData = docSnap.data();
 
       if (userData && !userData.verified) {

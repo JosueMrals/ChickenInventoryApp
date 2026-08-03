@@ -6,10 +6,12 @@ import {
   TextInput,
   Alert,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import styles from "./styles/quickPaymentStyles";
 import { registerQuickSaleFull } from "./services/quickSaleService";
+import { useSubmitLock } from "../../hooks/useSubmitLock";
 
 
 export default function QuickSalePaymentScreen({ navigation, route }) {
@@ -28,6 +30,7 @@ export default function QuickSalePaymentScreen({ navigation, route }) {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [amountPaid, setAmountPaid] = useState("");
   const [tip, setTip] = useState("");
+  const { submitting, runLocked } = useSubmitLock();
 
   // 🔹 Calcular cambio
   const change = useMemo(() => {
@@ -50,6 +53,7 @@ export default function QuickSalePaymentScreen({ navigation, route }) {
   }, [paymentMethod]);
 
   // 🔹 Validar y procesar pago
+  // Bloqueado contra doble toque: sin esto, dos taps rápidos registraban DOS ventas.
   const handlePay = () => {
     const paid = parseFloat(amountPaid || 0);
 
@@ -62,35 +66,29 @@ export default function QuickSalePaymentScreen({ navigation, route }) {
       return;
     }
 
-    const sale = {
-      items: cart,
-      subtotal,
-      discount,
-      total,
-      tip: parseFloat(tip || 0),
-      paymentMethod,
-      amountPaid: paid,
-      change,
-      customer: customer ?? { name: "Venta rápida" },
-      date: new Date(),
-    };
-
-    registerQuickSaleFull({
-      cart,
-      subtotal,
-      total,
-      tip,
-      paymentMethod,
-      amountPaid: paid,
-      change,
-      customer
-    })
-    .then((id) => {
-      navigation.replace("QuickSaleDone", { saleId: id });
-    })
-    .catch((e) => {
-      Alert.alert("Error", "No se pudo registrar la venta");
-    });
+    return runLocked(
+      async () => {
+        try {
+          const id = await registerQuickSaleFull({
+            cart,
+            subtotal,
+            total,
+            tip,
+            paymentMethod,
+            amountPaid: paid,
+            change,
+            customer,
+          });
+          navigation.replace("QuickSaleDone", { saleId: id });
+        } catch (e) {
+          Alert.alert("Error", "No se pudo registrar la venta");
+          throw e;   // libera el cerrojo para poder reintentar
+        }
+      },
+      // La venta ya quedó registrada y se navega a la pantalla final: el botón
+      // no debe reactivarse durante la transición.
+      { keepLockedOnSuccess: true },
+    ).catch(() => {});
   };
 
   return (
@@ -178,11 +176,14 @@ export default function QuickSalePaymentScreen({ navigation, route }) {
 
       {/* BOTÓN DE PAGO */}
       <TouchableOpacity
-        style={styles.payButton}
+        style={[styles.payButton, submitting && { opacity: 0.6 }]}
         onPress={handlePay}
         activeOpacity={0.8}
+        disabled={submitting}
       >
-        <Text style={styles.payButtonText}>{paymentText}</Text>
+        {submitting
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={styles.payButtonText}>{paymentText}</Text>}
       </TouchableOpacity>
     </View>
   );

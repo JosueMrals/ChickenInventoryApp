@@ -38,10 +38,12 @@ describe('CustomerCard', () => {
       <CustomerCard customer={baseCustomer} role="admin" onViewHistory={jest.fn()} />,
     );
     expect(getByText('Juan Pérez')).toBeTruthy();
-    expect(getByText('Tel: 555-1234')).toBeTruthy();
-    expect(getByText('Cédula: 001-123456-0001A')).toBeTruthy();
-    expect(getByText('Dir: Managua')).toBeTruthy();
-    expect(getByText('Crédito: C$5000.00')).toBeTruthy();
+    // Teléfono y cédula comparten una línea: "555-1234  •  001-123456-0001A"
+    expect(getByText(/555-1234/)).toBeTruthy();
+    expect(getByText(/001-123456-0001A/)).toBeTruthy();
+    // Dirección y crédito se muestran como chips
+    expect(getByText('Managua')).toBeTruthy();
+    expect(getByText('C$5000.00')).toBeTruthy();
   });
 
   it('muestra badge de tipo y descuento', () => {
@@ -108,13 +110,13 @@ describe('CustomerCard', () => {
 
   it('muestra valores por defecto cuando faltan datos', () => {
     const c = { id: 'c2' };
-    const { getByText } = render(
+    const { getByText, queryByText } = render(
       <CustomerCard customer={c} role="user" onViewHistory={jest.fn()} />,
     );
-    expect(getByText('Tel: -')).toBeTruthy();
-    expect(getByText('Sin cédula')).toBeTruthy();
-    expect(getByText('Dir: -')).toBeTruthy();
-    expect(getByText('Crédito: C$0.00')).toBeTruthy();
+    expect(getByText('Sin teléfono')).toBeTruthy();
+    expect(queryByText(/•/)).toBeNull(); // sin cédula no se agrega el separador
+    expect(getByText('Común')).toBeTruthy();
+    expect(getByText('C$0.00')).toBeTruthy();
   });
 });
 

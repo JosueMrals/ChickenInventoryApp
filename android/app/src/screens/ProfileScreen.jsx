@@ -90,7 +90,7 @@ export default function ProfileScreen({ route, navigation }) {
       .doc(user.uid)
       .onSnapshot(
         (docSnap) => {
-          if (docSnap.exists) {
+          if (docSnap.exists()) {
             const data = docSnap.data();
             setProfileData(data);
             if (!editingRef.current) {

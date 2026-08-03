@@ -29,8 +29,8 @@ Run from the repository root (one level up from here) unless noted:
 npm install                # install JS deps
 npm start                  # metro bundler (--reset-cache)
 npm run android             # build + run on device/emulator
-npm run lint                 # eslint .
-npx jest                     # run tests — npm test is stubbed to a no-op echo, use jest directly
+npm run lint                 # eslint . (flat config: eslint.config.js)
+npm test                     # run tests (jest)
 npx jest path/to.test.js     # run a single test file
 ```
 

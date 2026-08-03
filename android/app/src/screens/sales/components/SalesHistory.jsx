@@ -1,5 +1,5 @@
 // sales/components/SalesHistory.jsx
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,49 +11,54 @@ import firestore from '@react-native-firebase/firestore';
 import auth from '@react-native-firebase/auth';
 import SaleReceipt from './SaleReceipt';
 
+// Techo de filas traídas por periodo. La pantalla es una lista consultable, no un
+// reporte: para totales históricos está el módulo de reportes.
+const MAX_SALES = 200;
+
 export default function SalesHistory({ role }) {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterPeriod, setFilterPeriod] = useState('today');
   const [selectedSale, setSelectedSale] = useState(null);
 
+  // El rango del filtro va en el query, no en un useMemo sobre los resultados:
+  // antes se transfería la colección `sales` COMPLETA en vivo para mostrar,
+  // por defecto, solo las de hoy — y el costo crecía con cada venta histórica.
   useEffect(() => {
-    const unsubscribe = firestore()
-      .collection('sales')
-      .orderBy('createdAt', 'desc')
-      .onSnapshot((snapshot) => {
-        const data = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setSales(data);
-        setLoading(false);
-      });
+    setLoading(true);
 
-    return () => unsubscribe();
-  }, []);
-
-  const filteredSales = useMemo(() => {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - now.getDay());
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    startOfWeek.setHours(0, 0, 0, 0);
 
-    return sales.filter((s) => {
-      const saleDate = new Date(s.createdAt?.seconds * 1000);
-      switch (filterPeriod) {
-        case 'today':
-          return saleDate >= startOfDay;
-        case 'week':
-          return saleDate >= startOfWeek;
-        case 'month':
-          return saleDate >= startOfMonth;
-        default:
-          return true;
+    const periodStart = {
+      today: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+      week: startOfWeek,
+      month: new Date(now.getFullYear(), now.getMonth(), 1),
+    }[filterPeriod]; // 'all' → undefined, sin cota inferior
+
+    let query = firestore().collection('sales').orderBy('createdAt', 'desc');
+    if (periodStart) {
+      query = query.where('createdAt', '>=', periodStart);
+    }
+
+    // Incluso "Todo" se acota: es una colección que solo crece y la pantalla
+    // muestra una lista, no un reporte.
+    const unsubscribe = query.limit(MAX_SALES).onSnapshot(
+      (snapshot) => {
+        setSales(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+        setLoading(false);
+      },
+      (error) => {
+        console.error('[SalesHistory] snapshot:', error);
+        setSales([]);
+        setLoading(false);
       }
-    });
-  }, [sales, filterPeriod]);
+    );
+
+    return () => unsubscribe();
+  }, [filterPeriod]);
 
   if (loading)
     return (
@@ -98,7 +103,7 @@ export default function SalesHistory({ role }) {
 
       {/* Lista de ventas */}
       <FlatList
-        data={filteredSales}
+        data={sales}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 10 }}
         renderItem={({ item }) => (

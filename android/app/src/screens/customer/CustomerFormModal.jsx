@@ -11,6 +11,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import * as customersService from '../../services/customersService';
 import globalStyles from '../../styles/globalStyles';
 import { useAdaptiveBottom } from '../../hooks/useAdaptiveBottom';
+import { getEffectiveCreditLimit } from '../../utils/creditUtils';
 import { uploadCustomerPhoto, deleteCustomerPhoto } from './services/customerPhotosService';
 import PhotoGallery from './components/PhotoGallery';
 import ls from './styles/customerFormStyles';
@@ -115,6 +116,7 @@ export default function CustomerFormModal({ navigation, route }) {
   const [form, setForm] = useState({
     firstName: '', lastName: '', phone: '', address: '',
     cedula: '', creditLimit: '', type: 'Común', discount: '', photos: [],
+    creditOverdraftType: 'none', creditOverdraftValue: '',
   });
   const [errors, setErrors] = useState({});
   const [loadingCustomer, setLoadingCustomer] = useState(false);
@@ -133,7 +135,7 @@ export default function CustomerFormModal({ navigation, route }) {
 
   const applyCustomerToForm = (value) => {
     if (!value) {
-      setForm({ firstName: '', lastName: '', phone: '', address: '', cedula: '', creditLimit: '', type: 'Común', discount: '', photos: [] });
+      setForm({ firstName: '', lastName: '', phone: '', address: '', cedula: '', creditLimit: '', type: 'Común', discount: '', photos: [], creditOverdraftType: 'none', creditOverdraftValue: '' });
       return;
     }
     setForm({
@@ -144,6 +146,9 @@ export default function CustomerFormModal({ navigation, route }) {
       type: value.type || 'Común',
       discount: value.discount != null ? String(value.discount) : '',
       photos: Array.isArray(value.photos) ? value.photos : [],
+      creditOverdraftType: value.creditOverdraftType || 'none',
+      creditOverdraftValue: value.creditOverdraftValue != null && value.creditOverdraftValue !== 0
+        ? String(value.creditOverdraftValue) : '',
     });
   };
 
@@ -186,13 +191,20 @@ export default function CustomerFormModal({ navigation, route }) {
       if (parseFloat(form.discount || 0) !== (customer.discount ?? 0)) {
         Alert.alert('No autorizado', 'Solo admin puede cambiar el descuento.'); return;
       }
+      if (form.creditOverdraftType !== (customer.creditOverdraftType || 'none')
+        || parseFloat(form.creditOverdraftValue || 0) !== (customer.creditOverdraftValue ?? 0)) {
+        Alert.alert('No autorizado', 'Solo admin puede cambiar el sobregiro de crédito.'); return;
+      }
     }
 
+    const overdraftValue = form.creditOverdraftType === 'none' ? 0 : (parseFloat(form.creditOverdraftValue) || 0);
     const payload = {
       firstName: form.firstName.trim(), lastName: form.lastName.trim(),
       phone: form.phone.trim(), address: form.address.trim(),
       cedula: form.cedula.trim(),
       creditLimit: parseFloat(form.creditLimit) || 0,
+      creditOverdraftType: overdraftValue > 0 ? form.creditOverdraftType : 'none',
+      creditOverdraftValue: overdraftValue,
       type: form.type, discount: parseFloat(form.discount) || 0,
     };
 
@@ -338,6 +350,48 @@ export default function CustomerFormModal({ navigation, route }) {
             <View style={{ width: 8 }} />
             <Field icon="cash" label="Límite de crédito" value={String(form.creditLimit)} onChangeText={set('creditLimit')} placeholder="0.00" keyboard="numeric" editable={canEditSensitive} half />
           </View>
+
+          {/* Sobregiro: crédito extra sobre el límite, porcentual o monto fijo. */}
+          <Text style={[ls.sectionTitle, { marginTop: 12, marginBottom: 8 }]}>Sobregiro de crédito</Text>
+          <View style={ls.typesRow}>
+            {[
+              { key: 'none', label: 'Sin sobregiro' },
+              { key: 'percent', label: '% del límite' },
+              { key: 'fixed', label: 'Monto fijo' },
+            ].map(({ key, label }) => {
+              const active = form.creditOverdraftType === key;
+              return (
+                <ClayPressable
+                  key={key}
+                  onPress={() => canEditSensitive && set('creditOverdraftType')(key)}
+                  style={[ls.typeChip, active && ls.typeChipActive, !canEditSensitive && { opacity: 0.6 }]}
+                >
+                  <Icon name={active ? 'check-circle' : 'circle-outline'} size={16} color={active ? '#fff' : '#9A93AA'} />
+                  <Text style={[ls.typeChipText, active && ls.typeChipTextActive]}>{label}</Text>
+                </ClayPressable>
+              );
+            })}
+          </View>
+          {form.creditOverdraftType !== 'none' && (
+            <Field
+              icon={form.creditOverdraftType === 'percent' ? 'percent' : 'cash-plus'}
+              label={form.creditOverdraftType === 'percent' ? 'Sobregiro (% del límite)' : 'Sobregiro (monto C$)'}
+              value={String(form.creditOverdraftValue)}
+              onChangeText={set('creditOverdraftValue')}
+              placeholder="0"
+              keyboard="numeric"
+              editable={canEditSensitive}
+            />
+          )}
+          {form.creditOverdraftType !== 'none' && (
+            <Text style={ls.hintText}>
+              Crédito total permitido: C${getEffectiveCreditLimit({
+                creditLimit: parseFloat(form.creditLimit) || 0,
+                creditOverdraftType: form.creditOverdraftType,
+                creditOverdraftValue: parseFloat(form.creditOverdraftValue) || 0,
+              }).total.toFixed(2)}
+            </Text>
+          )}
         </View>
 
         {/* ── Fotos ── */}

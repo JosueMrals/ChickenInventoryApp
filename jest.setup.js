@@ -1,5 +1,10 @@
 import 'react-native-gesture-handler/jestSetup';
 
+// Mock oficial que publica la propia librería.
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
 jest.mock('react-native-encrypted-storage', () => ({
   getItem: jest.fn(),
   setItem: jest.fn(),
@@ -60,6 +65,86 @@ jest.mock('react-native-reanimated', () => {
     },
   };
 });
+
+// ── Hardware y módulos nativos: no existen bajo Jest ─────────────────────────
+jest.mock('react-native-bluetooth-classic', () => ({
+  __esModule: true,
+  default: {
+    isBluetoothEnabled: jest.fn().mockResolvedValue(false),
+    getBondedDevices: jest.fn().mockResolvedValue([]),
+    connectToDevice: jest.fn(),
+    onDeviceDisconnected: jest.fn(() => ({ remove: jest.fn() })),
+  },
+}));
+
+jest.mock('react-native-ble-plx', () => ({
+  BleManager: class {
+    destroy() {}
+    onStateChange() { return { remove: jest.fn() }; }
+    startDeviceScan() {}
+    stopDeviceScan() {}
+  },
+}));
+
+jest.mock('react-native-vision-camera', () => ({
+  Camera: () => null,
+  useCameraDevice: () => null,
+  useCameraPermission: () => ({ hasPermission: false, requestPermission: jest.fn() }),
+  useCodeScanner: () => ({}),
+}));
+
+jest.mock('@react-native-ml-kit/barcode-scanning', () => ({
+  __esModule: true,
+  default: { scan: jest.fn().mockResolvedValue([]) },
+}));
+
+jest.mock('react-native-view-shot', () => ({
+  __esModule: true,
+  default: () => null,
+  captureRef: jest.fn().mockResolvedValue('file://mock.png'),
+}));
+
+jest.mock('react-native-share', () => ({
+  __esModule: true,
+  default: { open: jest.fn().mockResolvedValue({}) },
+}));
+
+jest.mock('react-native-fs', () => ({
+  DocumentDirectoryPath: '/mock',
+  writeFile: jest.fn().mockResolvedValue(),
+  readFile: jest.fn().mockResolvedValue(''),
+  unlink: jest.fn().mockResolvedValue(),
+  exists: jest.fn().mockResolvedValue(false),
+}));
+
+jest.mock('react-native-print', () => ({
+  __esModule: true,
+  default: { print: jest.fn().mockResolvedValue() },
+}));
+
+jest.mock('react-native-html-to-pdf', () => ({
+  __esModule: true,
+  default: { convert: jest.fn().mockResolvedValue({ filePath: '/mock.pdf' }) },
+}));
+
+jest.mock('react-native-device-info', () => ({
+  __esModule: true,
+  default: {
+    getVersion: () => '1.0.0',
+    getBuildNumber: () => '1',
+    getUniqueId: () => Promise.resolve('mock-device'),
+  },
+}));
+
+jest.mock('@bam.tech/react-native-image-resizer', () => ({
+  __esModule: true,
+  default: { createResizedImage: jest.fn().mockResolvedValue({ uri: 'file://mock.jpg' }) },
+}));
+
+jest.mock('react-native-image-picker', () => ({
+  launchCamera: jest.fn().mockResolvedValue({ didCancel: true }),
+  launchImageLibrary: jest.fn().mockResolvedValue({ didCancel: true }),
+}));
 
 jest.mock('@react-native-firebase/app', () => ({
   __esModule: true,
@@ -134,6 +219,25 @@ jest.mock('@react-native-firebase/crashlytics', () => {
   return crashlytics;
 }, { virtual: true });
 
+jest.mock('@react-native-firebase/storage', () => {
+  const storage = () => ({
+    ref: () => ({
+      putFile: jest.fn().mockResolvedValue({}),
+      getDownloadURL: jest.fn().mockResolvedValue('https://mock/photo.jpg'),
+      delete: jest.fn().mockResolvedValue(),
+    }),
+  });
+  return storage;
+});
+
+jest.mock('@react-native-firebase/functions', () => {
+  const functions = () => ({
+    httpsCallable: () => jest.fn().mockResolvedValue({ data: {} }),
+    useEmulator: jest.fn(),
+  });
+  return functions;
+});
+
 jest.mock('@react-native-firebase/firestore', () => {
   const firestore = () => ({
     collection: () => ({
@@ -150,7 +254,10 @@ jest.mock('@react-native-firebase/firestore', () => {
       add: jest.fn(),
       get: jest.fn(),
     }),
+    // services/firebase.js configura la caché al importarse (ver index.js)
+    settings: jest.fn(),
   });
-  firestore.FieldValue = { serverTimestamp: jest.fn() };
+  firestore.FieldValue = { serverTimestamp: jest.fn(), increment: jest.fn() };
+  firestore.CACHE_SIZE_UNLIMITED = -1;
   return firestore;
 });

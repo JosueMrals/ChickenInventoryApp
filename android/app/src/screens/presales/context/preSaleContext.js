@@ -376,6 +376,7 @@ export function PreSaleProvider({ children }) {
         customer, cart: cartToSubmit, subtotal, totalDiscount, total,
         categoryDiscountTotal,
         paymentMethod,
+        creditDueDate: options.creditDueDate || null,
         route: editingPreSale?.route || selectedRoute || null,
         routeId: editingPreSale?.routeId || selectedRoute?.id || null
       };

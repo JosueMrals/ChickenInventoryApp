@@ -7,6 +7,7 @@ import auth from '@react-native-firebase/auth';
 import { getUsersByRole } from '../../../services/auth';
 import { warehouseStyles as globalStyles } from '../styles/warehouseStyles';
 import { groupItemsByProduct } from '../../../utils/warehouseUtils';
+import { TERMINAL_PRESALE_STATUSES } from '../../../services/preSaleService';
 import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
 
 export default function ProductHandoverScreen({ route, navigation }) {
@@ -104,27 +105,58 @@ export default function ProductHandoverScreen({ route, navigation }) {
         const currentUser = auth().currentUser;
 
         try {
-            const token = await currentUser.getIdToken(true);
-            const batch = firestore().batch();
+            await currentUser.getIdToken(true);
             const timestamp = firestore.Timestamp.now();
 
-            // We update each order in the batch
-            // Note: Firestore batches are limited to 500 operations.
-            // If readyOrders > 500, this simple approach will fail. Assuming < 500 for now.
+            // UNA transacción POR orden. Una sola transacción que leía TODAS las
+            // órdenes se abortaba en cuanto el listener en vivo tocaba cualquiera,
+            // y la entrega de carga fallaba entera. Transacciones de un documento
+            // aíslan la contención; cada relectura fresca evita re-despachar una
+            // orden ya cobrada/devuelta (guarda TERMINAL_PRESALE_STATUSES).
+            const results = await Promise.allSettled(
+                readyOrders.map(order => {
+                    const ref = firestore().collection('presales').doc(order.id);
+                    return firestore().runTransaction(async (tx) => {
+                        const snap = await tx.get(ref);
+                        if (!snap.exists()) return 'skipped';
+                        if (TERMINAL_PRESALE_STATUSES.has(snap.data()?.status)) return 'skipped';
+                        tx.update(ref, {
+                            status: 'dispatched',
+                            entregadorId: selectedEntregador.uid,
+                            dispatchedAt: timestamp,
+                            dispatchedBy: currentUser.uid,
+                            // Mismo timestamp que dispatchedAt: lo leen Mis Entregas y
+                            // el contador de "asignadas hoy" del panel de bodega, que
+                            // antes no veía las órdenes entregadas en carga masiva.
+                            fechaEntregaRepartidor: timestamp
+                        });
+                        return 'dispatched';
+                    });
+                })
+            );
 
-            readyOrders.forEach(order => {
-                const ref = firestore().collection('presales').doc(order.id);
-                batch.update(ref, {
-                    status: 'dispatched',
-                    entregadorId: selectedEntregador.uid,
-                    dispatchedAt: timestamp,
-                    dispatchedBy: currentUser.uid
-                });
+            let dispatched = 0;
+            let skipped = 0;
+            let failed = 0;
+            results.forEach((r) => {
+                if (r.status === 'rejected') { failed++; console.error('Error handover orden:', r.reason?.message || r.reason); }
+                else if (r.value === 'dispatched') dispatched++;
+                else skipped++;
             });
 
-            await batch.commit();
+            if (dispatched === 0 && failed > 0) {
+                Alert.alert('Error', 'No se pudo entregar la carga. Intenta nuevamente.');
+                return;
+            }
 
-            Alert.alert('Éxito', 'La carga ha sido entregada al repartidor correctamente.');
+            const notes = [];
+            if (skipped > 0) notes.push(`${skipped} ya cobradas o devueltas`);
+            if (failed > 0) notes.push(`${failed} con error (reintenta)`);
+            Alert.alert(
+                'Éxito',
+                `Se entregaron ${dispatched} orden(es) al repartidor.` +
+                    (notes.length ? ` Se omitieron: ${notes.join(', ')}.` : '')
+            );
             navigation.navigate('PreparePreSales');
         } catch (error) {
             console.error("Error en bulk handover:", error);

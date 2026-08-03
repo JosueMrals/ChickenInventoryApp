@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import {
-  View, Text, ScrollView, TextInput,
+  View, Text, ScrollView, FlatList, TextInput,
   TouchableOpacity, ActivityIndicator, StyleSheet, Dimensions,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
@@ -72,168 +72,142 @@ function TypeBadge({ type }) {
 }
 
 // ─── Tab: Top Clientes ────────────────────────────────────────────────────────
-function TopClientsTab({ clients, search }) {
-  const [sortBy, setSortBy] = useState("total"); // 'total' | 'count' | 'avg'
-  const maxTotal = clients[0]?.total || 1;
+// ─── Filas ────────────────────────────────────────────────────────────────────
+// Extraídas de los .map() que antes vivían dentro de un ScrollView: ahora son
+// filas de FlatList y van memoizadas, porque el panel entero se re-renderiza con
+// cada tecla del buscador y con cada cambio de orden o de filtro.
 
-  const sorted = useMemo(() => {
-    const filtered = search
-      ? clients.filter((c) => c.name?.toLowerCase().includes(search.toLowerCase()) || c.phone?.includes(search))
-      : clients;
-    if (sortBy === "count") return [...filtered].sort((a, b) => b.count    - a.count);
-    if (sortBy === "avg")   return [...filtered].sort((a, b) => b.avgTicket - a.avgTicket);
-    return [...filtered].sort((a, b) => b.total - a.total);
-  }, [clients, search, sortBy]);
-
-  if (!sorted.length) {
-    return (
-      <View style={cl.emptyBox}>
-        <Icon name="people-outline" size={40} color="#CBD5E1" />
-        <Text style={cl.emptyText}>Sin clientes con compras en este período</Text>
-      </View>
-    );
-  }
-
-  const maxVal = sortBy === "count" ? Math.max(...sorted.map((c) => c.count), 1)
-    : sortBy === "avg" ? Math.max(...sorted.map((c) => c.avgTicket), 1)
-    : maxTotal;
-
+const TopClientRow = React.memo(function TopClientRow({ client, index, ratio }) {
+  const color = avatarColor(client.id);
   return (
-    <>
-      {/* Ordenar */}
-      <View style={cl.sortRow}>
-        {[["total","Total gastado"],["count","# Compras"],["avg","Ticket prom."]].map(([k, l]) => (
-          <TouchableOpacity
-            key={k}
-            style={[cl.sortBtn, sortBy === k && cl.sortBtnActive]}
-            onPress={() => setSortBy(k)}
-            activeOpacity={0.8}
-          >
-            <Text style={[cl.sortBtnText, sortBy === k && cl.sortBtnTextActive]}>{l}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {sorted.map((client, i) => {
-        const color = avatarColor(client.id);
-        const ratio = sortBy === "count"
-          ? client.count    / Math.max(...sorted.map((c) => c.count), 1)
-          : sortBy === "avg"
-          ? client.avgTicket / Math.max(...sorted.map((c) => c.avgTicket), 1)
-          : client.total / maxTotal;
-        return (
-          <View key={client.id} style={cl.topCard}>
-            {/* Rank */}
-            <Text style={[cl.rankBadge, { color }]}>#{i + 1}</Text>
-            <ClientAvatar client={client} />
-            <View style={{ flex: 1 }}>
-              <View style={cl.rowBetween}>
-                <View style={{ flex: 1, marginRight: 6 }}>
-                  <Text style={cl.clientName} numberOfLines={1}>{client.name}</Text>
-                  <TypeBadge type={client.type} />
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={[cl.clientTotal, { color }]}>{C$(client.total)}</Text>
-                  {client.isNew && (
-                    <View style={cl.newBadge}><Text style={cl.newBadgeText}>NUEVO</Text></View>
-                  )}
-                </View>
-              </View>
-              <ProgressBar ratio={ratio} color={color} />
-              <View style={cl.rowBetween}>
-                <Text style={cl.clientSub}>{client.count} compra{client.count !== 1 ? "s" : ""} · {client.itemsQty} uds</Text>
-                <Text style={cl.clientSub}>Prom. {C$(client.avgTicket)} · {fmtDate(client.lastDate)}</Text>
-              </View>
-            </View>
+    <View style={cl.topCard}>
+      {/* Rank */}
+      <Text style={[cl.rankBadge, { color }]}>#{index + 1}</Text>
+      <ClientAvatar client={client} />
+      <View style={{ flex: 1 }}>
+        <View style={cl.rowBetween}>
+          <View style={{ flex: 1, marginRight: 6 }}>
+            <Text style={cl.clientName} numberOfLines={1}>{client.name}</Text>
+            <TypeBadge type={client.type} />
           </View>
-        );
-      })}
-    </>
+          <View style={{ alignItems: "flex-end" }}>
+            <Text style={[cl.clientTotal, { color }]}>{C$(client.total)}</Text>
+            {client.isNew && (
+              <View style={cl.newBadge}><Text style={cl.newBadgeText}>NUEVO</Text></View>
+            )}
+          </View>
+        </View>
+        <ProgressBar ratio={ratio} color={color} />
+        <View style={cl.rowBetween}>
+          <Text style={cl.clientSub}>{client.count} compra{client.count !== 1 ? "s" : ""} · {client.itemsQty} uds</Text>
+          <Text style={cl.clientSub}>Prom. {C$(client.avgTicket)} · {fmtDate(client.lastDate)}</Text>
+        </View>
+      </View>
+    </View>
   );
-}
+});
 
-// ─── Tab: Directorio ──────────────────────────────────────────────────────────
-function DirectoryTab({ allClients, search }) {
-  const [filter, setFilter] = useState("all"); // 'all' | 'active' | 'inactive' | 'new'
+const DirectoryRow = React.memo(function DirectoryRow({ client }) {
+  return (
+    <View style={cl.dirCard}>
+      <ClientAvatar client={client} size={40} />
+      <View style={{ flex: 1 }}>
+        <View style={cl.rowBetween}>
+          <Text style={cl.clientName} numberOfLines={1}>{client.name}</Text>
+          <Text style={[cl.clientTotal, { fontSize: 13, color: client.isActive ? "#059669" : "#9CA3AF" }]}>
+            {C$(client.total)}
+          </Text>
+        </View>
+        <View style={cl.dirMeta}>
+          <TypeBadge type={client.type} />
+          {client.phone ? (
+            <View style={cl.metaItem}>
+              <Icon name="call-outline" size={10} color="#9CA3AF" />
+              <Text style={cl.metaText}>{client.phone}</Text>
+            </View>
+          ) : null}
+          {client.creditLimit > 0 ? (
+            <View style={cl.metaItem}>
+              <Icon name="card-outline" size={10} color="#9CA3AF" />
+              <Text style={cl.metaText}>Límite {C$(client.creditLimit)}</Text>
+            </View>
+          ) : null}
+        </View>
+        {client.isActive && (
+          <Text style={cl.clientSub}>{client.count} compra{client.count !== 1 ? "s" : ""} · última {fmtDate(client.lastDate)}</Text>
+        )}
+        {!client.isActive && (
+          <Text style={[cl.clientSub, { color: "#EF4444" }]}>Sin compras en el período</Text>
+        )}
+      </View>
+      {client.isNew && (
+        <View style={cl.newBadge}><Text style={cl.newBadgeText}>NUEVO</Text></View>
+      )}
+    </View>
+  );
+});
 
-  const filtered = useMemo(() => {
-    let base =
-      filter === "active"   ? allClients.filter((c) => c.isActive) :
-      filter === "inactive" ? allClients.filter((c) => !c.isActive) :
-      filter === "new"      ? allClients.filter((c) => c.isNew) :
-      allClients;
-    if (search) base = base.filter((c) =>
-      c.name?.toLowerCase().includes(search.toLowerCase()) ||
+// ─── Derivación de filas (puro, fuera del render) ─────────────────────────────
+const sortTopClients = (clients, search, sortBy) => {
+  const q = search.toLowerCase();
+  const filtered = search
+    ? clients.filter((c) => c.name?.toLowerCase().includes(q) || c.phone?.includes(search))
+    : clients;
+  if (sortBy === "count") return [...filtered].sort((a, b) => b.count     - a.count);
+  if (sortBy === "avg")   return [...filtered].sort((a, b) => b.avgTicket - a.avgTicket);
+  return [...filtered].sort((a, b) => b.total - a.total);
+};
+
+const filterDirectory = (allClients, search, filter) => {
+  let base =
+    filter === "active"   ? allClients.filter((c) => c.isActive) :
+    filter === "inactive" ? allClients.filter((c) => !c.isActive) :
+    filter === "new"      ? allClients.filter((c) => c.isNew) :
+    allClients;
+  if (search) {
+    const q = search.toLowerCase();
+    base = base.filter((c) =>
+      c.name?.toLowerCase().includes(q) ||
       c.phone?.includes(search) ||
       c.cedula?.includes(search)
     );
-    return base;
-  }, [allClients, filter, search]);
+  }
+  return base;
+};
 
+// Controles de orden del tab "Top" — van en el header de la lista.
+function TopSortRow({ sortBy, setSortBy }) {
   return (
-    <>
-      {/* Filtros rápidos */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={cl.filterRow}>
-        {[["all","Todos"],["active","Activos"],["inactive","Inactivos"],["new","Nuevos"]].map(([k, l]) => (
-          <TouchableOpacity
-            key={k}
-            style={[cl.filterPill, filter === k && cl.filterPillActive]}
-            onPress={() => setFilter(k)}
-            activeOpacity={0.8}
-          >
-            <Text style={[cl.filterPillText, filter === k && cl.filterPillTextActive]}>{l}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+    <View style={cl.sortRow}>
+      {[["total","Total gastado"],["count","# Compras"],["avg","Ticket prom."]].map(([k, l]) => (
+        <TouchableOpacity
+          key={k}
+          style={[cl.sortBtn, sortBy === k && cl.sortBtnActive]}
+          onPress={() => setSortBy(k)}
+          activeOpacity={0.8}
+        >
+          <Text style={[cl.sortBtnText, sortBy === k && cl.sortBtnTextActive]}>{l}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
 
-      {filtered.length === 0 ? (
-        <View style={cl.emptyBox}>
-          <Icon name="search-outline" size={36} color="#CBD5E1" />
-          <Text style={cl.emptyText}>Sin resultados</Text>
-        </View>
-      ) : (
-        filtered.map((client) => {
-          const m = typeMeta(client.type);
-          return (
-            <View key={client.id} style={cl.dirCard}>
-              <ClientAvatar client={client} size={40} />
-              <View style={{ flex: 1 }}>
-                <View style={cl.rowBetween}>
-                  <Text style={cl.clientName} numberOfLines={1}>{client.name}</Text>
-                  <Text style={[cl.clientTotal, { fontSize: 13, color: client.isActive ? "#059669" : "#9CA3AF" }]}>
-                    {C$(client.total)}
-                  </Text>
-                </View>
-                <View style={cl.dirMeta}>
-                  <TypeBadge type={client.type} />
-                  {client.phone ? (
-                    <View style={cl.metaItem}>
-                      <Icon name="call-outline" size={10} color="#9CA3AF" />
-                      <Text style={cl.metaText}>{client.phone}</Text>
-                    </View>
-                  ) : null}
-                  {client.creditLimit > 0 ? (
-                    <View style={cl.metaItem}>
-                      <Icon name="card-outline" size={10} color="#9CA3AF" />
-                      <Text style={cl.metaText}>Límite {C$(client.creditLimit)}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                {client.isActive && (
-                  <Text style={cl.clientSub}>{client.count} compra{client.count !== 1 ? "s" : ""} · última {fmtDate(client.lastDate)}</Text>
-                )}
-                {!client.isActive && (
-                  <Text style={[cl.clientSub, { color: "#EF4444" }]}>Sin compras en el período</Text>
-                )}
-              </View>
-              {client.isNew && (
-                <View style={cl.newBadge}><Text style={cl.newBadgeText}>NUEVO</Text></View>
-              )}
-            </View>
-          );
-        })
-      )}
-    </>
+// Filtros rápidos del tab "Directorio" — también en el header.
+function DirectoryFilterRow({ filter, setFilter }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={cl.filterRow}>
+      {[["all","Todos"],["active","Activos"],["inactive","Inactivos"],["new","Nuevos"]].map(([k, l]) => (
+        <TouchableOpacity
+          key={k}
+          style={[cl.filterPill, filter === k && cl.filterPillActive]}
+          onPress={() => setFilter(k)}
+          activeOpacity={0.8}
+        >
+          <Text style={[cl.filterPillText, filter === k && cl.filterPillTextActive]}>{l}</Text>
+        </TouchableOpacity>
+      ))}
+    </ScrollView>
   );
 }
 
@@ -298,16 +272,21 @@ function TypesTab({ byType, totalRevenue, totalClients }) {
 }
 
 // ─── Panel principal ──────────────────────────────────────────────────────────
-export default function ClientsPanelPRO({ dateFrom, dateTo }) {
+export default function ClientsPanelPRO({ dateFrom, dateTo, refreshKey = 0 }) {
   const [data, setData]           = useState(null);
   const [loading, setLoading]     = useState(true);
   const [activeTab, setActiveTab] = useState(0);
   const [search, setSearch]       = useState("");
+  // Estado de los sub-filtros, subido desde los antiguos TopClientsTab/DirectoryTab:
+  // los controles ahora viven en el header de la lista, así que el estado tiene que
+  // vivir junto a la lista.
+  const [sortBy, setSortBy]       = useState("total"); // 'total' | 'count' | 'avg'
+  const [dirFilter, setDirFilter] = useState("all");   // 'all' | 'active' | 'inactive' | 'new'
   const lastKey = useRef(null);
 
   useEffect(() => {
-    const key = `${dateFrom?.getTime?.() ?? ""}_${dateTo?.getTime?.() ?? ""}`;
-    if (lastKey.current === key && data) return;
+    const key = `${dateFrom?.getTime?.() ?? ""}_${dateTo?.getTime?.() ?? ""}_${refreshKey}`;
+    if (lastKey.current === key) return;   // la clave ya incluye rango + refreshKey
     lastKey.current = key;
 
     let mounted = true;
@@ -317,7 +296,38 @@ export default function ClientsPanelPRO({ dateFrom, dateTo }) {
       .then((r) => { if (mounted) { setData(r); setLoading(false); } })
       .catch(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, refreshKey]);
+
+  // Todos los hooks van ANTES de los early returns de loading/!data, de ahí los `?.`.
+  const topRows = useMemo(
+    () => sortTopClients(data?.topClients ?? [], search, sortBy),
+    [data, search, sortBy]
+  );
+
+  const dirRows = useMemo(
+    () => filterDirectory(data?.allClients ?? [], search, dirFilter),
+    [data, search, dirFilter]
+  );
+
+  // Denominador de la barra de progreso: una pasada, no una por fila.
+  const { pickValue, maxVal } = useMemo(() => {
+    const pick = sortBy === "count" ? (c) => c.count
+      : sortBy === "avg" ? (c) => c.avgTicket
+      : (c) => c.total;
+    // reduce en vez de Math.max(...array): el spread pasa cada elemento como
+    // argumento y revienta con RangeError sobre ~100k elementos.
+    const max = sortBy === "total"
+      ? (data?.topClients?.[0]?.total || 1)
+      : topRows.reduce((m, c) => Math.max(m, pick(c) || 0), 1);
+    return { pickValue: pick, maxVal: max };
+  }, [sortBy, topRows, data]);
+
+  const renderRow = useCallback(({ item, index }) => {
+    if (activeTab === 0) {
+      return <TopClientRow client={item} index={index} ratio={pickValue(item) / maxVal} />;
+    }
+    return <DirectoryRow client={item} />;
+  }, [activeTab, pickValue, maxVal]);
 
   if (loading) {
     return (
@@ -337,12 +347,20 @@ export default function ClientsPanelPRO({ dateFrom, dateTo }) {
     );
   }
 
+  // topClients/allClients ya no se leen acá: alimentan topRows/dirRows vía useMemo,
+  // que corren antes de estos early returns.
   const { totalClients, activeCount, newCount, totalRevenue, avgTicket,
-          topClients, allClients, newClients, byType, anonymousCount } = data;
+          byType, anonymousCount } = data;
 
-  return (
-    <ScrollView style={cl.screen} contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
+  // Tab 2 (Por tipo) tiene tantas filas como tipos de cliente: no se virtualiza,
+  // va completo en el header. Los tabs 0 y 1 sí crecen con la cartera.
+  const rows = activeTab === 0 ? topRows : activeTab === 1 ? dirRows : [];
 
+  // ListHeaderComponent recibe un ELEMENTO, no una función: pasar una función
+  // crearía un tipo de componente nuevo en cada render y el TextInput de búsqueda
+  // se remontaría, perdiendo el foco en cada tecla.
+  const header = (
+    <>
       {/* ── KPIs scroll horizontal ────────────────────────────── */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         style={{ marginBottom: 14 }} contentContainerStyle={{ gap: 10, paddingHorizontal: 14 }}>
@@ -389,13 +407,38 @@ export default function ClientsPanelPRO({ dateFrom, dateTo }) {
         ))}
       </View>
 
-      {/* ── Contenido ─────────────────────────────────────────── */}
+      {/* ── Controles del tab activo ──────────────────────────── */}
       <View style={cl.tabContent}>
-        {activeTab === 0 && <TopClientsTab clients={topClients} search={search} />}
-        {activeTab === 1 && <DirectoryTab  allClients={allClients} search={search} />}
-        {activeTab === 2 && <TypesTab      byType={byType} totalRevenue={totalRevenue} totalClients={totalClients} />}
+        {activeTab === 0 && <TopSortRow sortBy={sortBy} setSortBy={setSortBy} />}
+        {activeTab === 1 && <DirectoryFilterRow filter={dirFilter} setFilter={setDirFilter} />}
+        {activeTab === 2 && (
+          <TypesTab byType={byType} totalRevenue={totalRevenue} totalClients={totalClients} />
+        )}
       </View>
-    </ScrollView>
+    </>
+  );
+
+  return (
+    <FlatList
+      style={cl.screen}
+      data={rows}
+      renderItem={renderRow}
+      keyExtractor={(item) => item.id}
+      ListHeaderComponent={header}
+      ListEmptyComponent={activeTab === 2 ? null : (
+        <View style={cl.emptyBox}>
+          <Icon name={activeTab === 0 ? "people-outline" : "search-outline"} size={40} color="#CBD5E1" />
+          <Text style={cl.emptyText}>
+            {activeTab === 0 ? "Sin clientes con compras en este período" : "Sin resultados"}
+          </Text>
+        </View>
+      )}
+      contentContainerStyle={{ paddingBottom: 32 }}
+      keyboardShouldPersistTaps="handled"
+      initialNumToRender={12}
+      windowSize={10}
+      removeClippedSubviews
+    />
   );
 }
 

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useContext } from 'react';
 import {
   View,
   Text,
@@ -30,7 +30,10 @@ import {
   subscribeReturnRequestsByPresale,
 } from '../../../services/returnService';
 import ReturnRequestModal from '../../returns/components/ReturnRequestModal';
+import CustomerInfoSheet from '../../customer/components/CustomerInfoSheet';
+import { useSubmitLock } from '../../../hooks/useSubmitLock';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PreSaleContext } from '../../presales/context/preSaleContext';
 
 export default function DeliveryDoneScreen({ navigation, route }) {
   const { sale: routeSale } = route.params;
@@ -38,47 +41,40 @@ export default function DeliveryDoneScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const [printing, setPrinting] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const [customersById, setCustomersById] = useState({});
+  // El mapa de clientes lo mantiene PreSaleProvider a nivel app. Antes cada pantalla
+  // de Bodega abría su propio listener sobre la colección `customers` completa.
+  const { customersById } = useContext(PreSaleContext);
   const [usersByEmail, setUsersByEmail] = useState({});
   const [ticketSettings, setTicketSettings] = useState(DEFAULT_TICKET_SETTINGS);
   const [bonusMovements, setBonusMovements] = useState([]);
+  // Doc vivo de la pre-venta: al aprobarse una devolución, bodega recalcula ítems y
+  // totales; sin esto el ticket se quedaría con la copia que llegó por navegación.
+  const [livePresale, setLivePresale] = useState(null);
   // Devolución
   const [returnModalVisible, setReturnModalVisible] = useState(false);
-  const [submittingReturn, setSubmittingReturn] = useState(false);
+  const { submitting: submittingReturn, runLocked } = useSubmitLock();
   const [existingReturnRequest, setExistingReturnRequest] = useState(null);
+  // Vista rápida del cliente desde el ticket
+  const [customerInfoVisible, setCustomerInfoVisible] = useState(false);
 
   const currentUser = auth().currentUser;
   const ticketWidth = ticketSettings.paperWidthMm >= 75 ? 576 : 384;
 
-  // Combinar bonos embebidos en la venta con los BONUS_OUT de Firestore
-  const embeddedBonuses = routeSale?.bonusesAwarded || routeSale?.bonuses || [];
-  const allBonuses = bonusMovements.length > 0 ? bonusMovements : embeddedBonuses;
+  // Combinar bonos embebidos en la venta con los BONUS_OUT de Firestore.
+  // Si la factura ya tiene devoluciones aprobadas, los BONUS_OUT quedan obsoletos
+  // (no se revierten), así que manda la lista recalculada del doc de pre-venta.
+  const hasReturns = Array.isArray(livePresale?.returnedSummary) && livePresale.returnedSummary.length > 0;
+  const embeddedBonuses = livePresale?.bonuses || routeSale?.bonusesAwarded || routeSale?.bonuses || [];
+  const allBonuses = hasReturns
+    ? (livePresale.bonuses || [])
+    : (bonusMovements.length > 0 ? bonusMovements : embeddedBonuses);
 
   // Usamos routeSale directamente sin mezclar deliveredBy en createdBy.
   // El override previo causaba que createdBy contuviera el email del entregador,
   // lo que hacía que el entregador apareciera como vendedor.
-  const sale = { ...routeSale };
+  const sale = { ...routeSale, ...(livePresale || {}) };
 
   useEffect(() => {
-    // Escuchar clientes
-    const unsubCustomers = firestore()
-      .collection('customers')
-      .onSnapshot(
-        (snap) => {
-          if (!snap) { setCustomersById({}); return; }
-          setCustomersById(
-            snap.docs.reduce((acc, doc) => {
-              acc[doc.id] = { id: doc.id, ...doc.data() };
-              return acc;
-            }, {}),
-          );
-        },
-        (err) => {
-          console.error('[DeliveryDone] customers:', err);
-          setCustomersById({});
-        },
-      );
-
     // Escuchar usuarios (para resolver nombres de vendedor/entregador)
     const unsubUsers = firestore()
       .collection('users')
@@ -115,11 +111,27 @@ export default function DeliveryDoneScreen({ navigation, route }) {
     });
 
     return () => {
-      unsubCustomers();
       unsubUsers();
       unsubBonuses();
       mounted = false;
     };
+  }, [routeSale?.id]);
+
+  // Escuchar la pre-venta: al aprobar una devolución, bodega reescribe ítems,
+  // bonos y totales; el ticket debe reflejarlo sin salir de la pantalla.
+  useEffect(() => {
+    if (!routeSale?.id) return;
+    const unsub = firestore()
+      .collection('presales')
+      .doc(routeSale.id)
+      .onSnapshot(
+        (snap) => setLivePresale(snap?.exists() ? { id: snap.id, ...snap.data() } : null),
+        (err) => {
+          console.error('[DeliveryDone] presale:', err);
+          setLivePresale(null);
+        },
+      );
+    return () => unsub();
   }, [routeSale?.id]);
 
   // Escuchar si ya existe una solicitud de devolución para esta venta
@@ -184,6 +196,16 @@ export default function DeliveryDoneScreen({ navigation, route }) {
     delivererDisplayName,                    // nombre completo del entregador
   };
 
+  // Ficha para la vista rápida: el doc de `customers` es la fuente completa; si la
+  // venta es de cliente ocasional, se arma con lo que trae la propia venta.
+  const customerInfo = customersById[customerId] || {
+    ...(sale.customer || {}),
+    firstName: sale.customer?.firstName || customerName,
+    lastName: sale.customer?.lastName || '',
+    phone: sale.customer?.phone || sale.customerPhone || null,
+    address: customerAddress,
+  };
+
   const handleFinish = () => navigation.popToTop();
 
   const handleShare = async () => {
@@ -227,25 +249,27 @@ export default function DeliveryDoneScreen({ navigation, route }) {
 
   const handleOpenReturnModal = () => setReturnModalVisible(true);
 
-  const handleSubmitReturn = async (reason, selItems, selBonuses) => {
-    try {
-      setSubmittingReturn(true);
-      await createReturnRequest({
-        presaleId: routeSale.id,
-        sale: ticketSale,
-        items: selItems,
-        bonuses: selBonuses,
-        reason,
-        requestedByRole: 'entregador',
-      });
-      setReturnModalVisible(false);
-      Alert.alert('Solicitud enviada', 'La solicitud de devolución fue enviada al equipo de bodega para revisión.');
-    } catch (e) {
-      Alert.alert('Error', e.message || 'No se pudo enviar la solicitud.');
-    } finally {
-      setSubmittingReturn(false);
-    }
-  };
+  // La comprobación de "ya existe una solicitud pendiente" que hace
+  // createReturnRequest es una consulta previa: con dos toques rápidos ambas
+  // salen vacías y se crean DOS solicitudes. El cerrojo lo corta antes.
+  const handleSubmitReturn = (reason, selItems, selBonuses) =>
+    runLocked(async () => {
+      try {
+        await createReturnRequest({
+          presaleId: routeSale.id,
+          sale: ticketSale,
+          items: selItems,
+          bonuses: selBonuses,
+          reason,
+          requestedByRole: 'entregador',
+        });
+        setReturnModalVisible(false);
+        Alert.alert('Solicitud enviada', 'La solicitud de devolución fue enviada al equipo de bodega para revisión.');
+      } catch (e) {
+        Alert.alert('Error', e.message || 'No se pudo enviar la solicitud.');
+        throw e;
+      }
+    }).catch(() => {});
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -255,9 +279,17 @@ export default function DeliveryDoneScreen({ navigation, route }) {
           <Icon name="checkmark-done-circle" size={22} color="#22C55E" />
           <Text style={styles.headerTitle}>Entrega Completada</Text>
         </View>
-        <TouchableOpacity onPress={handleFinish} style={styles.closeBtn}>
-          <Icon name="close" size={20} color="#6B7280" />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={() => setCustomerInfoVisible(true)}
+            style={styles.customerBtn}
+            activeOpacity={0.85}>
+            <Icon name="person-circle-outline" size={22} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleFinish} style={styles.closeBtn}>
+            <Icon name="close" size={20} color="#6B7280" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ── Ticket (capturado por ViewShot para impresión/compartir) ─────────── */}
@@ -348,6 +380,13 @@ export default function DeliveryDoneScreen({ navigation, route }) {
         onSubmit={handleSubmitReturn}
         submitting={submittingReturn}
       />
+
+      {/* Vista rápida del cliente (llamar / WhatsApp / ubicación) */}
+      <CustomerInfoSheet
+        visible={customerInfoVisible}
+        customer={customerInfo}
+        onClose={() => setCustomerInfoVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -366,7 +405,16 @@ const styles = StyleSheet.create({
     paddingTop: 40,
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
+  customerBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#EAF0FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   closeBtn: {
     width: 34,
     height: 34,

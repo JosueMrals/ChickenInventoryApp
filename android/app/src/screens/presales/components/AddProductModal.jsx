@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, FlatList, ActivityIndicator,
 	Modal, StyleSheet } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import SearchBar from "../../../components/SearchBar";
-import firestore from "@react-native-firebase/firestore";
+import { subscribeProducts } from "../../productsNew1/services/productsService";
 
 const AddProductModal = ({ visible, onClose, onAddProduct, cart }) => {
     const [products, setProducts] = useState([]);
@@ -15,14 +15,12 @@ const AddProductModal = ({ visible, onClose, onAddProduct, cart }) => {
     useEffect(() => {
         if (visible) {
             setLoading(true);
-            const unsubscribe = firestore()
-                .collection("products")
-                .orderBy("name", "asc")
-                .onSnapshot(snapshot => {
-                    const productList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setProducts(productList);
-                    setLoading(false);
-                });
+            // subscribeProducts aplica orderBy + limit; antes esto abría un listener
+            // crudo sobre la colección `products` completa.
+            const unsubscribe = subscribeProducts((items) => {
+                setProducts(items);
+                setLoading(false);
+            });
             return () => unsubscribe();
         }
     }, [visible]);

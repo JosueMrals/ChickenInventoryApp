@@ -24,7 +24,8 @@ export default function EmployeesPanelPRO({ data, loading }) {
     );
   }
 
-  const max = Math.max(1, ...employees.map((e) => e.total || 0));
+  // reduce en vez de spread: Math.max(...array) revienta con RangeError sobre ~100k elementos.
+  const max = employees.reduce((m, e) => Math.max(m, e.total || 0), 1);
   const totalSales = employees.reduce((s, e) => s + e.total, 0);
   const colors = ['#7C3AED','#0369A1','#059669','#D97706','#DC2626'];
 

@@ -23,7 +23,7 @@ export default function AddStockScreen({ route, navigation }) {
         const docRef = db.doc(`products/${productId}`);
         const snap = await docRef.get();
         if (mounted) {
-          if (snap.exists) setProduct({ id: snap.id, ...snap.data() });
+          if (snap.exists()) setProduct({ id: snap.id, ...snap.data() });
           else {
             Alert.alert('No encontrado', 'El producto solicitado no existe.');
             navigation.goBack();
@@ -86,7 +86,7 @@ export default function AddStockScreen({ route, navigation }) {
               // Usa transaccion para capturar stock real y evitar inconsistencias de concurrencia.
               const txResult = await firestore().runTransaction(async (transaction) => {
                 const freshSnap = await transaction.get(docRef);
-                if (!freshSnap.exists) {
+                if (!freshSnap.exists()) {
                   throw new Error('PRODUCT_NOT_FOUND');
                 }
 

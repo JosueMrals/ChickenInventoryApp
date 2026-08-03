@@ -94,8 +94,10 @@ describe('customerService', () => {
   // ─── getCustomerById ───
   describe('getCustomerById', () => {
     it('retorna cliente mapeado cuando el doc existe', async () => {
+      // `exists` es un MÉTODO en @react-native-firebase, no una propiedad: con un
+      // booleano el mock validaría un comportamiento que en producción no ocurre.
       mockGet.mockResolvedValue({
-        exists: true,
+        exists: () => true,
         id: 'c1',
         data: () => ({ firstName: 'Ana', lastName: 'López', phone: '111' }),
       });
@@ -105,7 +107,7 @@ describe('customerService', () => {
     });
 
     it('retorna null cuando el doc no existe', async () => {
-      mockGet.mockResolvedValue({ exists: false });
+      mockGet.mockResolvedValue({ exists: () => false });
       const result = await getCustomerById('xxx');
       expect(result).toBeNull();
     });

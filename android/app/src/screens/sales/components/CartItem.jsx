@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, TextInput } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import styles from '../styles/cartStyles';
 
-export default function CartItem({ item, onRemove, onUpdateQty }) {
+function CartItem({ item, onRemove, onUpdateQty }) {
   return (
     <View style={styles.cartItem}>
       <View style={{ flex: 1 }}>
@@ -29,3 +29,7 @@ export default function CartItem({ item, onRemove, onUpdateQty }) {
     </View>
   );
 }
+
+// memo: componente de fila. Sin esto se re-renderiza en cada cambio de estado
+// del padre (tecla del buscador, cambio de filtro) aunque su item no haya cambiado.
+export default React.memo(CartItem);

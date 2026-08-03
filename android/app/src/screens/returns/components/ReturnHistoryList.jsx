@@ -149,7 +149,7 @@ function HistoryCard({ request, onPress }) {
 }
 
 // ── Lista principal ───────────────────────────────────────────────────────────
-export default function ReturnHistoryList({ routeId = null }) {
+export default function ReturnHistoryList({ routeId = null, requestedByUid = null }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
@@ -160,9 +160,9 @@ export default function ReturnHistoryList({ routeId = null }) {
     const unsub = subscribeReturnHistory((docs) => {
       setHistory(docs);
       setLoading(false);
-    }, routeId);
+    }, routeId, requestedByUid);
     return () => unsub();
-  }, [routeId]);
+  }, [routeId, requestedByUid]);
 
   const handleOpen = useCallback((request) => {
     setSelected(request);

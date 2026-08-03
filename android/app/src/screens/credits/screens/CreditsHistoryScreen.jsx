@@ -4,6 +4,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation } from '@react-navigation/native';
 import globalStyles from '../../../styles/globalStyles';
 import { useCredits } from '../hooks/useCredits';
+import CreditDueInfo from '../components/CreditDueInfo';
 
 const DATE_FILTERS = [
   { key: 'all',   label: 'Todos',  icon: 'view-list-outline' },
@@ -76,6 +77,9 @@ const HistoryCard = ({ item }) => {
           <Text style={[s.pillText, { color: isPaid ? '#065F46' : '#991B1B' }]}>{isPaid ? 'Pagado' : 'Pendiente'}</Text>
         </View>
       </View>
+
+      {/* Fecha de pago acordada / atraso */}
+      {!isPaid && <CreditDueInfo credit={item} compact />}
 
       {/* Progress bar */}
       <View style={s.progressWrap}>

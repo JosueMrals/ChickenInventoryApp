@@ -6,20 +6,18 @@ import LineChart from "../components/LineChartPRO";
 import salesPanelStyles from "../styles/salesPanelStyles";
 import { useSalesData } from "../hooks/useReportsData";
 
-const SalesPanel = ({ data, loading: loadingSummary, dateFrom, dateTo }) => {
+const SalesPanel = ({ summary, loadingSummary, dateFrom, dateTo, refreshKey }) => {
   const [selectedSale, setSelectedSale] = useState(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
 
-  // Hook dedicado: solo consulta sales + presales, independiente del feed general
+  // Hook dedicado: solo consulta sales + presales, independiente del resumen
   const {
     sales,
     loading: loadingSales,
     loadingMore,
     loadMore,
     hasMore,
-  } = useSalesData(dateFrom, dateTo);
-
-  const loading = loadingSummary || loadingSales;
+  } = useSalesData(dateFrom, dateTo, refreshKey);
 
   const handleItemPress = (item) => {
     if (item.__kind === 'sale' || item.__kind === 'presale') {
@@ -34,16 +32,14 @@ const SalesPanel = ({ data, loading: loadingSummary, dateFrom, dateTo }) => {
   };
 
   const renderHeader = () => {
-    const summary = data.summary || {};
+    const s = summary || {};
     const safe = {
-        totalIncome: Number(summary.totalIncome ?? 0),
-        profit: Number(summary.profit ?? 0),
-        totalSalesCount: Number(summary.totalSalesCount ?? 0),
-        avgPerSale: Number(summary.avgPerSale ?? 0),
-        timeseries: Array.isArray(summary.timeseries) ? summary.timeseries : [],
+        totalIncome: Number(s.totalIncome ?? 0),
+        profit: Number(s.profit ?? 0),
+        totalSalesCount: Number(s.totalSalesCount ?? 0),
+        avgPerSale: Number(s.avgPerSale ?? 0),
+        timeseries: Array.isArray(s.timeseries) ? s.timeseries : [],
     };
-
-    const noData = safe.timeseries.length === 0 || isNaN(safe.totalIncome) || isNaN(safe.profit);
 
     if (loadingSummary && !sales.length) {
         return (
@@ -55,7 +51,10 @@ const SalesPanel = ({ data, loading: loadingSummary, dateFrom, dateTo }) => {
         );
     }
 
-    if (noData) return null;
+    // Los KPIs se muestran si hay resumen, aunque no haya serie diaria. Antes la
+    // condición exigía `timeseries.length > 0` y el resumen NUNCA devolvía esa
+    // serie, así que la cabecera entera —KPIs y gráfica— jamás se pintaba.
+    if (!summary) return null;
 
     return (
       <View style={{padding: 10}}>

@@ -72,7 +72,7 @@ const mapCustomer = (doc) => {
 export const getCustomerById = async (id) => {
   try {
     const doc = await firestore().collection(COLLECTION).doc(id).get();
-    if (!doc.exists) return null;
+    if (!doc.exists()) return null;
     return mapCustomer(doc);
   } catch (error) {
     console.error('[customersService] getCustomerById ERROR:', error);
