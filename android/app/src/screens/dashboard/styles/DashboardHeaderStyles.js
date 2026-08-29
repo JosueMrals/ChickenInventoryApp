@@ -46,4 +46,14 @@ export default StyleSheet.create({
     backgroundColor: '#FFF1F0',
     borderRadius: 10,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  toggleButton: {
+    padding: 8,
+    backgroundColor: '#EAF2FF',
+    borderRadius: 10,
+    marginRight: 8,
+  },
 });

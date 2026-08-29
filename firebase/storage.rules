@@ -30,6 +30,19 @@ service firebase.storage {
       allow delete: if isAdmin() || isVendedor();
     }
 
+    // =====================================================
+    // 📄 Fotos de facturas de recepción — goodsReceipts/{fileName}
+    // La recepción la registra bodega (o admin), así que ellos suben la foto.
+    // Los 4 roles operativos pueden verla (consulta del historial).
+    // =====================================================
+    match /goodsReceipts/{fileName} {
+      allow read: if isOperativo();
+      allow write: if (isAdmin() || isBodeguero())
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isAdmin() || isBodeguero();
+    }
+
     // Todo lo demás, denegado por defecto.
     match /{allPaths=**} {
       allow read, write: if false;

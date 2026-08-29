@@ -91,4 +91,55 @@ describe('abonarCredito: sincronización de la preventa enlazada', () => {
     expect(result.linkedPreSaleUpdated).toBe(false);
     expect(mockState.docs['ps-1'].status).toBe('cancelled'); // sin tocar
   });
+
+  // Regresión: el guard usaba TERMINAL_PRESALE_STATUSES, que incluye
+  // 'dispatched' y 'credit_dispatched' — justo los estados donde vive un crédito
+  // por cobrar. Saldarlo lanzaba, el catch se lo tragaba y la preventa quedaba
+  // como "crédito por cobrar" para siempre, inflando la cartera.
+  describe.each([
+    ['credit_dispatched', 'entregada al cliente con saldo pendiente'],
+    ['dispatched', 'asignada al entregador'],
+    ['delivered', 'entregada'],
+    ['credit_pending', 'aún en bodega'],
+    ['credit_ready_for_delivery', 'lista para entregar'],
+  ])('preventa en %s (%s)', (status) => {
+    test('saldar el crédito la marca como paid', async () => {
+      mockState.docs['cred-1'] = creditDoc();
+      mockState.docs['ps-1'] = { status };
+
+      const result = await creditsService.abonarCredito('cred-1', 100, 'admin@test.com');
+
+      expect(result.estado).toBe('paid');
+      expect(result.linkedPreSaleUpdated).toBe(true);
+      expect(mockState.docs['ps-1'].status).toBe('paid');
+      expect(mockState.docs['ps-1'].fechaPago).toBeDefined();
+    });
+  });
+
+  // Estos sí deben seguir bloqueados: no hay deuda que saldar (anulada) o el
+  // estado codifica una devolución que 'paid' borraría.
+  describe.each(['cancelled', 'returned', 'partially_returned'])('preventa en %s', (status) => {
+    test('no se sobrescribe y el abono igual se registra', async () => {
+      mockState.docs['cred-1'] = creditDoc();
+      mockState.docs['ps-1'] = { status };
+
+      const result = await creditsService.abonarCredito('cred-1', 100, 'admin@test.com');
+
+      expect(result.estado).toBe('paid');
+      expect(result.linkedPreSaleUpdated).toBe(false);
+      expect(mockState.docs['ps-1'].status).toBe(status);
+      expect(mockState.writes.find((w) => w.id === 'ps-1')).toBeUndefined();
+    });
+  });
+
+  test('un abono parcial no toca la preventa', async () => {
+    mockState.docs['cred-1'] = creditDoc();
+    mockState.docs['ps-1'] = { status: 'credit_dispatched' };
+
+    const result = await creditsService.abonarCredito('cred-1', 40, 'admin@test.com');
+
+    expect(result.estado).toBe('pending');
+    expect(mockState.docs['ps-1'].status).toBe('credit_dispatched');
+    expect(mockState.writes.find((w) => w.id === 'ps-1')).toBeUndefined();
+  });
 });

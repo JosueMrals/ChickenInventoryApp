@@ -11,7 +11,7 @@ jest.mock('@react-native-firebase/firestore', () => {
 });
 jest.mock('@react-native-firebase/auth', () => () => ({ currentUser: null }));
 
-const { applyReturnToPresale } = require('../android/app/src/services/returnService');
+const { applyReturnToPresale, applyReturnToCredit } = require('../android/app/src/services/returnService');
 
 // Factura: 10 unidades a C$20 con C$50 de descuento (total 150) + 2 regalos.
 const presale = () => ({
@@ -96,4 +96,50 @@ test('devolver más de lo facturado no deja cantidades ni totales negativos', ()
   expect(res.returnedSummary[0].quantity).toBe(10);
   expect(res.total).toBe(100);
   expect(res.subtotal).toBe(100);
+});
+
+// ── applyReturnToCredit ──────────────────────────────────────────────────────
+// Regresión: la devolución bajaba el total de la pre-venta pero no tocaba el
+// crédito, así que al cliente se le seguía cobrando lo que devolvió.
+describe('applyReturnToCredit', () => {
+  const credit = (overrides = {}) => ({ total: 250, paid: 0, pending: 250, status: 'pending', ...overrides });
+
+  test('sin crédito enlazado no hay nada que escribir', () => {
+    expect(applyReturnToCredit(null, 190)).toBeNull();
+  });
+
+  test('devolución parcial sin abonos: la deuda baja al nuevo total', () => {
+    expect(applyReturnToCredit(credit(), 190)).toEqual({ total: 190, pending: 190, status: 'pending' });
+  });
+
+  test('con un abono previo, solo baja lo pendiente y `paid` queda intacto', () => {
+    // Debía 250, ya abonó 100 → tras devolver hasta 190, debe 90.
+    expect(applyReturnToCredit(credit({ paid: 100, pending: 150 }), 190))
+      .toEqual({ total: 190, pending: 90, status: 'pending' });
+  });
+
+  test('si ya pagó más de lo que quedó facturado, el crédito se cierra en lo cobrado', () => {
+    // Invariante de las reglas: total == paid + pending, y `paid` es inmutable.
+    // El sobrante (200 - 190 = 10) se le devuelve al cliente; el crédito no queda debiendo.
+    expect(applyReturnToCredit(credit({ paid: 200, pending: 50 }), 190))
+      .toEqual({ total: 200, pending: 0, status: 'paid' });
+  });
+
+  test('devolución total sin abonos: no se debe nada', () => {
+    expect(applyReturnToCredit(credit(), 0)).toEqual({ total: 0, pending: 0, status: 'paid' });
+  });
+
+  test('un crédito ya saldado no vuelve a quedar pendiente', () => {
+    expect(applyReturnToCredit(credit({ paid: 250, pending: 0, status: 'paid' }), 190))
+      .toEqual({ total: 250, pending: 0, status: 'paid' });
+  });
+
+  test('nunca produce montos negativos ni rompe el invariante total == paid + pending', () => {
+    [[250, 0, 190], [250, 100, 0], [250, 250, 0], [100, 40, 999]].forEach(([total, paid, newTotal]) => {
+      const res = applyReturnToCredit({ total, paid, pending: total - paid, status: 'pending' }, newTotal);
+      expect(res.total).toBeGreaterThanOrEqual(0);
+      expect(res.pending).toBeGreaterThanOrEqual(0);
+      expect(res.total).toBeCloseTo(paid + res.pending, 2);
+    });
+  });
 });

@@ -8,7 +8,7 @@ import globalStyles from '../../../styles/globalStyles';
 const money = (value) =>
   Number.isFinite(value) ? `C$${value.toFixed(2)}` : '—';
 
-export default function CreditsHeader({ totals, onBack, onOpenHistory }) {
+export default function CreditsHeader({ totals, onBack, onOpenMenu, filtersActive = false }) {
   const total = Number.isFinite(totals.paid) && Number.isFinite(totals.pending)
     ? totals.paid + totals.pending
     : null;
@@ -24,13 +24,17 @@ export default function CreditsHeader({ totals, onBack, onOpenHistory }) {
 
         <Text style={globalStyles.title}>Créditos</Text>
 
-        {onOpenHistory ? (
-          <TouchableOpacity
-            onPress={onOpenHistory}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
-          >
-            <Icon name="history" size={15} color="#fff" />
-            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Historial</Text>
+        {onOpenMenu ? (
+          <TouchableOpacity onPress={onOpenMenu} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Icon name="dots-vertical" size={26} color="#fff" />
+            {/* Punto rojo: sin él no hay forma de saber que la lista está acotada
+                por un filtro que vive escondido en el menú. */}
+            {filtersActive && (
+              <View style={{
+                position: 'absolute', top: 0, right: 0, width: 9, height: 9,
+                borderRadius: 5, backgroundColor: '#FF3B30', borderWidth: 1.5, borderColor: '#007AFF',
+              }} />
+            )}
           </TouchableOpacity>
         ) : <View style={{ width: 26 }} />}
       </View>

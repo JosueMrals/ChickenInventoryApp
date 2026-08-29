@@ -166,15 +166,25 @@ service cloud.firestore {
         && request.resource.data.payments.size() >= getPaymentsSize(resource.data);
 
       // Editar la pre-venta origen cambia lo adeudado (monto o fecha de pago).
+      // También entra por aquí la devolución aprobada, que baja el total de la
+      // factura: la aprueba bodega (isWarehouseResolution), así que el bodeguero
+      // necesita este permiso o la devolución dejaría el crédito cobrando la
+      // mercadería devuelta.
       // No toca `paid` ni `payments`, e isValidCreditState mantiene el invariante
       // total == paid + pending, así que no se puede "perder" un abono por aquí.
-      allow update: if (isAdmin() || isVendedor())
+      // `status` se permite porque una devolución puede dejar el saldo en cero
+      // (pending → paid); la coherencia status↔pending se exige explícitamente.
+      allow update: if (isAdmin() || isVendedor() || isBodeguero())
         && request.resource.data
             .diff(resource.data)
             .affectedKeys()
-            .hasOnly(['total', 'pending', 'dueDate', 'updatedAt'])
+            .hasOnly(['total', 'pending', 'status', 'dueDate', 'updatedAt'])
         && request.resource.data.paid == resource.data.paid
-        && isValidCreditState(request.resource.data);
+        && isValidCreditState(request.resource.data)
+        && (
+          (request.resource.data.status == 'paid' && request.resource.data.pending == 0) ||
+          (request.resource.data.status == 'pending' && request.resource.data.pending > 0)
+        );
 
       // Admin siempre; el vendedor solo puede borrar un crédito SIN abonos
       // (pre-venta a crédito que se corrige a contado antes de cobrar nada).
@@ -325,10 +335,40 @@ service cloud.firestore {
 
       // Permitir crear/actualizar contadores numéricos por admin o vendedor.
       // Necesario para transacciones como counters/preSaleCounter.currentNumber.
-      allow create, update: if (isAdmin() || isVendedor())
+      // Bodega también los toca: consecutivo de recepción (goodsReceiptCounter).
+      allow create, update: if (isAdmin() || isVendedor() || isBodeguero())
         && isValidCounterPayload(request.resource.data);
 
       allow delete: if isAdmin();
+    }
+
+    // =====================================================
+    //  📥 GOODS RECEIPTS — recepción de mercancía (ingreso de stock)
+    // =====================================================
+    match /goodsReceipts/{receiptId} {
+      allow read: if isOperativo();
+
+      // La recepción la registra bodega (o admin). Nace siempre 'completed'
+      // y a nombre de quien la crea; el stock se sube en la misma transacción.
+      allow create: if (isAdmin() || isBodeguero())
+        && request.resource.data.status == 'completed'
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.totalUnits is number
+        && request.resource.data.totalUnits > 0;
+
+      // Anular: solo admin y solo una recepción aún vigente
+      // (completed → voided). Restringirlo a 'completed' evita revertir el
+      // stock dos veces. El resto de campos son inmutables.
+      allow update: if isAdmin()
+        && resource.data.status == 'completed'
+        && request.resource.data.status == 'voided'
+        && request.resource.data
+            .diff(resource.data)
+            .affectedKeys()
+            .hasOnly(['status', 'voidedBy', 'voidedByUid', 'voidedAt', 'voidReason']);
+
+      // Es un registro contable: no se borra.
+      allow delete: if false;
     }
 
     // =====================================================

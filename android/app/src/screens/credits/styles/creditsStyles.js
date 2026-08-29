@@ -24,21 +24,14 @@ export default StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 14, color: '#111827', marginLeft: 6 },
 
-  /* ── Filters ── */
-  filters: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  filterBtn: {
+  /* ── Filtros activos (los controles viven en el menú de 3 puntos) ── */
+  activeChipsRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  activeChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-    backgroundColor: '#F0F0F5', borderWidth: 1, borderColor: '#E0E0E8',
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16, backgroundColor: '#EBF3FF',
   },
-  filterBtnActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  filterBtnText: { fontSize: 12, fontWeight: '700', color: '#555' },
-  filterBtnTextActive: { color: '#fff' },
-  filterCount: {
-    fontSize: 10, fontWeight: '800', color: '#007AFF',
-    backgroundColor: '#EBF3FF', borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1,
-  },
-  filterCountActive: { color: '#007AFF', backgroundColor: 'rgba(255,255,255,0.25)' },
+  activeChipText: { fontSize: 11, fontWeight: '700', color: '#007AFF' },
+  activeChipsCount: { marginLeft: 'auto', fontSize: 11, fontWeight: '700', color: '#9CA3AF' },
 
   /* ── Credit card ── */
   creditCard: {

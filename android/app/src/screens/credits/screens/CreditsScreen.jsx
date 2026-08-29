@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator, FlatList, Platform, UIManager,
   View, Alert, Text, TextInput, TouchableOpacity,
@@ -11,12 +11,14 @@ import globalStyles from '../../../styles/globalStyles';
 import { useCredits } from '../hooks/useCredits';
 import CreditCard from '../components/CreditCard';
 import CreditPaymentModal from '../components/CreditPaymentModal';
-import CreditsFilters from '../components/CreditsFilters';
+import CreditsFilters, { formatRange } from '../components/CreditsFilters';
 import CreditsHeader from '../components/CreditsHeader';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
+
+const STATUS_LABEL = { pending: 'Pendientes', paid: 'Pagados' };
 
 export default function CreditsScreen({ route, user: userProp, role: roleProp }) {
   const navigation = useNavigation();
@@ -24,15 +26,22 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
   const user = routeUser || userProp || null;
   const role = routeRole || roleProp || null;
   const [search, setSearch] = useState('');
+  const [menuVisible, setMenuVisible] = useState(false);
 
   const {
-    loading, loadError, filter, setFilter, credits, filteredCredits, totals,
+    loading, loadError, filter, setFilter, filteredCredits, totals, counts,
+    dateFrom, dateTo, setDateRange, clearFilters, reload,
     selectedCredit, paymentAmount, setPaymentAmount,
     modalVisible, openModal, closeModal, animValue,
     handleAbono, handleDelete, submittingPayment,
   } = useCredits(user, role, initialFilter || 'pending');
 
-  const handleEditPreSale = async (credit) => {
+  const openHistory = useCallback(
+    () => navigation.navigate('CreditsHistory', { user, role }),
+    [navigation, user, role],
+  );
+
+  const handleEditPreSale = useCallback(async (credit) => {
     if (!credit?.preSaleId) {
       Alert.alert('Sin preventa', 'Este crédito no está vinculado a una pre-venta.');
       return;
@@ -44,7 +53,12 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
     } catch (error) {
       Alert.alert('Error', 'No se pudo cargar la pre-venta.');
     }
-  };
+  }, [navigation, role]);
+
+  const openDetail = useCallback(
+    (credit) => navigation.navigate('CreditDetail', { credit, user, role }),
+    [navigation, user, role],
+  );
 
   const normalize = (v) => (v || '').toString().toLowerCase().trim();
 
@@ -58,12 +72,47 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
     });
   }, [filteredCredits, search]);
 
-  // Counts per status for filter chips (sobre todos los créditos, no solo el filtro activo)
-  const filterCounts = useMemo(() => {
-    const pending = credits.filter(c => c.status !== 'paid').length;
-    const paid = credits.filter(c => c.status === 'paid').length;
-    return { pending, paid };
-  }, [credits]);
+  // Estado y fechas viven en el menú de 3 puntos: sin este resumen la lista
+  // aparecería acotada sin decir por qué.
+  const rangeLabel = formatRange(dateFrom, dateTo);
+  const filtersActive = filter !== 'pending' || !!rangeLabel;
+
+  // renderItem inline se recreaba en cada tecla del buscador y anulaba el
+  // React.memo de CreditCard: con useCallback solo re-renderiza lo que cambió.
+  const renderItem = useCallback(({ item }) => (
+    <CreditCard
+      item={item}
+      role={role}
+      onAbonar={openModal}
+      onDelete={handleDelete}
+      onEditPreSale={handleEditPreSale}
+      onViewDetail={openDetail}
+    />
+  ), [role, openModal, handleDelete, handleEditPreSale, openDetail]);
+
+  const header = (
+    <CreditsHeader
+      totals={totals}
+      onBack={() => navigation.goBack()}
+      onOpenMenu={() => setMenuVisible(true)}
+      filtersActive={filtersActive}
+    />
+  );
+
+  const menu = (
+    <CreditsFilters
+      visible={menuVisible}
+      onClose={() => setMenuVisible(false)}
+      filter={filter}
+      onChangeFilter={setFilter}
+      counts={counts}
+      dateFrom={dateFrom}
+      dateTo={dateTo}
+      onChangeRange={setDateRange}
+      onClear={clearFilters}
+      onOpenHistory={openHistory}
+    />
+  );
 
   if (loading) {
     return (
@@ -80,11 +129,8 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
     const isBuildingIndex = String(loadError?.message || '').includes('index');
     return (
       <View style={globalStyles.container}>
-        <CreditsHeader
-          totals={totals}
-          onBack={() => navigation.goBack()}
-          onOpenHistory={() => navigation.navigate('CreditsHistory', { user, role })}
-        />
+        {header}
+        {menu}
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30 }}>
           <Icon name="alert-circle-outline" size={56} color="#FF3B30" />
           <Text style={{ marginTop: 12, fontSize: 15, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' }}>
@@ -97,7 +143,7 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
           </Text>
           <TouchableOpacity
             style={{ marginTop: 20, backgroundColor: '#007AFF', borderRadius: 30, paddingVertical: 12, paddingHorizontal: 26 }}
-            onPress={() => setFilter(filter)}
+            onPress={reload}
             activeOpacity={0.85}
           >
             <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Reintentar</Text>
@@ -109,11 +155,7 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
 
   return (
     <View style={globalStyles.container}>
-      <CreditsHeader
-        totals={totals}
-        onBack={() => navigation.goBack()}
-        onOpenHistory={() => navigation.navigate('CreditsHistory', { user, role })}
-      />
+      {header}
 
       <View style={styles.screenContent}>
         {/* Search bar */}
@@ -131,24 +173,37 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
           )}
         </View>
 
-        <CreditsFilters filter={filter} onChange={setFilter} counts={filterCounts} />
+        {/* Resumen de filtros activos (solo cuando no es la vista por defecto) */}
+        {filtersActive && (
+          <View style={styles.activeChipsRow}>
+            {filter !== 'pending' && (
+              <TouchableOpacity style={styles.activeChip} onPress={() => setFilter('pending')}>
+                <Text style={styles.activeChipText}>{STATUS_LABEL[filter] || filter}</Text>
+                <Icon name="close-circle" size={14} color="#007AFF" />
+              </TouchableOpacity>
+            )}
+            {!!rangeLabel && (
+              <TouchableOpacity style={styles.activeChip} onPress={() => setDateRange(null, null)}>
+                <Icon name="calendar" size={13} color="#007AFF" />
+                <Text style={styles.activeChipText}>{rangeLabel}</Text>
+                <Icon name="close-circle" size={14} color="#007AFF" />
+              </TouchableOpacity>
+            )}
+            <Text style={styles.activeChipsCount}>{visibleCredits.length}</Text>
+          </View>
+        )}
 
         <FlatList
           data={visibleCredits}
           keyExtractor={(i) => i.id}
-          renderItem={({ item }) => (
-            <CreditCard
-              item={item}
-              role={role}
-              onAbonar={openModal}
-              onDelete={handleDelete}
-              onEditPreSale={handleEditPreSale}
-              onViewDetail={(credit) => navigation.navigate('CreditDetail', { credit, user, role })}
-            />
-          )}
+          renderItem={renderItem}
           contentContainerStyle={styles.listContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Icon name="credit-card-off-outline" size={40} color="#D1D5DB" />
@@ -157,6 +212,8 @@ export default function CreditsScreen({ route, user: userProp, role: roleProp })
           }
         />
       </View>
+
+      {menu}
 
       <CreditPaymentModal
         visible={modalVisible}

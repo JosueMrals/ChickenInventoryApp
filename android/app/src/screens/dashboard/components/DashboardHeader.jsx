@@ -8,7 +8,7 @@ import styles from '../styles/DashboardHeaderStyles';
 
 const COLLAPSE_DISTANCE = 40;
 
-export default function DashboardHeader({ displayName, scrollY }) {
+export default function DashboardHeader({ displayName, scrollY, onToggleVariant }) {
   const insets = useSafeAreaInsets();
 
   const handleLogout = async () => {
@@ -47,9 +47,16 @@ export default function DashboardHeader({ displayName, scrollY }) {
         {displayName}
       </Animated.Text>
 
-      <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-        <Icon name="log-out-outline" size={20} color="#FF3B30" />
-      </TouchableOpacity>
+      <View style={styles.headerActions}>
+        {onToggleVariant && (
+          <TouchableOpacity onPress={onToggleVariant} style={styles.toggleButton}>
+            <Icon name="grid-outline" size={19} color="#007AFF" />
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+          <Icon name="log-out-outline" size={20} color="#FF3B30" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }

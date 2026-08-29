@@ -3,6 +3,7 @@ import {
   getDaysOverdue,
   getEffectiveCreditLimit,
   getCreditBehavior,
+  computeCreditExposure,
   toDateSafe,
 } from '../creditUtils';
 
@@ -152,5 +153,60 @@ describe('toDateSafe', () => {
     expect(toDateSafe({ toDate: () => d })).toEqual(d);
     expect(toDateSafe(null)).toBeNull();
     expect(toDateSafe('no-es-fecha')).toBeNull();
+  });
+});
+
+// ── computeCreditExposure ────────────────────────────────────────────────────
+// Regresión: el límite se comparaba contra el total de LA VENTA, no contra la
+// exposición acumulada. Un cliente con límite C$1,000 que ya debía C$950 podía
+// llevarse otra venta de C$1,000, y otra, sin tope real.
+describe('computeCreditExposure', () => {
+  const conLimite = { creditLimit: 1000 };
+
+  test('cliente sin límite: el crédito no está habilitado', () => {
+    const res = computeCreditExposure({ customer: { creditLimit: 0 }, outstanding: 0, saleTotal: 100 });
+    expect(res.enabled).toBe(false);
+    expect(res.exceeded).toBe(false);
+  });
+
+  test('sin deuda previa: descuenta solo esta venta', () => {
+    expect(computeCreditExposure({ customer: conLimite, outstanding: 0, saleTotal: 800 }))
+      .toMatchObject({ enabled: true, verified: true, outstanding: 0, available: 200, exceeded: false });
+  });
+
+  test('la deuda vigente cuenta contra el límite', () => {
+    // El caso del bug: ya debe 950 y quiere llevar otros 1000.
+    expect(computeCreditExposure({ customer: conLimite, outstanding: 950, saleTotal: 1000 }))
+      .toMatchObject({ available: 0, exceeded: true });
+  });
+
+  test('justo en el límite no se bloquea; un centavo más sí', () => {
+    expect(computeCreditExposure({ customer: conLimite, outstanding: 950, saleTotal: 50 }))
+      .toMatchObject({ available: 0, exceeded: false });
+    expect(computeCreditExposure({ customer: conLimite, outstanding: 950, saleTotal: 50.01 }).exceeded)
+      .toBe(true);
+  });
+
+  test('el sobregiro amplía el tope', () => {
+    // 1000 + 20% = 1200 efectivo.
+    const conSobregiro = { creditLimit: 1000, creditOverdraftType: 'percent', creditOverdraftValue: 20 };
+    expect(computeCreditExposure({ customer: conSobregiro, outstanding: 1000, saleTotal: 200 }))
+      .toMatchObject({ limit: 1200, exceeded: false });
+    expect(computeCreditExposure({ customer: conSobregiro, outstanding: 1000, saleTotal: 201 }).exceeded)
+      .toBe(true);
+  });
+
+  test('sin verificar (sin señal): degrada a validar solo el total de la venta', () => {
+    const sinVerificar = computeCreditExposure({ customer: conLimite, outstanding: null, saleTotal: 1000 });
+    expect(sinVerificar.verified).toBe(false);
+    expect(sinVerificar.outstanding).toBeNull();
+    expect(sinVerificar.exceeded).toBe(false); // comportamiento anterior
+    expect(computeCreditExposure({ customer: conLimite, outstanding: null, saleTotal: 1001 }).exceeded).toBe(true);
+  });
+
+  test('no arrastra errores de punto flotante', () => {
+    const res = computeCreditExposure({ customer: { creditLimit: 100 }, outstanding: 33.33, saleTotal: 66.67 });
+    expect(res.available).toBe(0);
+    expect(res.exceeded).toBe(false);
   });
 });

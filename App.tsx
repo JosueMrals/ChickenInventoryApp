@@ -51,6 +51,7 @@ import StaffPurchaseScreen from './android/app/src/screens/payroll/screens/Staff
 
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
 import ProductsStack from './android/app/src/navigation/ProductsStack';
+import ReceptionStack from './android/app/src/navigation/ReceptionStack';
 import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen';
 import TicketCustomizationScreen from './android/app/src/screens/settings/ticketCustomization/TicketCustomizationScreen';
 import SettingsScreen from './android/app/src/screens/settings/SettingsScreen'; // Nuevo Import
@@ -88,6 +89,7 @@ const ReturnsScreenAny = ReturnsScreen as React.ComponentType<any>;
 const WarehouseDashboardScreenAny = WarehouseDashboardScreen as React.ComponentType<any>;
 const PayrollScreenAny = PayrollScreen as React.ComponentType<any>;
 const StaffPurchaseScreenAny = StaffPurchaseScreen as React.ComponentType<any>;
+const ReceptionStackAny = ReceptionStack as React.ComponentType<any>;
 
 function AppDrawer({ route, navigation }: any) {
   const { role, user, screen } = route?.params || {};
@@ -229,6 +231,11 @@ function AppDrawer({ route, navigation }: any) {
 	  {/* WAREHOUSE ROUTES */}
 	  <Drawer.Screen name="PreparePreSales" options={{ title: "Bodega - Control" }}>
 		  {(props) => <WarehouseDashboardScreenAny {...props} user={user} role={role} />}
+	  </Drawer.Screen>
+
+	  {/* RECEPCIÓN DE MERCANCÍA — ingreso de stock (admin/bodeguero) */}
+	  <Drawer.Screen name="Reception" options={{ headerShown: false, drawerLabel: 'Recepción de Mercancía' }}>
+		  {(props) => <ReceptionStackAny {...props} route={{ ...props.route, params: { ...(props.route?.params || {}), user, role } }} />}
 	  </Drawer.Screen>
 
       <Drawer.Screen name="Returns" options={{ drawerLabel: "Devoluciones" }}>

@@ -238,6 +238,35 @@ export function applyReturnToPresale(presaleData, verifiedItems) {
   };
 }
 
+// ── Recálculo del crédito tras una devolución aprobada ───────────────────────
+// Pura (sin Firestore), igual que applyReturnToPresale: recibe el doc de crédito
+// y el nuevo total de la factura, devuelve los campos a escribir (o null si no
+// hay crédito). Antes esto no existía y la devolución solo bajaba el total de la
+// pre-venta: al cliente se le seguía cobrando la mercadería que devolvió.
+//
+// `paid` NO se toca (es inmutable en esta vía por reglas, y borrarlo perdería el
+// rastro del dinero ya cobrado). El invariante que exigen las reglas es
+// total == paid + pending, así que cuando el cliente ya pagó MÁS de lo que quedó
+// facturado, el crédito se cierra en lo cobrado (total = paid, pending = 0) y el
+// reembolso queda reflejado en el `amountPaid` que applyReturnToPresale recorta.
+export function applyReturnToCredit(creditData, newPresaleTotal) {
+  if (!creditData) return null;
+
+  const paid = Number(creditData.paid) || 0;
+  const newTotal = Math.max(0, Number(newPresaleTotal) || 0);
+  const total = Math.max(newTotal, paid);
+  const pending = Number((total - paid).toFixed(2));
+
+  return {
+    total: Number(total.toFixed(2)),
+    pending,
+    // Devolución total sin abonos → total 0 y pending 0: no se debe nada. Es la
+    // única forma válida de "sin deuda" que admiten las reglas (status pending
+    // exige pending > 0).
+    status: pending <= 0 ? 'paid' : 'pending',
+  };
+}
+
 export async function approveReturnRequest({ returnRequestId, returnRequest, verifiedQuantities = null }) {
   const user = auth().currentUser;
   if (!user) throw new Error('No autenticado');
@@ -294,6 +323,20 @@ export async function approveReturnRequest({ returnRequestId, returnRequest, ver
       else presaleRef = null;
     }
 
+    // Crédito enlazado: se lee AQUÍ (con el resto de lecturas) porque una
+    // transacción no admite leer después de escribir. Se resuelve solo por
+    // `creditId` — la transacción del cliente no puede ejecutar queries, y ese
+    // campo lo escriben todas las vías que crean crédito (createPreSale,
+    // createCreditFromPreSale y completePreSalePayment).
+    let creditRef = null;
+    let creditData = null;
+    if (presaleData?.creditId) {
+      creditRef = firestore().collection('credits').doc(presaleData.creditId);
+      const creditSnap = await tx.get(creditRef);
+      if (creditSnap.exists()) creditData = creditSnap.data();
+      else creditRef = null;
+    }
+
     // Restaurar stock solo por las cantidades verificadas como recibidas
     snapshots.forEach((snap, idx) => {
       if (!snap.exists()) return;
@@ -321,12 +364,22 @@ export async function approveReturnRequest({ returnRequestId, returnRequest, ver
     // Actualizar la factura (pre-venta): quitar de la lista las cantidades
     // DEVUELTAS por el cliente (expectedQty) y recalcular los totales.
     if (presaleRef && presaleData) {
+      const presaleUpdate = applyReturnToPresale(presaleData, verifiedItems);
       tx.update(presaleRef, {
-        ...applyReturnToPresale(presaleData, verifiedItems),
+        ...presaleUpdate,
         returnedAt: firestore.FieldValue.serverTimestamp(),
         lastReturnAt: firestore.FieldValue.serverTimestamp(),
         returnApprovedBy: user.email || user.uid,
       });
+
+      // El crédito debe seguir al total de la factura: sin esto, devolver
+      // mercadería no bajaba la deuda y se le cobraba al cliente lo devuelto.
+      if (creditRef && creditData) {
+        tx.update(creditRef, {
+          ...applyReturnToCredit(creditData, presaleUpdate.total),
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+      }
     } else if (presaleRef) {
       tx.update(presaleRef, {
         status: 'returned',

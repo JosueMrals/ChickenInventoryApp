@@ -1,7 +1,10 @@
 import { firestore, auth } from '../../../services/firebaseConfig';
-import { getAggregateFromServer, sum } from '@react-native-firebase/firestore';
+import { getAggregateFromServer, count, sum } from '@react-native-firebase/firestore';
+import { startOfDay, endOfDay } from 'date-fns';
 import { computeAbono } from '../../../utils/creditUtils';
-import { TERMINAL_PRESALE_STATUSES } from '../../../services/preSaleService';
+import { captureError } from '../../../services/errorMonitoring';
+import { NON_PAYABLE_PRESALE_STATUSES, CREDIT_TO_CASH_STATUS } from '../../../services/preSaleService';
+import { formatCurrency } from '../../../utils/formatMoney';
 
 function sanitizeDocId(rawId) {
   if (typeof rawId !== 'string') return null;
@@ -53,13 +56,26 @@ function toFirestoreTimestamp(value) {
   return firestore.Timestamp.fromDate(new Date());
 }
 
+/** 📅 Acota un query de créditos a un rango de fechas.
+ *  Se normaliza a día completo: con la fecha tal cual, "hasta el 15" dejaba
+ *  fuera todo lo creado ese mismo día después de las 00:00. */
+const applyDateRange = (query, from, to) => {
+  if (from) query = query.where('createdAt', '>=', startOfDay(from));
+  if (to) query = query.where('createdAt', '<=', endOfDay(to));
+  return query;
+};
+
 /** 🧾 Obtener lista de créditos en tiempo real.
- *  `status` va al query en vez de filtrarse en JS, y `limit` acota la lista:
- *  `credits` solo crece y antes se transfería entera para mostrar una pantalla.
+ *  `status` y el rango de fechas van al query en vez de filtrarse en JS, y
+ *  `limit` acota la lista: `credits` solo crece y antes se transfería entera
+ *  para mostrar una pantalla. Filtrar la fecha en cliente sobre esa página
+ *  mentiría (mostraría "no hay créditos en marzo" cuando solo no entraron en
+ *  los últimos 100). Índice existente: (status ASC, createdAt DESC).
  *  Los totales NO salen de aquí (serían parciales): ver getCreditTotals(). */
-export const fetchCredits = (onUpdate, { status = null, limit = 100 } = {}, onError = null) => {
+export const fetchCredits = (onUpdate, { status = null, limit = 100, from = null, to = null } = {}, onError = null) => {
   let query = firestore().collection('credits');
   if (status) query = query.where('status', '==', status);
+  query = applyDateRange(query, from, to);
 
   return query
     .orderBy('createdAt', 'desc')
@@ -95,24 +111,72 @@ export const fetchCredits = (onUpdate, { status = null, limit = 100 } = {}, onEr
  *  Un agregado no descarga los documentos: cuesta una fracción de lectura y el
  *  resultado es exacto sobre toda la colección, no sobre la página visible.
  */
-export const getCreditTotals = async () => {
+export const getCreditTotals = async ({ from = null, to = null } = {}) => {
   const credits = firestore().collection('credits');
+  const scoped = (status) => applyDateRange(credits.where('status', '==', status), from, to);
 
   try {
+    // El conteo viaja en el mismo agregado que la suma: los contadores de los
+    // filtros no pueden salir de la lista descargada (viene ya filtrada por
+    // estado, así que el estado inactivo siempre contaría 0).
     const [paidSnap, pendingSnap] = await Promise.all([
-      getAggregateFromServer(credits.where('status', '==', 'paid'), { value: sum('total') }),
-      getAggregateFromServer(credits.where('status', '==', 'pending'), { value: sum('pending') }),
+      getAggregateFromServer(scoped('paid'), { value: sum('total'), docs: count() }),
+      getAggregateFromServer(scoped('pending'), { value: sum('pending'), docs: count() }),
     ]);
 
     return {
       paid: paidSnap.data().value || 0,
       pending: pendingSnap.data().value || 0,
+      countPaid: paidSnap.data().docs || 0,
+      countPending: pendingSnap.data().docs || 0,
     };
   } catch (error) {
     console.error('[creditsService] getCreditTotals:', error);
     // `null`, no 0: son montos de dinero. Un C$0.00 inventado hace creer que no
     // hay saldo pendiente; la UI muestra "—" cuando el dato no está disponible.
-    return { paid: null, pending: null, error };
+    return { paid: null, pending: null, countPaid: null, countPending: null, error };
+  }
+};
+
+/** 🧮 Deuda vigente de un cliente: suma EN EL SERVIDOR de lo pendiente en sus
+ *  créditos sin saldar. Es la base del control de sobregiro acumulado: sin esto
+ *  el límite se comparaba solo contra el total de la venta en curso.
+ *
+ *  Se calcula por agregado en vez de mantener un contador denormalizado en el
+ *  cliente (`customer.currentCredit`): hay ~10 vías que escriben créditos y un
+ *  contador con tantos escritores se desincroniza en silencio — y es dinero.
+ *
+ *  `excludeCreditId`: al EDITAR una preventa a crédito, su propio crédito ya
+ *  está incluido en la suma; sin excluirlo se contaría dos veces y bloquearía
+ *  cualquier edición.
+ *
+ *  Devuelve `null` —no 0— si el agregado falla (sin señal): 0 significaría
+ *  "no debe nada" y autorizaría crédito a un cliente sobregirado. */
+export const getCustomerOutstandingCredit = async (customerId, { excludeCreditId = null } = {}) => {
+  if (!customerId) return 0;
+
+  try {
+    const snap = await getAggregateFromServer(
+      firestore()
+        .collection('credits')
+        .where('customerId', '==', customerId)
+        .where('status', '==', 'pending'),
+      { value: sum('pending') },
+    );
+
+    let outstanding = Number(snap.data().value) || 0;
+
+    if (excludeCreditId) {
+      const own = await firestore().collection('credits').doc(excludeCreditId).get();
+      if (own.exists() && own.data()?.status === 'pending') {
+        outstanding -= Number(own.data()?.pending) || 0;
+      }
+    }
+
+    return Math.max(0, Number(outstanding.toFixed(2)));
+  } catch (error) {
+    captureError(error, { scope: 'creditsService.getCustomerOutstandingCredit', customerId });
+    return null;
   }
 };
 
@@ -189,8 +253,11 @@ export const abonarCredito = async (creditId, amount, userEmail) => {
         if (!snap.exists()) return;
         const currentStatus = snap.data()?.status;
         if (currentStatus === 'paid') return; // ya reflejaba el saldo: reintento idempotente
-        if (TERMINAL_PRESALE_STATUSES.has(currentStatus)) {
-          throw new Error(`La pre-venta está en estado terminal incompatible: ${currentStatus}`);
+        // El crédito por cobrar vive en 'dispatched'/'credit_dispatched': esos SÍ
+        // deben poder pasar a 'paid'. Solo se bloquean los estados donde ya no hay
+        // deuda que saldar o donde el estado codifica una devolución.
+        if (NON_PAYABLE_PRESALE_STATUSES.has(currentStatus)) {
+          throw new Error(`La pre-venta está en un estado que no admite cobro: ${currentStatus}`);
         }
         tx.update(preSaleRef, { status: 'paid', fechaPago: nowTs, updatedAt: nowTs });
       });
@@ -275,6 +342,62 @@ export const createCreditFromPreSale = async (preSale, createdBy, options = {}) 
 };
 
 /** ❌ Eliminar crédito */
+/** ❌ Eliminar crédito y devolver su pre-venta a contado.
+ *
+ *  Antes era un `.delete()` suelto: el crédito desaparecía y la pre-venta se
+ *  quedaba en 'credit_pending' apuntando a un `creditId` que ya no existía.
+ *  Peor: en ese estado createCreditFromPreSale la rechaza ("ya tiene un crédito
+ *  asignado"), así que la orden quedaba trabada para siempre, sin cuenta por
+ *  cobrar y sin posibilidad de volver a generarla. */
 export const eliminarCredito = async (creditId) => {
-  await firestore().collection('credits').doc(creditId).delete();
+  const safeCreditId = sanitizeDocId(creditId);
+  if (!safeCreditId) throw new Error('Crédito inválido: id no válido.');
+
+  const creditRef = firestore().collection('credits').doc(safeCreditId);
+
+  await firestore().runTransaction(async (tx) => {
+    const creditSnap = await tx.get(creditRef);
+    if (!creditSnap.exists()) return; // ya no existe: reintento idempotente
+
+    const creditData = creditSnap.data() || {};
+
+    // Mismo criterio que al pasar una pre-venta de crédito a contado: borrar un
+    // crédito con abonos perdería el registro del dinero ya cobrado.
+    const paid = Number(creditData.paid) || 0;
+    if (paid > 0) {
+      throw new Error(
+        `Este crédito tiene ${formatCurrency(paid)} abonados. No se puede eliminar sin perder el registro de lo cobrado.`
+      );
+    }
+
+    // Los créditos de venta rápida guardan `saleId` y no tienen pre-venta que
+    // revertir: en ese caso solo se borra el documento.
+    const preSaleId = sanitizeDocId(creditData.preSaleId || creditData.presaleId);
+    let preSaleRef = null;
+    let preSaleStatus = null;
+    if (preSaleId) {
+      preSaleRef = firestore().collection('presales').doc(preSaleId);
+      const preSaleSnap = await tx.get(preSaleRef);
+      if (preSaleSnap.exists()) preSaleStatus = preSaleSnap.data()?.status;
+      else preSaleRef = null;
+    }
+
+    if (preSaleRef) {
+      const revertTo = CREDIT_TO_CASH_STATUS[preSaleStatus];
+      if (!revertTo) {
+        throw new Error(
+          `No se puede eliminar: la pre-venta está en estado "${preSaleStatus}". Solo se puede quitar el crédito antes de que la orden salga de bodega.`
+        );
+      }
+      tx.update(preSaleRef, {
+        status: revertTo,
+        paymentMethod: 'cash',
+        creditId: firestore.FieldValue.delete(),
+        creditDueDate: null,
+        updatedAt: firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    tx.delete(creditRef);
+  });
 };

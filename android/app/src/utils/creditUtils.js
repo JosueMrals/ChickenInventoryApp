@@ -55,6 +55,46 @@ export const getEffectiveCreditLimit = (customer) => {
 };
 
 /**
+ * Disponibilidad de crédito de un cliente CONSIDERANDO lo que ya debe.
+ *
+ * Antes solo se comparaba el total de la venta contra el límite: un cliente con
+ * límite C$1,000 que ya debía C$950 podía llevarse otra venta de C$1,000, y
+ * otra. El tope se aplica ahora sobre la exposición total (deuda vigente + esta
+ * venta).
+ *
+ * `outstanding` es la suma de lo pendiente en los créditos vigentes del cliente.
+ * Pasar `null` significa "no se pudo verificar" (sin señal): en ese caso se
+ * valida solo contra el total de la venta —el comportamiento anterior— y
+ * `verified` sale en false para que la UI lo advierta.
+ */
+export const computeCreditExposure = ({ customer, outstanding = null, saleTotal = 0 } = {}) => {
+  const limit = getEffectiveCreditLimit(customer);
+  const limitCents = toCents(limit.total);
+  const saleCents = Math.max(0, toCents(saleTotal));
+
+  // OJO: Number(null) es 0, que es finito. Sin descartar null/undefined aparte,
+  // un saldo NO verificado se leería como "verificado, no debe nada" — que es
+  // justo el caso peligroso: autorizaría crédito a un cliente sobregirado.
+  const verified = outstanding !== null
+    && outstanding !== undefined
+    && Number.isFinite(Number(outstanding));
+  const outstandingCents = verified ? Math.max(0, toCents(outstanding)) : 0;
+  const usedCents = outstandingCents + saleCents;
+  const enabled = limitCents > 0;
+
+  return {
+    enabled,
+    verified,
+    limit: limit.total,
+    extra: limit.extra,
+    outstanding: verified ? fromCents(outstandingCents) : null,
+    // Lo que le queda al cliente DESPUÉS de esta venta.
+    available: fromCents(Math.max(0, limitCents - usedCents)),
+    exceeded: enabled && usedCents > limitCents,
+  };
+};
+
+/**
  * Calcula el resultado de un abono. Acepta pagos mayores al saldo: aplica solo
  * el pendiente y reporta el cambio a devolver.
  * Lanza Error con mensaje en español si el monto es inválido o no hay saldo.

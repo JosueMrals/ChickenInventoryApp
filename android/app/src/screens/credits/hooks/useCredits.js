@@ -3,6 +3,7 @@ import { Alert, Animated } from 'react-native';
 import { fetchCredits, getCreditTotals, abonarCredito, eliminarCredito } from '../services/creditsService';
 import { auth } from '../../../services/firebaseConfig';
 import { useSubmitLock } from '../../../hooks/useSubmitLock';
+import { formatCurrency } from '../../../utils/formatMoney';
 
 const parseAmount = (value) => {
   const normalized = (value || '').toString().replace(',', '.').trim();
@@ -29,6 +30,12 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
   const [filter, setFilter] = useState(initialFilter);
+  // Rango de fechas: va al query, no se filtra en cliente (ver fetchCredits).
+  const [dateFrom, setDateFrom] = useState(null);
+  const [dateTo, setDateTo] = useState(null);
+  // El botón "Reintentar" hacía `setFilter(filter)`: mismo valor, sin re-render,
+  // sin resuscripción. `reloadKey` sí fuerza volver a montar el listener.
+  const [reloadKey, setReloadKey] = useState(0);
   // Cerrojo por ref: `submittingPayment` era estado, y dos toques rápidos leían
   // ambos `false` antes del re-render → se registraba el abono DOS veces.
   const { submitting: submittingPayment, runLocked } = useSubmitLock();
@@ -48,7 +55,7 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
         setLoadError(null);
         setLoading(false);
       },
-      { status },
+      { status, from: dateFrom, to: dateTo },
       // Un query fallido (índice en construcción, permisos) debe cortar la carga
       // y mostrar el motivo; antes dejaba la pantalla girando indefinidamente.
       (error) => {
@@ -58,7 +65,7 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
       },
     );
     return unsub;
-  }, [filter]);
+  }, [filter, dateFrom, dateTo, reloadKey]);
 
   // Los totales se suman en el servidor sobre TODA la colección: la lista está
   // acotada, así que calcularlos sobre `credits` daría montos incompletos.
@@ -66,18 +73,33 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
+  // Los totales siguen el mismo rango de fechas que la lista: si no, el encabezado
+  // mostraría el saldo de toda la cartera bajo una vista filtrada a una semana.
   const refreshTotals = useCallback(async () => {
-    const next = await getCreditTotals();
+    const next = await getCreditTotals({ from: dateFrom, to: dateTo });
     // getCreditTotals es asíncrono y la pantalla puede cerrarse antes de que resuelva.
     if (mountedRef.current) setTotals(next);
-  }, []);
+  }, [dateFrom, dateTo]);
 
   useEffect(() => {
     refreshTotals();
-  }, [refreshTotals]);
+  }, [refreshTotals, reloadKey]);
 
   // La lista ya viene filtrada del servidor.
   const filteredCredits = credits;
+
+  const setDateRange = useCallback((from, to) => {
+    setDateFrom(from || null);
+    setDateTo(to || null);
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setDateFrom(null);
+    setDateTo(null);
+    setFilter('pending');
+  }, []);
+
+  const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
   const openModal = (credit) => {
     setSelectedCredit(credit);
@@ -133,13 +155,19 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
         refreshTotals();
 
         const changeMsg = res.change > 0
-          ? `\nCambio a devolver: C$${res.change.toFixed(2)}`
+          ? `\nCambio a devolver: ${formatCurrency(res.change)}`
+          : '';
+        // El enlace con la preventa se actualiza aparte y puede fallar. Antes solo
+        // se registraba en consola: la pantalla decía "saldado" mientras la venta
+        // seguía figurando como crédito por cobrar, sin que nadie se enterara.
+        const linkMsg = res.linkedPreSaleUpdated === false
+          ? '\n\n⚠ El crédito quedó saldado, pero la pre-venta enlazada no pudo actualizarse. Revísala manualmente.'
           : '';
         Alert.alert(
           'Abono registrado',
           (res.estado === 'paid'
             ? 'Crédito saldado completamente.'
-            : 'Pago parcial aplicado correctamente.') + changeMsg
+            : 'Pago parcial aplicado correctamente.') + changeMsg + linkMsg
         );
 
         closeModal();
@@ -158,9 +186,16 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
       {
         text: 'Eliminar',
         style: 'destructive',
+        // eliminarCredito ahora rechaza si el crédito tiene abonos o si la orden
+        // ya salió de bodega: sin este catch el error quedaba sin manejar y la
+        // pantalla no decía nada.
         onPress: async () => {
-          await eliminarCredito(id);
-          refreshTotals();
+          try {
+            await eliminarCredito(id);
+            refreshTotals();
+          } catch (e) {
+            Alert.alert('No se pudo eliminar', e?.message || 'Intenta de nuevo.');
+          }
         },
       },
     ]);
@@ -172,8 +207,16 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
     loadError,
     filter,
     setFilter,
+    dateFrom,
+    dateTo,
+    setDateRange,
+    clearFilters,
+    reload,
     filteredCredits,
     totals,
+    // Contadores por estado: vienen del servidor, no de `credits` (esa lista ya
+    // está filtrada por estado y el estado inactivo siempre daría 0).
+    counts: { pending: totals.countPending, paid: totals.countPaid },
     selectedCredit,
     paymentAmount,
     setPaymentAmount,

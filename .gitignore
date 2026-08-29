@@ -91,3 +91,5 @@ ios/**/GoogleService-Info.plist
 android/gradle.local.properties
 android/.github
 android/firebase
+android/.claude
+.serena/

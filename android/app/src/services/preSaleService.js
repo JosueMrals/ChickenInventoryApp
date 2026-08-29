@@ -1,6 +1,7 @@
 import firestore from '@react-native-firebase/firestore';
 import auth from "@react-native-firebase/auth";
 import { buildCustomerName } from "../utils/customerUtils";
+import { formatCurrency } from "../utils/formatMoney";
 
 const presalesCollection = firestore().collection('presales');
 const creditsCollection = firestore().collection('credits');
@@ -30,6 +31,29 @@ const BLOCKING_DELETE_ITEM_STATUSES = new Set(['preparing', 'ready', 'dispatched
 export const TERMINAL_PRESALE_STATUSES = new Set([
   'paid', 'cancelled', 'dispatched', 'credit_dispatched', 'delivered',
   'partially_returned', 'returned',
+]);
+
+// Crédito → contado. Solo cubre los estados anteriores al despacho: una orden ya
+// entregada no puede "dejar de ser a crédito" sin quedar entregada y sin cuenta
+// por cobrar. Vive aquí, y no dentro de una función, para que la conversión sea
+// una sola definición compartida.
+export const CREDIT_TO_CASH_STATUS = {
+  credit_pending: 'pending',
+  credit_preparing: 'preparing',
+  credit_ready_for_delivery: 'ready_for_delivery',
+};
+
+// Estados en los que saldar el crédito NO debe marcar la venta como pagada.
+// OJO: no confundir con TERMINAL_PRESALE_STATUSES, que responde otra pregunta
+// ("¿puede bodega reescribir esta orden?") e incluye `dispatched` y
+// `credit_dispatched` — que son justamente donde vive un crédito por cobrar.
+// Usarlo como guard del cobro dejaba la preventa en 'credit_dispatched' para
+// siempre y la cartera sobrestimada.
+// - cancelled: la venta se anuló, no hay nada que marcar pagado.
+// - returned / partially_returned: el estado codifica la devolución;
+//   sobrescribirlo con 'paid' borraría ese rastro.
+export const NON_PAYABLE_PRESALE_STATUSES = new Set([
+  'cancelled', 'returned', 'partially_returned',
 ]);
 
 // Estado de la ORDEN → estado que corresponde a cada uno de sus PRODUCTOS.
@@ -341,12 +365,8 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
     preparing: 'credit_preparing',
     ready_for_delivery: 'credit_ready_for_delivery',
   };
-  // Mapa inverso: crédito → normal
-  const normalStatusMap = {
-    credit_pending: 'pending',
-    credit_preparing: 'preparing',
-    credit_ready_for_delivery: 'ready_for_delivery',
-  };
+  // Mapa inverso: crédito → normal (definición única a nivel de módulo).
+  const normalStatusMap = CREDIT_TO_CASH_STATUS;
   const creditStatuses = new Set(Object.keys(normalStatusMap));
   const editableStatuses = new Set([...Object.keys(creditStatusMap), ...creditStatuses]);
 
@@ -434,7 +454,7 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
         // Pasa a contado: un crédito con abonos no puede desaparecer sin más.
         if (paid > 0) {
           throw new Error(
-            `Esta pre-venta tiene C$${paid.toFixed(2)} abonados al crédito. Elimina los abonos antes de cambiarla a contado.`
+            `Esta pre-venta tiene ${formatCurrency(paid)} abonados al crédito. Elimina los abonos antes de cambiarla a contado.`
           );
         }
         tx.delete(existingCreditRef);
@@ -442,7 +462,7 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
       } else {
         if (total < paid) {
           throw new Error(
-            `El nuevo total (C$${total.toFixed(2)}) es menor que lo ya abonado (C$${paid.toFixed(2)}).`
+            `El nuevo total (${formatCurrency(total)}) es menor que lo ya abonado (${formatCurrency(paid)}).`
           );
         }
         tx.update(existingCreditRef, {
@@ -751,6 +771,31 @@ export const deletePreSaleInFirestore = async ({ preSaleId, reason }) => {
       throw new Error('No se puede eliminar: hay productos que ya fueron trabajados por bodega.');
     }
 
+    // La cuenta por cobrar muere con la venta. Antes esta transacción no tocaba
+    // `credits`: la preventa quedaba cancelada y el crédito seguía 'pending',
+    // inflando la cartera con una deuda de una venta que ya no existe.
+    // Se lee AQUÍ, junto al resto de lecturas, porque después ya hay escrituras.
+    // `creditId` lo escribe este mismo servicio (siempre un id limpio), así que
+    // basta con comprobar que sea una cadena con contenido.
+    const creditId = typeof preSaleData.creditId === 'string' ? preSaleData.creditId.trim() : '';
+    let creditRef = null;
+    if (creditId) {
+      creditRef = creditsCollection.doc(creditId);
+      const creditSnap = await tx.get(creditRef);
+      if (!creditSnap.exists()) {
+        creditRef = null;
+      } else {
+        // Mismo criterio que al pasar de crédito a contado: un crédito con
+        // abonos no puede desaparecer sin perder el rastro del dinero cobrado.
+        const paid = Number(creditSnap.data()?.paid) || 0;
+        if (paid > 0) {
+          throw new Error(
+            `No se puede eliminar: esta pre-venta tiene ${formatCurrency(paid)} abonados al crédito. Devuelve el dinero y elimina los abonos primero.`
+          );
+        }
+      }
+    }
+
     const inventoryWasDeducted = !!preSaleData.inventoryDeducted;
     const inventoryAlreadyRestored = !!preSaleData.inventoryRestored;
 
@@ -769,7 +814,10 @@ export const deletePreSaleInFirestore = async ({ preSaleId, reason }) => {
       inventoryRestored: inventoryWasDeducted,
       inventoryRestoredAt: inventoryWasDeducted ? firestore.FieldValue.serverTimestamp() : null,
       inventoryRestoredBy: inventoryWasDeducted ? (user?.email || 'N/A') : null,
+      ...(creditRef ? { creditId: firestore.FieldValue.delete() } : {}),
     });
+
+    if (creditRef) tx.delete(creditRef);
 
     const historyRef = preSaleRef.collection('history').doc();
     tx.set(historyRef, {

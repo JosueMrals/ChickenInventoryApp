@@ -9,9 +9,9 @@ import globalStyles from "../../styles/globalStyles";
 import AddProductModal from "./components/AddProductModal";
 import CreditDueDatePicker from "./components/CreditDueDatePicker";
 import { getEffectiveCreditLimit, toDateSafe } from "../../utils/creditUtils";
+import { useCreditExposure } from "../../hooks/useCreditExposure";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
-
-const formatCurrency = (value) => `C$${(Number(value) || 0).toFixed(2)}`;
+import { formatCurrency } from "../../utils/formatMoney";
 
 const formatPreSaleError = (error) => {
   const message = error?.message || '';
@@ -84,8 +84,14 @@ export default function PreSaleEditCartScreen({ navigation }) {
   const effectiveCredit = getEffectiveCreditLimit(customer);
   const customerCreditLimit = effectiveCredit.total;
   const canUseCredit = customerCreditLimit > 0;
-  const creditExceeded = canUseCredit && total > customerCreditLimit;
-  const creditAvailable = canUseCredit ? Math.max(customerCreditLimit - total, 0) : 0;
+  // El tope se aplica sobre la exposición TOTAL (deuda vigente + esta venta).
+  // Se excluye el crédito de ESTA preventa: ya está contado en la deuda vigente
+  // y sin excluirlo se contaría dos veces, bloqueando cualquier edición.
+  const creditExposure = useCreditExposure(customer, total, {
+    excludeCreditId: editingPreSale?.creditId || null,
+  });
+  const creditExceeded = creditExposure.exceeded;
+  const creditAvailable = creditExposure.available;
   const hasValidTotal = Number.isFinite(total) && total > 0;
   const preSaleIsCredit = editingPreSale?.paymentMethod === 'credit' || editingPreSale?.status === 'credit_pending';
 
@@ -153,10 +159,20 @@ export default function PreSaleEditCartScreen({ navigation }) {
       if (!canUseCredit) {
         return Alert.alert("Crédito no disponible", "Este cliente no tiene crédito habilitado.");
       }
-      if (total > customerCreditLimit) {
+      // Mientras la consulta esté en vuelo no se sabe si el saldo es 0 o si no se
+      // pudo leer: confirmar aquí se saltaría el tope acumulado.
+      if (creditExposure.loading) {
+        return Alert.alert(
+          "Verificando saldo",
+          "Estamos consultando la deuda del cliente. Intenta de nuevo en un momento."
+        );
+      }
+      if (creditExposure.exceeded) {
         return Alert.alert(
           "Crédito insuficiente",
-          `El crédito permitido es C$${customerCreditLimit.toFixed(2)} y el total es C$${total.toFixed(2)}.`
+          creditExposure.verified
+            ? `Este cliente ya debe ${formatCurrency(creditExposure.outstanding)} en otras facturas y su límite es ${formatCurrency(customerCreditLimit)}.\n\nCon esta venta de ${formatCurrency(total)} lo superaría.`
+            : `El crédito permitido es ${formatCurrency(customerCreditLimit)} y el total es ${formatCurrency(total)}.`
         );
       }
       if (!creditDueDate) {
@@ -301,13 +317,27 @@ export default function PreSaleEditCartScreen({ navigation }) {
                   <Text style={localStyles.creditHint}>
                     Límite: {formatCurrency(customerCreditLimit)}
                     {effectiveCredit.extra > 0 ? ` (incluye sobregiro ${formatCurrency(effectiveCredit.extra)})` : ''}
+                    {creditExposure.verified && creditExposure.outstanding > 0
+                      ? `${' · '}Ya debe: ${formatCurrency(creditExposure.outstanding)}`
+                      : ''}
                     {' · '}Disponible: {formatCurrency(creditAvailable)}
                   </Text>
                   {!hasValidTotal && (
                     <Text style={localStyles.creditWarning}>El total debe ser mayor que 0.</Text>
                   )}
                   {creditExceeded && (
-                    <Text style={localStyles.creditWarning}>El total supera el límite permitido.</Text>
+                    <Text style={localStyles.creditWarning}>
+                      {creditExposure.verified
+                        ? 'Con su deuda actual, esta venta supera el límite permitido.'
+                        : 'El total supera el límite permitido.'}
+                    </Text>
+                  )}
+                  {/* Sin señal no se puede leer la deuda vigente: se valida solo
+                      contra el total de la venta y se avisa. */}
+                  {!creditExposure.verified && !creditExposure.loading && (
+                    <Text style={localStyles.creditWarning}>
+                      Sin conexión: no se pudo verificar la deuda actual del cliente.
+                    </Text>
                   )}
                 </View>
                 <TouchableOpacity

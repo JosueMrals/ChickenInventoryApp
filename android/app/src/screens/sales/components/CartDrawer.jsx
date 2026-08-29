@@ -6,7 +6,8 @@ import styles from '../styles/cartStyles';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { registerQuickSaleFull } from '../../quicksalesNew/services/quickSaleService';
 import PaymentSelector from './PaymentSelector';
-import { getEffectiveCreditLimit } from '../../../utils/creditUtils';
+import { useCreditExposure } from '../../../hooks/useCreditExposure';
+import { formatCurrency } from '../../../utils/formatMoney';
 
 
 export default function CartDrawer({
@@ -39,6 +40,9 @@ export default function CartDrawer({
   const paid = parseFloat(paidAmount || 0);
   const pending = +Math.max(finalTotal - paid, 0).toFixed(2);
   const change = +Math.max(paid - finalTotal, 0).toFixed(2);
+  // En venta rápida solo lo que queda SIN pagar se vuelve crédito, así que la
+  // exposición se mide contra `pending`, no contra el total de la venta.
+  const creditExposure = useCreditExposure(customer, pending);
 
   const validateCreditAndRegister = async () => {
     if (cart.totals.items.length === 0) {
@@ -53,13 +57,25 @@ export default function CartDrawer({
         return;
       }
 
-      // Límite efectivo: límite base + sobregiro configurado en el cliente.
-      const creditLimit = getEffectiveCreditLimit(customer).total;
-      const currentCredit = Number(customer.currentCredit || 0);
-      const remaining = Math.max(creditLimit - currentCredit, 0);
+      // Mientras la consulta esté en vuelo no se sabe si el saldo es 0 o si no se
+      // pudo leer: confirmar aquí caería en el camino degradado y se saltaría el
+      // tope acumulado.
+      if (creditExposure.loading) {
+        Alert.alert('Verificando saldo', 'Estamos consultando la deuda del cliente. Intenta de nuevo en un momento.');
+        return;
+      }
 
-      if (pending > remaining) {
-        Alert.alert('Crédito insuficiente', `El cliente tiene límite disponible C$${remaining.toFixed(2)}. Ajusta el pago.`);
+      // La deuda vigente se lee del servidor. Antes se restaba
+      // `customer.currentCredit`, un campo que NADIE escribe en todo el repo:
+      // valía siempre 0, así que esta validación degradaba en silencio a comparar
+      // solo el pendiente de esta venta contra el límite.
+      if (creditExposure.exceeded) {
+        Alert.alert(
+          'Crédito insuficiente',
+          creditExposure.verified
+            ? `Este cliente ya debe ${formatCurrency(creditExposure.outstanding)} y su límite es ${formatCurrency(creditExposure.limit)}.\n\nDisponible: ${formatCurrency(Math.max(creditExposure.limit - creditExposure.outstanding, 0))}. Ajusta el pago.`
+            : `El cliente tiene límite disponible ${formatCurrency(creditExposure.limit)}. Ajusta el pago.`
+        );
         return;
       }
     }
@@ -140,7 +156,7 @@ export default function CartDrawer({
               </TouchableOpacity>
 
               <TouchableOpacity onPress={validateCreditAndRegister} style={[styles.btn, styles.btnPrimary]}>
-                <Text style={styles.btnText}>Confirmar C${finalTotal.toFixed(2)}</Text>
+                <Text style={styles.btnText}>Confirmar {formatCurrency(finalTotal)}</Text>
               </TouchableOpacity>
             </View>
           </View>
