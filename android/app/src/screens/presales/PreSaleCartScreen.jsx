@@ -8,7 +8,7 @@ import DiscountModal from "../../components/common/DiscountModal";
 import styles from "../quicksalesNew/styles/quickCartStyles";
 import globalStyles from "../../styles/globalStyles";
 import CreditDueDatePicker from "./components/CreditDueDatePicker";
-import { getEffectiveCreditLimit, toDateSafe } from "../../utils/creditUtils";
+import { getEffectiveCreditLimit, toDateSafe, computeCreditDueDate } from "../../utils/creditUtils";
 import { useCreditExposure } from "../../hooks/useCreditExposure";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { formatCurrency } from "../../utils/formatMoney";
@@ -46,6 +46,12 @@ export default function PreSaleCartScreen({ navigation }) {
   const [creditDueDate, setCreditDueDate] = useState(null);
   const creditWarningShownRef = useRef(false);
   const totalWarningShownRef = useRef(false);
+  // Al guardar, resetPreSale() vacía cart/customer antes de navegar: la pantalla
+  // sigue montada un instante con isCredit aún en true, y los efectos de abajo
+  // (pensados para validar mientras el usuario arma el carrito) confundían ese
+  // vaciado con "el cliente ya no califica" y disparaban sus alertas después
+  // del "Pre-Venta Guardada". Este flag las silencia durante el teardown.
+  const submittedRef = useRef(false);
 
   const isEditing = !!editingPreSale;
   const cartToDisplay = isEditing ? editCart : cart;
@@ -63,6 +69,18 @@ export default function PreSaleCartScreen({ navigation }) {
       setCreditDueDate(toDateSafe(editingPreSale.creditDueDate));
     }
   }, [editingPreSale]);
+
+  // La fecha de pago ya no la elige el vendedor: sale del plazo configurado
+  // por el admin en el cliente (creditUtils.computeCreditDueDate). Si la
+  // preventa que se edita YA tenía un crédito con fecha acordada, esa fecha
+  // es inmutable acá (se fijó al crear el crédito, arriba); esto solo cubre
+  // crédito nuevo o una conversión de contado a crédito.
+  useEffect(() => {
+    if (!isCredit) return;
+    const alreadyFixed = editingPreSale?.paymentMethod === 'credit' && editingPreSale?.creditDueDate;
+    if (alreadyFixed) return;
+    setCreditDueDate(computeCreditDueDate(customer));
+  }, [isCredit, customer, editingPreSale]);
 
   const displayData = useMemo(() => {
     const normalItems = cartToDisplay.filter(i => !i.isBonus);
@@ -116,6 +134,7 @@ export default function PreSaleCartScreen({ navigation }) {
   const creditAvailable = creditExposure.available;
 
   useEffect(() => {
+    if (submittedRef.current) return;
     if (!hasValidTotal) {
       if (isCredit && !totalWarningShownRef.current) {
         Alert.alert('Total inválido', 'El total debe ser mayor que 0 para usar crédito.');
@@ -129,6 +148,7 @@ export default function PreSaleCartScreen({ navigation }) {
   }, [hasValidTotal, isCredit]);
 
   useEffect(() => {
+    if (submittedRef.current) return;
     if (!canUseCredit || creditExceeded) {
       if (isCredit && !creditWarningShownRef.current) {
         Alert.alert('Crédito desactivado', 'El crédito no está disponible o el total supera el límite.');
@@ -182,8 +202,8 @@ export default function PreSaleCartScreen({ navigation }) {
       }
       if (!creditDueDate) {
         return Alert.alert(
-          "Fecha de pago requerida",
-          "Selecciona la fecha en la que el cliente se compromete a pagar el crédito."
+          "No se pudo calcular la fecha de pago",
+          "Revisa el plazo de crédito configurado para este cliente."
         );
       }
     }
@@ -196,6 +216,7 @@ export default function PreSaleCartScreen({ navigation }) {
           paymentMethod: isCredit ? 'credit' : 'cash',
           creditDueDate: isCredit ? creditDueDate : null,
         });
+        submittedRef.current = true;
         Alert.alert(
           isEditing ? "Pre-Venta Actualizada" : "Pre-Venta Guardada",
           isEditing ? "Los cambios han sido guardados." : `La pre-venta ha sido creada exitosamente para la ruta: ${selectedRoute.name}`,
@@ -364,7 +385,7 @@ export default function PreSaleCartScreen({ navigation }) {
             )}
 
             {isCredit && (
-              <CreditDueDatePicker value={creditDueDate} onChange={setCreditDueDate} />
+              <CreditDueDatePicker customer={customer} dueDate={creditDueDate} />
             )}
 
             <TouchableOpacity style={[styles.checkoutBtn, loading && styles.disabledButton]} onPress={handleSubmit} disabled={loading}>

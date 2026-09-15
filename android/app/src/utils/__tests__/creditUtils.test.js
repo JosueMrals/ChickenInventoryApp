@@ -4,8 +4,37 @@ import {
   getEffectiveCreditLimit,
   getCreditBehavior,
   computeCreditExposure,
+  computeCreditDueDate,
   toDateSafe,
 } from '../creditUtils';
+
+describe('computeCreditDueDate', () => {
+  it('sin plazo configurado, usa 30 días por defecto', () => {
+    const from = new Date(2026, 0, 1);
+    const due = computeCreditDueDate({}, from);
+    expect(due.toDateString()).toBe(new Date(2026, 0, 31, 12).toDateString());
+  });
+
+  it('creditTermType days: N días desde la venta', () => {
+    const from = new Date(2026, 0, 1);
+    const due = computeCreditDueDate({ creditTermType: 'days', creditTermDays: 15 }, from);
+    expect(due.toDateString()).toBe(new Date(2026, 0, 16, 12).toDateString());
+  });
+
+  it('creditTermType fixedDay: cae este mes si el día no ha pasado', () => {
+    const from = new Date(2026, 0, 1); // 1 de enero
+    const due = computeCreditDueDate({ creditTermType: 'fixedDay', creditTermDay: 15 }, from);
+    expect(due.getMonth()).toBe(0);
+    expect(due.getDate()).toBe(15);
+  });
+
+  it('creditTermType fixedDay: si ya pasó este mes, rueda al mismo día del mes siguiente', () => {
+    const from = new Date(2026, 0, 20); // 20 de enero, ya pasó el día 15
+    const due = computeCreditDueDate({ creditTermType: 'fixedDay', creditTermDay: 15 }, from);
+    expect(due.getMonth()).toBe(1); // febrero
+    expect(due.getDate()).toBe(15);
+  });
+});
 
 describe('computeAbono', () => {
   const credit = { total: 500, paid: 100, pending: 400, status: 'pending' };

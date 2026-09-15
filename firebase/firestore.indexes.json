@@ -227,6 +227,70 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "createdBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "credits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "createdBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "credits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "entregadorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "credits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "entregadorId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "credits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "status",
           "order": "ASCENDING"
         },

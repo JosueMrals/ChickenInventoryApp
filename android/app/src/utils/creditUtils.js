@@ -55,6 +55,50 @@ export const getEffectiveCreditLimit = (customer) => {
 };
 
 /**
+ * Fecha de pago del crédito según el plazo configurado por el admin en el
+ * cliente (ya no lo elige el vendedor por venta). Dos modalidades:
+ *  - 'fixedDay' (creditTermDay 1-31): paga siempre ese día del mes. Si ya pasó
+ *    este mes, cae en el mismo día del mes siguiente.
+ *  - 'days' (creditTermDays) o sin configurar: N días desde la venta.
+ *    Por defecto 30 si el cliente no tiene plazo configurado (comportamiento
+ *    histórico más común, para no dejar creditDueDate en null).
+ *
+ * ponytail: día 31 en un mes corto lo normaliza Date nativo (cae en el mes
+ * siguiente); si algún día hace falta "último día del mes" en vez de rodar,
+ * se ajusta aquí.
+ */
+export const computeCreditDueDate = (customer, fromDate = new Date()) => {
+  const from = fromDate instanceof Date && !Number.isNaN(fromDate.getTime()) ? fromDate : new Date();
+
+  if (customer?.creditTermType === 'fixedDay') {
+    const day = Number(customer?.creditTermDay);
+    if (Number.isFinite(day) && day >= 1 && day <= 31) {
+      const due = new Date(from.getFullYear(), from.getMonth(), day, 12, 0, 0, 0);
+      if (due <= from) due.setMonth(due.getMonth() + 1);
+      return due;
+    }
+  }
+
+  const configuredDays = Number(customer?.creditTermDays);
+  const days = Number.isFinite(configuredDays) && configuredDays > 0 ? configuredDays : 30;
+  const due = new Date(from);
+  due.setDate(due.getDate() + days);
+  due.setHours(12, 0, 0, 0);
+  return due;
+};
+
+/** Texto corto para mostrarle al vendedor de dónde sale la fecha (solo lectura). */
+export const describeCreditTerm = (customer) => {
+  if (customer?.creditTermType === 'fixedDay') {
+    const day = Number(customer?.creditTermDay);
+    if (Number.isFinite(day) && day >= 1 && day <= 31) return `Plazo del cliente: paga el día ${day} de cada mes.`;
+  }
+  const days = Number(customer?.creditTermDays);
+  if (Number.isFinite(days) && days > 0) return `Plazo del cliente: ${days} días desde la venta.`;
+  return 'Este cliente no tiene un plazo configurado; se usa el valor por defecto (30 días).';
+};
+
+/**
  * Disponibilidad de crédito de un cliente CONSIDERANDO lo que ya debe.
  *
  * Antes solo se comparaba el total de la venta contra el límite: un cliente con

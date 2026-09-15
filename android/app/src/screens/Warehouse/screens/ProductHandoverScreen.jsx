@@ -119,7 +119,15 @@ export default function ProductHandoverScreen({ route, navigation }) {
                     return firestore().runTransaction(async (tx) => {
                         const snap = await tx.get(ref);
                         if (!snap.exists()) return 'skipped';
-                        if (TERMINAL_PRESALE_STATUSES.has(snap.data()?.status)) return 'skipped';
+                        const pData = snap.data() || {};
+                        if (TERMINAL_PRESALE_STATUSES.has(pData.status)) return 'skipped';
+
+                        // El crédito enlazado (si lo hay) necesita el mismo entregadorId:
+                        // es lo que usa la lista de Créditos para mostrarle al entregador
+                        // solo lo suyo. Relectura ANTES de cualquier escritura.
+                        const creditRef = pData.creditId ? firestore().collection('credits').doc(pData.creditId) : null;
+                        const creditSnap = creditRef ? await tx.get(creditRef) : null;
+
                         tx.update(ref, {
                             status: 'dispatched',
                             entregadorId: selectedEntregador.uid,
@@ -130,6 +138,10 @@ export default function ProductHandoverScreen({ route, navigation }) {
                             // antes no veía las órdenes entregadas en carga masiva.
                             fechaEntregaRepartidor: timestamp
                         });
+
+                        if (creditSnap && creditSnap.exists()) {
+                            tx.update(creditRef, { entregadorId: selectedEntregador.uid });
+                        }
                         return 'dispatched';
                     });
                 })

@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import ReceptionListScreen from '../screens/reception/screens/ReceptionListScreen';
 import ReceptionCreateScreen from '../screens/reception/screens/ReceptionCreateScreen';
 import ReceptionDetailScreen from '../screens/reception/screens/ReceptionDetailScreen';
+import ManageSuppliersScreen from '../screens/reception/screens/ManageSuppliersScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -20,6 +21,7 @@ export default function ReceptionStack({ route }) {
       <Stack.Screen name="ReceptionList" component={ReceptionListScreen} initialParams={{ user, role }} />
       <Stack.Screen name="ReceptionCreate" component={ReceptionCreateScreen} initialParams={{ user, role }} />
       <Stack.Screen name="ReceptionDetail" component={ReceptionDetailScreen} initialParams={{ user, role }} />
+      <Stack.Screen name="ManageSuppliers" component={ManageSuppliersScreen} initialParams={{ user, role }} />
     </Stack.Navigator>
   );
 }

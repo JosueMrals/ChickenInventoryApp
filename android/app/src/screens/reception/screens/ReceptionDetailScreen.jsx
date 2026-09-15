@@ -10,6 +10,7 @@ import {
   TextInput,
   Image,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import firestore from '@react-native-firebase/firestore';
 import { format } from 'date-fns';
@@ -27,6 +28,7 @@ function formatDate(ts) {
 
 export default function ReceptionDetailScreen({ navigation, route }) {
   const { receiptId, role } = route.params || {};
+  const insets = useSafeAreaInsets();
   const [receipt, setReceipt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [voiding, setVoiding] = useState(false);
@@ -114,7 +116,7 @@ export default function ReceptionDetailScreen({ navigation, route }) {
   if (!receipt) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
             <Icon name="chevron-back" size={26} color="#fff" />
           </TouchableOpacity>
@@ -131,10 +133,12 @@ export default function ReceptionDetailScreen({ navigation, route }) {
 
   const isVoided = receipt.status === 'voided';
   const isAdmin = role === 'admin';
+  // Precios y costos son dato de admin; el bodeguero solo ve cantidades/stock.
+  const showCosts = isAdmin;
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
           <Icon name="chevron-back" size={26} color="#fff" />
         </TouchableOpacity>
@@ -200,12 +204,16 @@ export default function ReceptionDetailScreen({ navigation, route }) {
                 <Text style={styles.lineName} numberOfLines={1}>{item.productName}</Text>
                 <Text style={styles.lineSub}>
                   Stock {item.previousStock} → {item.resultingStock}
-                  {item.unitCost != null ? `  ·  ${formatCurrency(item.unitCost)} c/u` : ''}
+                  {showCosts && item.unitCost != null ? `  ·  ${formatCurrency(item.unitCost)} c/u` : ''}
                 </Text>
               </View>
               <View style={{ alignItems: 'flex-end', marginRight: 8 }}>
                 <Text style={styles.lineQty}>+{item.quantity}</Text>
-                <Text style={styles.lineSub}>{formatCurrency(item.lineCost)}</Text>
+                {showCosts && (
+                  <Text style={[styles.lineSub, item.unitCost == null && { color: COLORS.red }]}>
+                    {item.unitCost == null ? 'Costo pendiente' : formatCurrency(item.lineCost)}
+                  </Text>
+                )}
               </View>
               {openingProductId === item.productId ? (
                 <ActivityIndicator size="small" color={COLORS.primary} />
@@ -222,10 +230,19 @@ export default function ReceptionDetailScreen({ navigation, route }) {
             <Text style={styles.label}>Unidades totales</Text>
             <Text style={styles.value}>{receipt.totalUnits ?? 0}</Text>
           </View>
-          <View style={[styles.rowBetween, { marginTop: 8 }]}>
-            <Text style={styles.label}>Costo total</Text>
-            <Text style={[styles.value, { fontSize: 18 }]}>{formatCurrency(receipt.totalCost)}</Text>
-          </View>
+          {showCosts && (
+            <View style={[styles.rowBetween, { marginTop: 8 }]}>
+              <Text style={styles.label}>Costo total</Text>
+              <Text style={[styles.value, { fontSize: 18 }, receipt.hasPendingCost && { color: COLORS.red }]}>
+                {formatCurrency(receipt.totalCost)}{receipt.hasPendingCost ? ' (parcial)' : ''}
+              </Text>
+            </View>
+          )}
+          {showCosts && receipt.hasPendingCost && (
+            <Text style={[styles.lineSub, { color: COLORS.red, marginTop: 4 }]}>
+              Registrada por bodega sin costo. El total no incluye los productos marcados "Costo pendiente".
+            </Text>
+          )}
         </View>
 
         {/* Anular: solo admin y solo si sigue completada */}

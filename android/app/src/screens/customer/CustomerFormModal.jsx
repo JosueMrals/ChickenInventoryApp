@@ -117,6 +117,10 @@ export default function CustomerFormModal({ navigation, route }) {
     firstName: '', lastName: '', phone: '', address: '',
     cedula: '', creditLimit: '', type: 'Común', discount: '', photos: [],
     creditOverdraftType: 'none', creditOverdraftValue: '',
+    // Plazo de pago del crédito: lo fija el admin acá, no el vendedor por venta
+    // (ver creditUtils.computeCreditDueDate). 'days' = N días desde la venta,
+    // 'fixedDay' = paga siempre ese día del mes.
+    creditTermType: 'days', creditTermDays: '30', creditTermDay: '',
   });
   const [errors, setErrors] = useState({});
   const [loadingCustomer, setLoadingCustomer] = useState(false);
@@ -135,7 +139,11 @@ export default function CustomerFormModal({ navigation, route }) {
 
   const applyCustomerToForm = (value) => {
     if (!value) {
-      setForm({ firstName: '', lastName: '', phone: '', address: '', cedula: '', creditLimit: '', type: 'Común', discount: '', photos: [], creditOverdraftType: 'none', creditOverdraftValue: '' });
+      setForm({
+        firstName: '', lastName: '', phone: '', address: '', cedula: '', creditLimit: '', type: 'Común', discount: '', photos: [],
+        creditOverdraftType: 'none', creditOverdraftValue: '',
+        creditTermType: 'days', creditTermDays: '30', creditTermDay: '',
+      });
       return;
     }
     setForm({
@@ -149,6 +157,9 @@ export default function CustomerFormModal({ navigation, route }) {
       creditOverdraftType: value.creditOverdraftType || 'none',
       creditOverdraftValue: value.creditOverdraftValue != null && value.creditOverdraftValue !== 0
         ? String(value.creditOverdraftValue) : '',
+      creditTermType: value.creditTermType === 'fixedDay' ? 'fixedDay' : 'days',
+      creditTermDays: value.creditTermDays != null ? String(value.creditTermDays) : '30',
+      creditTermDay: value.creditTermDay != null ? String(value.creditTermDay) : '',
     });
   };
 
@@ -195,6 +206,18 @@ export default function CustomerFormModal({ navigation, route }) {
         || parseFloat(form.creditOverdraftValue || 0) !== (customer.creditOverdraftValue ?? 0)) {
         Alert.alert('No autorizado', 'Solo admin puede cambiar el sobregiro de crédito.'); return;
       }
+      if (form.creditTermType !== (customer.creditTermType || 'days')
+        || parseFloat(form.creditTermDays || 0) !== (customer.creditTermDays ?? 30)
+        || parseFloat(form.creditTermDay || 0) !== (customer.creditTermDay ?? 0)) {
+        Alert.alert('No autorizado', 'Solo admin puede cambiar el plazo de pago del crédito.'); return;
+      }
+    }
+
+    if (form.creditTermType === 'fixedDay') {
+      const day = parseInt(form.creditTermDay, 10);
+      if (!Number.isFinite(day) || day < 1 || day > 31) {
+        Alert.alert('Día inválido', 'Indica un día del mes entre 1 y 31 para el plazo de pago.'); return;
+      }
     }
 
     const overdraftValue = form.creditOverdraftType === 'none' ? 0 : (parseFloat(form.creditOverdraftValue) || 0);
@@ -205,6 +228,9 @@ export default function CustomerFormModal({ navigation, route }) {
       creditLimit: parseFloat(form.creditLimit) || 0,
       creditOverdraftType: overdraftValue > 0 ? form.creditOverdraftType : 'none',
       creditOverdraftValue: overdraftValue,
+      creditTermType: form.creditTermType === 'fixedDay' ? 'fixedDay' : 'days',
+      creditTermDays: form.creditTermType === 'fixedDay' ? null : (parseInt(form.creditTermDays, 10) || 30),
+      creditTermDay: form.creditTermType === 'fixedDay' ? (parseInt(form.creditTermDay, 10) || null) : null,
       type: form.type, discount: parseFloat(form.discount) || 0,
     };
 
@@ -392,6 +418,54 @@ export default function CustomerFormModal({ navigation, route }) {
               }).total.toFixed(2)}
             </Text>
           )}
+
+          {/* Plazo de pago: lo fija el admin acá; el vendedor solo lo ve al
+              hacer una venta a crédito, ya no elige la fecha. */}
+          <Text style={[ls.sectionTitle, { marginTop: 12, marginBottom: 8 }]}>Plazo de pago del crédito</Text>
+          <View style={ls.typesRow}>
+            {[
+              { key: 'days', label: 'Días desde la venta' },
+              { key: 'fixedDay', label: 'Día fijo del mes' },
+            ].map(({ key, label }) => {
+              const active = form.creditTermType === key;
+              return (
+                <ClayPressable
+                  key={key}
+                  onPress={() => canEditSensitive && set('creditTermType')(key)}
+                  style={[ls.typeChip, active && ls.typeChipActive, !canEditSensitive && { opacity: 0.6 }]}
+                >
+                  <Icon name={active ? 'check-circle' : 'circle-outline'} size={16} color={active ? '#fff' : '#9A93AA'} />
+                  <Text style={[ls.typeChipText, active && ls.typeChipTextActive]}>{label}</Text>
+                </ClayPressable>
+              );
+            })}
+          </View>
+          {form.creditTermType === 'fixedDay' ? (
+            <Field
+              icon="calendar-month"
+              label="Día del mes (1-31)"
+              value={String(form.creditTermDay)}
+              onChangeText={set('creditTermDay')}
+              placeholder="15"
+              keyboard="numeric"
+              editable={canEditSensitive}
+            />
+          ) : (
+            <Field
+              icon="calendar-range"
+              label="Días permitidos desde la venta"
+              value={String(form.creditTermDays)}
+              onChangeText={set('creditTermDays')}
+              placeholder="30"
+              keyboard="numeric"
+              editable={canEditSensitive}
+            />
+          )}
+          <Text style={ls.hintText}>
+            {form.creditTermType === 'fixedDay'
+              ? `El cliente paga el día ${form.creditTermDay || '—'} de cada mes.`
+              : `El cliente tiene ${form.creditTermDays || 30} días desde la venta para pagar.`}
+          </Text>
         </View>
 
         {/* ── Fotos ── */}

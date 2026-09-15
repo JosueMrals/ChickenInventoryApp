@@ -23,7 +23,7 @@ function PreSaleCard({ presale, customerName }) {
         <View style={styles.card}>
             <View style={styles.header}>
                 <View style={styles.headerInfo}>
-                    <Icon name="person-circle-outline" size={20} color="#555" />
+                    <Icon name="person-circle-outline" size={14} color="#555" />
                     <Text style={styles.customerName}>
                         {displayName}
                     </Text>
@@ -73,12 +73,14 @@ function PreSaleCard({ presale, customerName }) {
 }
 
 const styles = StyleSheet.create({
+    // Tamaños reducidos ~30% (padding/fuente) respecto al original: la meta es
+    // que quepan más filas visibles sin perder legibilidad.
     card: {
         backgroundColor: 'white',
         borderRadius: 12,
         marginHorizontal: 16,
-        marginVertical: 8,
-        padding: 16,
+        marginVertical: 6,
+        padding: 11,
         elevation: 3,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
@@ -89,7 +91,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        paddingBottom: 12,
+        paddingBottom: 8,
         borderBottomWidth: 1,
         borderBottomColor: '#F0F0F0',
     },
@@ -98,12 +100,12 @@ const styles = StyleSheet.create({
         alignItems: 'flex-start',
         flex: 1,
         minWidth: 0,
-        paddingRight: 10,
+        paddingRight: 8,
     },
     customerName: {
-        fontSize: 16,
+        fontSize: 13,
         fontWeight: 'bold',
-        marginLeft: 8,
+        marginLeft: 6,
         color: '#333',
         flexShrink: 1,
         flexWrap: 'wrap',
@@ -113,46 +115,46 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'flex-end',
         flexShrink: 0,
-        gap: 6,
+        gap: 4,
     },
     creditBadge: {
         backgroundColor: '#FFF4E5',
         borderRadius: 10,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
     },
     creditText: {
-        fontSize: 11,
+        fontSize: 10,
         fontWeight: '700',
         color: '#B45309',
     },
     statusBadge: {
         borderRadius: 12,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
+        paddingHorizontal: 7,
+        paddingVertical: 3,
     },
     pendingBadge: { backgroundColor: '#FFF2E5' },
     paidBadge: { backgroundColor: '#E6F7FF' },
     statusText: {
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: 'bold',
         color: '#555',
     },
     content: {
-        paddingVertical: 12,
+        paddingVertical: 8,
     },
     detailRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 4,
+        paddingVertical: 3,
     },
     label: {
-        fontSize: 14,
+        fontSize: 12,
         color: '#666',
     },
     value: {
-        fontSize: 14,
+        fontSize: 12,
         fontWeight: '500',
         color: '#333',
     },
@@ -162,17 +164,17 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingTop: 12,
+        paddingTop: 8,
         borderTopWidth: 1,
         borderTopColor: '#F0F0F0',
     },
     totalLabel: {
-        fontSize: 16,
+        fontSize: 13,
         fontWeight: 'bold',
         color: '#333',
     },
     totalAmount: {
-        fontSize: 18,
+        fontSize: 15,
         fontWeight: 'bold',
         color: '#007AFF',
     },

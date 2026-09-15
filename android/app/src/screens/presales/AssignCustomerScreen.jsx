@@ -4,6 +4,7 @@ import Icon from "react-native-vector-icons/Ionicons";
 import firestore from "@react-native-firebase/firestore";
 import styles from "../quicksalesNew/styles/assignCustomerStyles";
 import { PreSaleContext } from "./context/preSaleContext";
+import { normalizeText } from "../../utils/textUtils";
 
 export default function AssignCustomerScreen({ navigation }) {
   const { setCustomer } = useContext(PreSaleContext);
@@ -21,8 +22,8 @@ export default function AssignCustomerScreen({ navigation }) {
   }, []);
 
   const filtered = customers.filter(c => {
-    const full = `${c.firstName} ${c.lastName}`.toLowerCase();
-    return full.includes(search.toLowerCase());
+    const full = normalizeText(`${c.firstName} ${c.lastName}`);
+    return full.includes(normalizeText(search));
   });
 
   const selectCustomer = (customer) => {

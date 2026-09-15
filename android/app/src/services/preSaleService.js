@@ -305,6 +305,8 @@ export const savePreSaleToFirestore = async (preSaleData) => {
         status: 'pending',
         createdAt: firestore.FieldValue.serverTimestamp(),
         createdBy: user?.email || 'N/A',
+        // Se completa al despachar (dispatchPreSale); todavía no hay entregador asignado.
+        entregadorId: null,
         payments: [],
       });
     }
@@ -486,6 +488,8 @@ export const updatePreSaleInFirestore = async (preSaleId, oldPreSaleData, newPre
         status: 'pending',
         createdAt: firestore.FieldValue.serverTimestamp(),
         createdBy: user?.email || 'N/A',
+        // Copia el entregador si la orden ya estaba despachada al pasarla a crédito.
+        entregadorId: freshData.entregadorId || null,
         payments: [],
       });
     }

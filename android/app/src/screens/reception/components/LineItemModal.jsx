@@ -17,7 +17,7 @@ const clean = (val) => (val || '').replace(/[^0-9.]/g, '').replace(/(\..*)\./g, 
 
 // Ventana flotante para capturar/editar la cantidad y el costo unitario de un
 // producto de la recepción. Mantiene su propio estado y lo entrega en onSave.
-export default function LineItemModal({ visible, line, onClose, onSave, onRemove }) {
+export default function LineItemModal({ visible, line, onClose, onSave, onRemove, hideCost = false }) {
   const [quantity, setQuantity] = useState('');
   const [unitCost, setUnitCost] = useState('');
 
@@ -58,7 +58,7 @@ export default function LineItemModal({ visible, line, onClose, onSave, onRemove
             <Text style={styles.lineSub}>Stock actual: {line.stock}</Text>
 
             <View style={[styles.rowBetween, { marginTop: 16 }]}>
-              <View style={{ flex: 1, marginRight: 8 }}>
+              <View style={{ flex: 1, marginRight: hideCost ? 0 : 8 }}>
                 <Text style={[styles.label, { marginBottom: 6 }]}>Cantidad <Text style={styles.required}>*</Text></Text>
                 <TextInput
                   style={styles.input}
@@ -70,22 +70,25 @@ export default function LineItemModal({ visible, line, onClose, onSave, onRemove
                   autoFocus
                 />
               </View>
-              <View style={{ flex: 1, marginLeft: 8 }}>
-                <Text style={[styles.label, { marginBottom: 6 }]}>Costo unitario (C$)</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  placeholder="0.00"
-                  placeholderTextColor={COLORS.muted}
-                  value={unitCost}
-                  onChangeText={(v) => setUnitCost(clean(v))}
-                />
-              </View>
+              {/* El bodeguero solo cuenta unidades; el costo es dato de admin. */}
+              {!hideCost && (
+                <View style={{ flex: 1, marginLeft: 8 }}>
+                  <Text style={[styles.label, { marginBottom: 6 }]}>Costo unitario (C$)</Text>
+                  <TextInput
+                    style={styles.input}
+                    keyboardType="numeric"
+                    placeholder="0.00"
+                    placeholderTextColor={COLORS.muted}
+                    value={unitCost}
+                    onChangeText={(v) => setUnitCost(clean(v))}
+                  />
+                </View>
+              )}
             </View>
 
             <View style={[styles.rowBetween, { marginBottom: 4 }]}>
               <Text style={styles.lineSub}>Nuevo stock: {line.stock + qty}</Text>
-              <Text style={styles.value}>Subtotal: {formatCurrency(qty * cost)}</Text>
+              {!hideCost && <Text style={styles.value}>Subtotal: {formatCurrency(qty * cost)}</Text>}
             </View>
 
             <TouchableOpacity

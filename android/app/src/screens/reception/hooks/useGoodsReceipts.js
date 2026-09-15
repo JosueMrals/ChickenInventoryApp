@@ -97,6 +97,9 @@ export function useGoodsReceipts({ limit = 100 } = {}) {
       voidedCount: byTimeAndStatus.length - completed.length,
       totalUnits: completed.reduce((sum, r) => sum + (Number(r.totalUnits) || 0), 0),
       totalCost: completed.reduce((sum, r) => sum + (Number(r.totalCost) || 0), 0),
+      // Recepciones de bodega sin costo capturado: el totalCost de arriba no las
+      // incluye completas, así que admin necesita saber que el total es parcial.
+      pendingCostCount: completed.filter((r) => r.hasPendingCost).length,
     };
   }, [byTimeAndStatus]);
 

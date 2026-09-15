@@ -5,11 +5,15 @@ import { computeCreditExposure } from '../utils/creditUtils';
 /**
  * Disponibilidad de crédito del cliente considerando la deuda que ya tiene.
  *
- * Las tres vías de venta (pre-venta, edición de pre-venta y venta rápida)
- * validaban el límite contra el total de LA VENTA, no contra la exposición
- * acumulada: un cliente podía superar su límite tantas veces como facturas
- * distintas se le hicieran. Este hook centraliza el cálculo para que las tres
- * apliquen la misma regla.
+ * Las vías de venta a crédito validaban el límite contra el total de LA VENTA,
+ * no contra la exposición acumulada: un cliente podía superar su límite tantas
+ * veces como facturas distintas se le hicieran. Este hook centraliza el
+ * cálculo. Usado hoy en: carrito de pre-venta, edición de pre-venta y cobro de
+ * pre-venta (conversión a crédito al entregar). La venta rápida (quicksalesNew)
+ * no ofrece crédito en su pantalla de pago actual, así que no aplica aquí; el
+ * único flujo de venta rápida que sí lo usaba (sales/CartDrawer + PaymentSelector)
+ * está inalcanzable desde la UI (botón "Venta" del CustomerCard permanece
+ * deshabilitado) — ver nota en creditsAccumulation en memoria de proyecto.
  *
  * `excludeCreditId`: en edición, el crédito de la propia pre-venta ya está en la
  * deuda vigente; sin excluirlo se contaría dos veces.

@@ -34,15 +34,19 @@ service cloud.firestore {
       allow create: if isAdmin() || isVendedor();
 
       // Actualizar: solo ADMIN puede modificar campos sensibles (límite de
-      // crédito, sobregiro, descuento y tipo). Nota: antes existía un
-      // `allow update` amplio que anulaba esta restricción (los allow se OR-ean).
+      // crédito, sobregiro, plazo de pago, descuento y tipo). Nota: antes
+      // existía un `allow update` amplio que anulaba esta restricción (los
+      // allow se OR-ean).
       allow update: if isAdmin() ||
         (
           isVendedor() &&
           !request.resource.data
             .diff(resource.data)
             .affectedKeys()
-            .hasAny(['creditLimit', 'creditOverdraftType', 'creditOverdraftValue', 'discount', 'type'])
+            .hasAny([
+              'creditLimit', 'creditOverdraftType', 'creditOverdraftValue', 'discount', 'type',
+              'creditTermType', 'creditTermDays', 'creditTermDay',
+            ])
         );
 
       // Solo admin puede eliminar
@@ -185,6 +189,16 @@ service cloud.firestore {
           (request.resource.data.status == 'paid' && request.resource.data.pending == 0) ||
           (request.resource.data.status == 'pending' && request.resource.data.pending > 0)
         );
+
+      // Bodega asigna entregadorId al despachar. dispatchPreSale (Cloud Function,
+      // Admin SDK) no pasa por aquí; esta rama cubre el handover masivo cliente de
+      // ProductHandoverScreen. El crédito necesita el mismo valor que la preventa
+      // para que la lista de Créditos, acotada por dueño, se lo muestre al entregador.
+      allow update: if (isAdmin() || isBodeguero())
+        && request.resource.data
+            .diff(resource.data)
+            .affectedKeys()
+            .hasOnly(['entregadorId']);
 
       // Admin siempre; el vendedor solo puede borrar un crédito SIN abonos
       // (pre-venta a crédito que se corrige a contado antes de cobrar nada).
@@ -369,6 +383,14 @@ service cloud.firestore {
 
       // Es un registro contable: no se borra.
       allow delete: if false;
+    }
+
+    // =====================================================
+    // 🚚 SUPPLIERS — catálogo de proveedores (Recepción de Mercancía)
+    // =====================================================
+    match /suppliers/{supplierId} {
+      allow read: if isOperativo();
+      allow create, update, delete: if isAdmin();
     }
 
     // =====================================================

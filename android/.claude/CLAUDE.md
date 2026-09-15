@@ -87,6 +87,18 @@ The short version, so you know when you're deviating:
 Known drift to fix when you touch it, not before: the `Warehouse` module uses a green `#2DCE89` for tabs and
 primary actions instead of Field Blue / `#34C759`.
 
+## Single Responsibility (mandatory for new/changed code)
+
+- Every new or modified class/function must have exactly one reason to change. If describing it
+  needs an "and", split it.
+- Split by layer: validation, persistence (Firestore/Storage), and business logic go in separate
+  functions/modules — don't mix `validate*` with the write or with the calculation. Follow the
+  pattern already used in `receptionService.js` (pure `validateReceptionDraft`, separate from the
+  transactional `createGoodsReceipt` and from `computeReceiptTotals`/`computeReceiptStockChanges`).
+- Max 30 lines per function/class. Over that, extract a function named after the sub-responsibility.
+- Applies to code you write or touch going forward — not a license to rewrite existing files you
+  aren't otherwise changing (that would conflict with "surgical diffs" below).
+
 ## Editing conventions
 
 These carry over from this repo's existing Copilot instructions and reflect how this codebase has been

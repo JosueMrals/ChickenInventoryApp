@@ -87,6 +87,29 @@ export default function EmployeesPanelPRO({ data, loading }) {
                 Promedio por venta: C${(emp.total / emp.count).toFixed(2)}
               </Text>
             )}
+
+            {/* Desglose de contado vs crédito. cash/creditPending/creditPaid/
+                collectedToDate vienen de getSalesSummaryOptimized (fusión con
+                fetchCreditsByEmployee); pueden faltar si el vendedor solo tuvo
+                ventas o solo créditos en el rango — de ahí el `|| 0` en cada uno. */}
+            <View style={s.detailGrid}>
+              <View style={s.detailCell}>
+                <Text style={s.detailLabel}>Efectivo</Text>
+                <Text style={[s.detailValue, { color: '#059669' }]}>C${(emp.cash || 0).toFixed(2)}</Text>
+              </View>
+              <View style={s.detailCell}>
+                <Text style={s.detailLabel}>Cobrado en el período</Text>
+                <Text style={[s.detailValue, { color: '#0369A1' }]}>C${(emp.collectedToDate || 0).toFixed(2)}</Text>
+              </View>
+              <View style={s.detailCell}>
+                <Text style={s.detailLabel}>Créd. pendiente{emp.creditPendingCount ? ` (${emp.creditPendingCount})` : ''}</Text>
+                <Text style={[s.detailValue, { color: '#D97706' }]}>C${(emp.creditPending || 0).toFixed(2)}</Text>
+              </View>
+              <View style={s.detailCell}>
+                <Text style={s.detailLabel}>Créd. pagado{emp.creditPaidCount ? ` (${emp.creditPaidCount})` : ''}</Text>
+                <Text style={[s.detailValue, { color: '#6B7280' }]}>C${(emp.creditPaid || 0).toFixed(2)}</Text>
+              </View>
+            </View>
           </View>
         );
       })}
@@ -137,4 +160,13 @@ const s = StyleSheet.create({
   barFill: { height: 8, borderRadius: 6 },
   barValue: { fontSize: 13, fontWeight: '800', width: 90, textAlign: 'right' },
   avgText: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+
+  detailGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    marginTop: 10, paddingTop: 10,
+    borderTopWidth: 1, borderTopColor: '#F1F5F9',
+  },
+  detailCell: { width: '50%', marginBottom: 6 },
+  detailLabel: { fontSize: 10, color: '#9CA3AF', fontWeight: '600' },
+  detailValue: { fontSize: 13, fontWeight: '800', marginTop: 1 },
 });

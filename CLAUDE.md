@@ -104,6 +104,19 @@ Secretos gitignored: `android/app/google-services.json`, `android/app/my-release
 6. **Reglas Firestore/Storage**: si escribe una colección nueva, añadir regla en `firebase/firestore.rules` con el rol adecuado.
 7. **Test**: si añades lógica pura (validación, cálculos, mutaciones), añade `__tests__/<x>.test.js` — no rompas la suite verde.
 
+## Single Responsibility (obligatorio en todo cambio nuevo)
+
+- **Una sola razón para cambiar.** Cada clase o función nueva/modificada debe tener una única
+  responsabilidad. Si al describirla necesitas un "y", divídela.
+- **Separar por capa**: validación, persistencia (Firestore/Storage) y lógica de negocio van en
+  funciones o módulos distintos — no mezclar `validate*` con la escritura ni con el cálculo.
+  Sigue el patrón ya usado en `receptionService.js` (`validateReceptionDraft` puro, separado de
+  `createGoodsReceipt` transaccional y de `computeReceiptTotals`/`computeReceiptStockChanges`).
+- **Máximo 30 líneas por función/clase.** Si se pasa, extrae una función con un nombre que
+  describa la sub-responsabilidad.
+- Aplica a código **nuevo o modificado** a partir de ahora; no es excusa para reescribir archivos
+  existentes que no se están tocando (choca con "diff quirúrgico" de abajo si no hay necesidad real).
+
 ## Convenciones de edición (leer antes de cambiar código)
 
 - **No reescribir archivos completos.** Usa `patch` (mode replace/patch) con snippets únicos.

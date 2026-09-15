@@ -93,6 +93,14 @@ export const createCustomer = async (data) => {
       cedula: data.cedula ?? '',
       address: data.address ?? '',
       creditLimit: data.creditLimit ?? 0,
+      // Sobregiro y plazo de pago: faltaban en esta whitelist, así que un
+      // cliente NUEVO con crédito perdía esta config en silencio (updateCustomer
+      // sí la guarda, por spread directo — solo creación estaba incompleta).
+      creditOverdraftType: data.creditOverdraftType ?? 'none',
+      creditOverdraftValue: data.creditOverdraftValue ?? 0,
+      creditTermType: data.creditTermType ?? 'days',
+      creditTermDays: data.creditTermDays ?? 30,
+      creditTermDay: data.creditTermDay ?? null,
       type: data.type ?? 'Común',
       discount: data.discount ?? 0,
       createdAt: new Date(),

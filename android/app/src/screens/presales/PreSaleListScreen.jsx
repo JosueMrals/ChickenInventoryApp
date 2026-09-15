@@ -26,12 +26,12 @@ function SummaryCards({ data }) {
     return (
         <View style={summaryStyles.container}>
             <View style={summaryStyles.card}>
-                <Icon name="receipt-outline" size={18} color="#007AFF" />
+                <Icon name="receipt-outline" size={13} color="#007AFF" />
                 <Text style={summaryStyles.cardValue}>{data.length}</Text>
                 <Text style={summaryStyles.cardLabel}>Ventas</Text>
             </View>
             <View style={summaryStyles.card}>
-                <Icon name="cash-outline" size={18} color="#34C759" />
+                <Icon name="cash-outline" size={13} color="#34C759" />
                 <Text style={[summaryStyles.cardValue, { color: '#34C759' }]}>{formatCurrency(totalAmount)}</Text>
                 <Text style={summaryStyles.cardLabel}>Total</Text>
             </View>
@@ -39,11 +39,13 @@ function SummaryCards({ data }) {
     );
 }
 
+// Tamaños reducidos ~30% (padding/fuente/gap) para dar más espacio vertical
+// a la lista de pre-ventas/créditos debajo.
 const summaryStyles = StyleSheet.create({
-    container: { flexDirection: 'row', marginHorizontal: 16, marginTop: 12, marginBottom: 4, gap: 8 },
-    card: { flex: 1, backgroundColor: '#fff', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 6, alignItems: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
-    cardValue: { fontSize: 15, fontWeight: '800', color: '#111', marginTop: 4 },
-    cardLabel: { fontSize: 10, color: '#888', fontWeight: '600', marginTop: 2 },
+    container: { flexDirection: 'row', marginHorizontal: 16, marginTop: 8, marginBottom: 3, gap: 6 },
+    card: { flex: 1, backgroundColor: '#fff', borderRadius: 10, paddingVertical: 7, paddingHorizontal: 4, alignItems: 'center', borderWidth: 1, borderColor: '#F0F0F0' },
+    cardValue: { fontSize: 12, fontWeight: '800', color: '#111', marginTop: 3 },
+    cardLabel: { fontSize: 8, color: '#888', fontWeight: '600', marginTop: 1 },
 });
 
 export default function PreSaleListScreen({ navigation }) {
@@ -62,6 +64,7 @@ export default function PreSaleListScreen({ navigation }) {
     const [showFilterModal, setShowFilterModal] = useState(false);
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
+    const [showDeletedModal, setShowDeletedModal] = useState(false);
 
     const hasDateFilter = dateFrom || dateTo;
 
@@ -87,7 +90,10 @@ export default function PreSaleListScreen({ navigation }) {
     const filteredData = useMemo(() => {
         let data;
         if (activeTab === 'Pendientes') data = preSales.filter(p => p.status === 'pending');
-        else if (activeTab === 'Crédito') data = preSales.filter(p => p.status === 'credit_pending' || p.paymentMethod === 'credit');
+        // 'cancelled' es como quedan las preventas eliminadas (soft-delete): el
+        // paymentMethod 'credit' no se limpia al cancelar, así que sin este filtro
+        // seguían apareciendo aquí. Su lugar es el historial del menú de opciones.
+        else if (activeTab === 'Crédito') data = preSales.filter(p => (p.status === 'credit_pending' || p.paymentMethod === 'credit') && p.status !== 'cancelled');
         else if (activeTab === 'Pagadas') data = preSales.filter(p => ['paid', 'partially_returned', 'returned'].includes(p.status));
         else data = [];
 
@@ -109,6 +115,21 @@ export default function PreSaleListScreen({ navigation }) {
 
         return data;
     }, [preSales, activeTab, dateFrom, dateTo, isAdmin, currentEmail]);
+
+    // Preventas de crédito eliminadas (status 'cancelled'): viven en el historial
+    // del menú, no en la lista principal.
+    const deletedCreditPreSales = useMemo(() => {
+        let data = preSales.filter(p => p.status === 'cancelled' && p.paymentMethod === 'credit');
+        if (!isAdmin) {
+            const mine = normalizeKey(currentEmail);
+            data = data.filter((p) => normalizeKey(p.createdBy) === mine);
+        }
+        return data;
+    }, [preSales, isAdmin, currentEmail]);
+
+    const renderDeletedEmpty = () => (
+        <Text style={deletedStyles.emptyText}>No hay pre-ventas de crédito eliminadas.</Text>
+    );
 
     const renderEmptyComponent = () => (
         <View style={styles.emptyContainer}>
@@ -143,6 +164,10 @@ export default function PreSaleListScreen({ navigation }) {
                         <TouchableOpacity style={menuStyles.menuItem} onPress={() => { setShowMenu(false); clearDateFilter(); }}>
                             <Icon name="refresh-outline" size={18} color="#333" />
                             <Text style={menuStyles.menuText}>Limpiar filtros</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={menuStyles.menuItem} onPress={() => { setShowMenu(false); setShowDeletedModal(true); }}>
+                            <Icon name="trash-bin-outline" size={18} color="#333" />
+                            <Text style={menuStyles.menuText}>Historial de crédito eliminado</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
@@ -222,6 +247,40 @@ export default function PreSaleListScreen({ navigation }) {
                 </TouchableOpacity>
             </Modal>
 
+            {/* Historial de crédito eliminado */}
+            <Modal visible={showDeletedModal} transparent animationType="slide" onRequestClose={() => setShowDeletedModal(false)}>
+                <View style={deletedStyles.overlay}>
+                    <View style={deletedStyles.sheet}>
+                        <View style={deletedStyles.sheetHeader}>
+                            <Text style={deletedStyles.sheetTitle}>Crédito eliminado</Text>
+                            <TouchableOpacity onPress={() => setShowDeletedModal(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                                <Icon name="close" size={22} color="#333" />
+                            </TouchableOpacity>
+                        </View>
+                        <FlatList
+                            data={deletedCreditPreSales}
+                            keyExtractor={item => item.id}
+                            contentContainerStyle={deletedStyles.listContent}
+                            ListEmptyComponent={renderDeletedEmpty}
+                            renderItem={({ item }) => (
+                                <View style={deletedStyles.row}>
+                                    <View style={deletedStyles.rowHeader}>
+                                        <Text style={deletedStyles.rowName}>{resolveCustomerName(item, customersById)}</Text>
+                                        <Text style={deletedStyles.rowTotal}>{formatCurrency(item.total)}</Text>
+                                    </View>
+                                    <Text style={deletedStyles.rowMeta}>
+                                        Eliminada {item.cancelledAt?.toDate ? formatDateShort(item.cancelledAt.toDate()) : '—'} por {item.cancelledBy || 'N/A'}
+                                    </Text>
+                                    {!!item.cancellationReason && (
+                                        <Text style={deletedStyles.rowReason}>Motivo: {item.cancellationReason}</Text>
+                                    )}
+                                </View>
+                            )}
+                        />
+                    </View>
+                </View>
+            </Modal>
+
             <DateTimePickerModal
                 isVisible={showDatePicker}
                 mode="date"
@@ -266,19 +325,34 @@ const filterStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-    listContent: { paddingBottom: 100, paddingTop: 10 },
+    listContent: { paddingBottom: 100, paddingTop: 7 },
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 100 },
     emptyText: { fontSize: 18, fontWeight: '600', color: '#888', marginTop: 16 },
     emptySubText: { fontSize: 14, color: '#aaa', marginTop: 8 },
     fab: { position: 'absolute', right: 30, bottom: 30, backgroundColor: '#007AFF', width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 8 },
-    tabContainer: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: 'white', paddingVertical: 10, marginHorizontal: 16, borderRadius: 8, marginTop: -5, elevation: 1 },
-    tab: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6 },
+    tabContainer: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: 'white', paddingVertical: 7, marginHorizontal: 16, borderRadius: 8, marginTop: -5, elevation: 1 },
+    tab: { paddingVertical: 6, paddingHorizontal: 11, borderRadius: 6 },
     activeTab: { backgroundColor: '#007AFF' },
-    tabText: { color: '#333', fontWeight: '600' },
+    tabText: { color: '#333', fontWeight: '600', fontSize: 13 },
     activeTabText: { color: 'white' },
     productItem: { backgroundColor: 'white', padding: 16, marginVertical: 6, marginHorizontal: 16, borderRadius: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     productName: { fontSize: 16, fontWeight: '500' },
     productQuantity: { fontSize: 16, fontWeight: 'bold', color: '#007AFF' },
+});
+
+const deletedStyles = StyleSheet.create({
+    overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
+    sheet: { backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: '75%', paddingBottom: 12 },
+    sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+    sheetTitle: { fontSize: 17, fontWeight: '800', color: '#111' },
+    listContent: { paddingBottom: 20 },
+    emptyText: { textAlign: 'center', color: '#888', marginTop: 30, paddingHorizontal: 20 },
+    row: { marginHorizontal: 16, marginTop: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+    rowHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    rowName: { fontSize: 14, fontWeight: '700', color: '#333', flexShrink: 1 },
+    rowTotal: { fontSize: 14, fontWeight: '700', color: '#FF3B30' },
+    rowMeta: { fontSize: 12, color: '#888', marginTop: 4 },
+    rowReason: { fontSize: 12, color: '#666', marginTop: 2, fontStyle: 'italic' },
 });
 
 const normalizeKey = (value) => String(value || '').trim().toLowerCase();

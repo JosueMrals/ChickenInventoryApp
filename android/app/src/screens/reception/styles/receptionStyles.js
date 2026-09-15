@@ -113,6 +113,7 @@ export default StyleSheet.create({
   summaryValueSm: { fontSize: 16, fontWeight: '800', color: COLORS.ink },
   summaryLabelSm: { fontSize: 10, color: COLORS.muted, fontWeight: '600', marginTop: 1, textTransform: 'uppercase', letterSpacing: 0.3 },
   summaryDivider: { width: StyleSheet.hairlineWidth, height: 26, backgroundColor: COLORS.border },
+  pendingCostNotice: { fontSize: 11, color: COLORS.red, fontWeight: '600', marginHorizontal: 16, marginTop: 6 },
 
   // Buscador delgado con ícono embebido.
   searchRowSm: {
@@ -399,4 +400,90 @@ export default StyleSheet.create({
   },
   productName: { fontSize: 15, fontWeight: '600', color: COLORS.ink },
   productStock: { fontSize: 12, color: COLORS.muted, marginTop: 2 },
+
+  // FAB "Agregar" (mismo patrón que customer/presales: círculo Field Blue, abajo-derecha)
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 8,
+  },
+
+  // Buscador de proveedor (bodeguero): input + lista de sugerencias flotante
+  supplierSuggestions: {
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    marginTop: -6,
+    marginBottom: 12,
+    maxHeight: 160,
+    overflow: 'hidden',
+  },
+  supplierSuggestionRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.divider,
+  },
+  supplierSuggestionText: { fontSize: 14, color: COLORS.ink },
+  supplierEmptyHint: { fontSize: 12, color: COLORS.muted, marginTop: -6, marginBottom: 12 },
+
+  // Menú de opciones del header (filtros + accesos admin), patrón compartido
+  // con ProductsListScreen: ícono ellipsis-vertical abre un dropdown flotante.
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerMenuBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  headerMenuBtnActive: { backgroundColor: 'rgba(255,255,255,0.35)' },
+  topActionsBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 20 },
+  topActionsMenu: {
+    position: 'absolute',
+    top: 64,
+    right: 16,
+    zIndex: 30,
+    width: 190,
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  topActionsMenuOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.divider,
+  },
+  topActionsMenuOptionText: { fontSize: 14, fontWeight: '700', color: COLORS.ink },
+
+  // Filas de acción (editar/eliminar) reutilizadas por la pantalla de proveedores.
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 6 },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.bg,
+  },
 });

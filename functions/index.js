@@ -384,6 +384,12 @@ exports.dispatchPreSale = functions.https.onCall(async (reqData, context) => {
             );
         }
 
+        // El crédito enlazado (si lo hay) necesita el mismo entregadorId: es lo que
+        // usa la lista de Créditos para mostrarle al entregador solo lo suyo. Se
+        // relee ANTES de cualquier escritura (regla de transacciones de Firestore).
+        const creditRef = pData.creditId ? db.collection('credits').doc(pData.creditId) : null;
+        const creditSnap = creditRef ? await t.get(creditRef) : null;
+
         t.update(preSaleRef, {
             status: 'dispatched',
             entregadorId,
@@ -396,6 +402,10 @@ exports.dispatchPreSale = functions.https.onCall(async (reqData, context) => {
             dispatchedBy: uid,
             fechaEntregaRepartidor: now
         });
+
+        if (creditSnap && creditSnap.exists) {
+            t.update(creditRef, { entregadorId });
+        }
     });
     return { success: true };
 });

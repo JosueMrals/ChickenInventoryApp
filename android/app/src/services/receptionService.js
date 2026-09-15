@@ -35,14 +35,18 @@ export function round2(value) {
 // costo) y produce siempre la misma forma canónica.
 export function normalizeReceiptItem(item = {}) {
   const quantity = Number(item.quantity ?? item.qty ?? 0);
-  const unitCost = Number(item.unitCost ?? item.cost ?? item.price ?? 0);
+  // El bodeguero no ve/captura costo (ver LineItemModal hideCost): distinguir
+  // "no informado" de "cero" evita guardar C$0.00 como si fuera un dato real.
+  const rawCost = item.unitCost ?? item.cost ?? item.price;
+  const hasCost = rawCost !== undefined && rawCost !== null && rawCost !== '';
+  const unitCost = hasCost ? Number(rawCost) : null;
   return {
     productId: item.productId || item.id || null,
     productName: item.productName || item.name || '',
     category: typeof item.category === 'string' ? item.category.trim() : '',
     quantity,
     unitCost,
-    lineCost: round2(quantity * unitCost),
+    lineCost: unitCost != null ? round2(quantity * unitCost) : null,
   };
 }
 
@@ -51,7 +55,10 @@ export function computeReceiptTotals(items = []) {
   const norm = items.map(normalizeReceiptItem);
   const totalUnits = norm.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
   const totalCost = round2(norm.reduce((sum, i) => sum + (Number(i.lineCost) || 0), 0));
-  return { itemCount: norm.length, totalUnits, totalCost };
+  // true si alguna línea no trae costo (recepción de bodeguero): el total de
+  // arriba queda parcial y no debe mostrarse como si fuera el costo real.
+  const hasPendingCost = norm.some((i) => i.unitCost == null);
+  return { itemCount: norm.length, totalUnits, totalCost, hasPendingCost };
 }
 
 // ── Validación del borrador antes de guardar ─────────────────────────────────
@@ -82,7 +89,7 @@ export function validateReceptionDraft({ items, supplier, reference } = {}) {
     if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
       return { ok: false, message: `Cantidad inválida para "${item.productName || item.productId}". Debe ser mayor que cero.` };
     }
-    if (!Number.isFinite(item.unitCost) || item.unitCost < 0) {
+    if (item.unitCost !== null && (!Number.isFinite(item.unitCost) || item.unitCost < 0)) {
       return { ok: false, message: `Costo inválido para "${item.productName || item.productId}". No puede ser negativo.` };
     }
     if (seen.has(item.productId)) {
@@ -195,6 +202,7 @@ export async function createGoodsReceipt({ items, supplier = '', reference = '',
       itemCount: totals.itemCount,
       totalUnits: totals.totalUnits,
       totalCost: totals.totalCost,
+      hasPendingCost: totals.hasPendingCost,
       createdBy: user.email || user.uid,
       createdByUid: user.uid,
       createdByRole: role || 'unknown',
@@ -327,6 +335,28 @@ export function subscribeGoodsReceipts(callback, { limit = 100 } = {}) {
     );
 }
 
+// ── Proveedores para el buscador del formulario ──────────────────────────────
+// Combina la colección `suppliers` (gestionada por admin en Proveedores) con los
+// nombres usados en recepciones previas, para no perder proveedores escritos a
+// mano antes de que existiera la colección dedicada.
+export async function fetchSupplierNames() {
+  const [suppliersSnap, receiptsSnap] = await Promise.all([
+    firestore().collection('suppliers').get(),
+    receiptsCollection().orderBy('createdAt', 'desc').limit(300).get(),
+  ]);
+
+  const names = new Set();
+  suppliersSnap.forEach((doc) => {
+    const name = (doc.data()?.name || '').trim();
+    if (name) names.add(name);
+  });
+  receiptsSnap.forEach((doc) => {
+    const supplier = (doc.data()?.supplier || '').trim();
+    if (supplier) names.add(supplier);
+  });
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
 // ── Una recepción por id ─────────────────────────────────────────────────────
 export async function getGoodsReceipt(receiptId) {
   if (!receiptId) return null;
@@ -363,6 +393,7 @@ export default {
   createGoodsReceipt,
   voidGoodsReceipt,
   subscribeGoodsReceipts,
+  fetchSupplierNames,
   getGoodsReceipt,
   subscribeReceptionMovements,
 };

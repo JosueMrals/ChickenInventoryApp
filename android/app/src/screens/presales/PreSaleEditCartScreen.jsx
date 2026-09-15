@@ -8,7 +8,7 @@ import styles from "../quicksalesNew/styles/quickCartStyles";
 import globalStyles from "../../styles/globalStyles";
 import AddProductModal from "./components/AddProductModal";
 import CreditDueDatePicker from "./components/CreditDueDatePicker";
-import { getEffectiveCreditLimit, toDateSafe } from "../../utils/creditUtils";
+import { getEffectiveCreditLimit, toDateSafe, computeCreditDueDate } from "../../utils/creditUtils";
 import { useCreditExposure } from "../../hooks/useCreditExposure";
 import { useSubmitLock } from "../../hooks/useSubmitLock";
 import { formatCurrency } from "../../utils/formatMoney";
@@ -47,6 +47,18 @@ export default function PreSaleEditCartScreen({ navigation }) {
   useEffect(() => {
     setCreditDueDate(toDateSafe(editingPreSale?.creditDueDate));
   }, [editingPreSale]);
+
+  // La fecha de pago ya no la elige el vendedor: sale del plazo configurado
+  // por el admin en el cliente (creditUtils.computeCreditDueDate). Si la
+  // preventa ya tenía un crédito con fecha acordada, esa fecha es inmutable
+  // acá (efecto de arriba); esto cubre crédito nuevo o conversión de contado
+  // a crédito durante la edición.
+  useEffect(() => {
+    if (!isCredit) return;
+    const alreadyFixed = editingPreSale?.paymentMethod === 'credit' && editingPreSale?.creditDueDate;
+    if (alreadyFixed) return;
+    setCreditDueDate(computeCreditDueDate(customer));
+  }, [isCredit, customer, editingPreSale]);
 
   const displayData = useMemo(() => {
     const normalItems = editCart.filter(i => !i.isBonus);
@@ -107,6 +119,10 @@ export default function PreSaleEditCartScreen({ navigation }) {
   }, [preSaleIsCredit, hasValidTotal, canUseCredit, creditExceeded]);
 
   useEffect(() => {
+    // allowExitRef ya está en true cuando resetPreSale() vacía cart/customer tras
+    // guardar: sin este corte, el re-render de teardown veía total=0/sin cliente
+    // y disparaba esta alerta después de "Pre-Venta Actualizada".
+    if (allowExitRef.current) return;
     if (!hasValidTotal || !canUseCredit || creditExceeded) {
       if (isCredit && !creditWarningShownRef.current) {
         Alert.alert(
@@ -177,8 +193,8 @@ export default function PreSaleEditCartScreen({ navigation }) {
       }
       if (!creditDueDate) {
         return Alert.alert(
-          "Fecha de pago requerida",
-          "Selecciona la fecha en la que el cliente se compromete a pagar el crédito."
+          "No se pudo calcular la fecha de pago",
+          "Revisa el plazo de crédito configurado para este cliente."
         );
       }
     }
@@ -358,7 +374,7 @@ export default function PreSaleEditCartScreen({ navigation }) {
             )}
 
             {isCredit && (
-              <CreditDueDatePicker value={creditDueDate} onChange={setCreditDueDate} />
+              <CreditDueDatePicker customer={customer} dueDate={creditDueDate} />
             )}
 
             <View style={localStyles.footerButtons}>

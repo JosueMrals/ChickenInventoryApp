@@ -42,6 +42,12 @@ describe('normalizeReceiptItem', () => {
     expect(norm.quantity).toBe(2);
     expect(norm.lineCost).toBe(20);
   });
+
+  test('costo no informado (bodeguero) queda en null, no en cero', () => {
+    const norm = normalizeReceiptItem({ productId: 'p1', quantity: 3, unitCost: '' });
+    expect(norm.unitCost).toBeNull();
+    expect(norm.lineCost).toBeNull();
+  });
 });
 
 describe('computeReceiptTotals', () => {
@@ -50,11 +56,19 @@ describe('computeReceiptTotals', () => {
       { productId: 'p1', quantity: 3, unitCost: 20 },
       { productId: 'p2', quantity: 2, unitCost: 15.5 },
     ]);
-    expect(totals).toEqual({ itemCount: 2, totalUnits: 5, totalCost: 91 });
+    expect(totals).toEqual({ itemCount: 2, totalUnits: 5, totalCost: 91, hasPendingCost: false });
   });
 
   test('lista vacía → todo en cero', () => {
-    expect(computeReceiptTotals([])).toEqual({ itemCount: 0, totalUnits: 0, totalCost: 0 });
+    expect(computeReceiptTotals([])).toEqual({ itemCount: 0, totalUnits: 0, totalCost: 0, hasPendingCost: false });
+  });
+
+  test('línea sin costo marca hasPendingCost y no cuenta como cero', () => {
+    const totals = computeReceiptTotals([
+      { productId: 'p1', quantity: 3, unitCost: 20 },
+      { productId: 'p2', quantity: 2, unitCost: '' },
+    ]);
+    expect(totals).toEqual({ itemCount: 2, totalUnits: 5, totalCost: 60, hasPendingCost: true });
   });
 });
 
@@ -112,6 +126,11 @@ describe('validateReceptionDraft', () => {
     }));
     expect(res.ok).toBe(false);
     expect(res.message).toMatch(/repetido/i);
+  });
+
+  test('acepta línea sin costo (recepción de bodeguero)', () => {
+    const res = validateReceptionDraft(baseDraft({ items: [{ productId: 'p1', productName: 'Pollo', quantity: 2, unitCost: '' }] }));
+    expect(res.ok).toBe(true);
   });
 
   test('acepta un borrador válido con proveedor y factura', () => {

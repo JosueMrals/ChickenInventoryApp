@@ -3,11 +3,18 @@ service firebase.storage {
   match /b/{bucket}/o {
 
     // =====================================================
-    // ⚙ Roles — espeja firestore.rules (users/{uid}.role)
+    // ⚙ Roles — espeja firestore.rules: custom claim primero (sin lectura
+    // extra), con el mismo fallback legacy a users/{uid}.role para tokens
+    // pre-migración o usuarios sin backfill. Borrar legacyHasRole() y su
+    // llamada cuando los claims estén propagados a todos (ver firestore.rules).
     // =====================================================
     function hasRole(role) {
       return request.auth != null
-        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && (request.auth.token.get('role', '') == role || legacyHasRole(role));
+    }
+
+    function legacyHasRole(role) {
+      return firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
         && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == role;
     }
 

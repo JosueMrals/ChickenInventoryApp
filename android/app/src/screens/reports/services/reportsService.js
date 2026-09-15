@@ -8,6 +8,7 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 const _docsCache    = new Map();
 const _summaryCache = new Map();
 const _userSalesCache = new Map();
+const _creditsByEmployeeCache = new Map();
 
 function _cacheKey(from, to) {
   return `${from?.getTime?.() ?? "null"}_${to?.getTime?.() ?? "null"}`;
@@ -54,6 +55,7 @@ export function clearAllReportsCaches() {
   _docsCache.clear();
   _summaryCache.clear();
   _userSalesCache.clear();
+  _creditsByEmployeeCache.clear();
   _financialDetailCache.clear();
   _clientsReportCache.clear();
   _productsReportCache.clear();
@@ -167,6 +169,85 @@ async function fetchAllSalesDocs({ from, to }) {
   return allDocs;
 }
 
+/**
+ * Créditos creados en el rango, agrupados por vendedor (`createdBy`).
+ * La usa `getSalesSummaryOptimized` para enriquecer `salesByEmployee` con el
+ * detalle de crédito del panel de Vendedores — sin esto ese panel solo veía
+ * el total de venta, sin distinguir cuánto quedó pendiente vs cobrado.
+ *
+ * `creditPaid`/`creditPending` replican exactamente el criterio de
+ * `getCreditTotals` (creditsService.js): `total` para créditos con
+ * status 'paid', `pending` para 'pending' — mismo número que vería el
+ * vendedor en el módulo Créditos.
+ *
+ * `collectedToDate` es distinto de `creditPaid`: suma los abonos
+ * (`payments[]`) con fecha dentro de [`from`, `to`], sin importar el status
+ * actual del crédito NI cuándo se originó — una venta a crédito de un mes
+ * puede cobrarse el siguiente, y ese abono sí cuenta como cobrado en este
+ * período aunque el crédito no aparezca como "creado" en él. Por eso la
+ * consulta solo acota por `createdAt <= to` (no por `from`): filtrar también
+ * por `from` en la consulta dejaba fuera créditos originados antes del rango
+ * y subestimaba lo realmente cobrado.
+ */
+async function fetchCreditsByEmployee({ from, to }) {
+  const key = _cacheKey(from, to);
+  const hit = _creditsByEmployeeCache.get(key);
+  if (hit && Date.now() - hit.ts < CACHE_TTL) return hit.data;
+
+  const byEmployee = {};
+  try {
+    let q = col("credits").orderBy("createdAt");
+    if (to) q = q.where("createdAt", "<=", toTs(to));
+    const snap = await q.get();
+    const toMs = to instanceof Date ? to.getTime() : null;
+    const fromMs = from instanceof Date ? from.getTime() : null;
+
+    snap.forEach((doc) => {
+      const c = doc.data();
+      const empKey = c.createdBy || null;
+      if (!empKey) return;
+
+      if (!byEmployee[empKey]) {
+        byEmployee[empKey] = {
+          creditPending: 0, creditPendingCount: 0,
+          creditPaid: 0, creditPaidCount: 0,
+          collectedToDate: 0,
+        };
+      }
+      const bucket = byEmployee[empKey];
+
+      // creditPending/creditPaid describen créditos ORIGINADOS en el rango.
+      const createdMs = docDate(c.createdAt)?.getTime() ?? null;
+      const createdInRange = fromMs === null || (createdMs !== null && createdMs >= fromMs);
+      if (createdInRange) {
+        if (c.status === "paid") {
+          bucket.creditPaid += Number(c.total) || 0;
+          bucket.creditPaidCount += 1;
+        } else if (c.status === "pending") {
+          bucket.creditPending += Number(c.pending) || 0;
+          bucket.creditPendingCount += 1;
+        }
+      }
+
+      (c.payments || []).forEach((p) => {
+        const d = docDate(p.date);
+        if (!d) return;
+        const ms = d.getTime();
+        if ((toMs === null || ms <= toMs) && (fromMs === null || ms >= fromMs)) {
+          bucket.collectedToDate += Number(p.amount) || 0;
+        }
+      });
+    });
+  } catch (e) {
+    // Un fallo aquí no debe tumbar el resto del resumen: el panel de Vendedores
+    // simplemente se queda sin el detalle de crédito (campos en 0/undefined).
+    console.error("ERROR fetchCreditsByEmployee:", e);
+  }
+
+  _creditsByEmployeeCache.set(key, { ts: Date.now(), data: byEmployee });
+  return byEmployee;
+}
+
 export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
   const key = _cacheKey(from, to);
   const hit = _summaryCache.get(key);
@@ -198,8 +279,12 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
       });
     });
 
-    // Precios de compra
-    const productPrices = await fetchPurchasePrices(productIds);
+    // Precios de compra + créditos por vendedor del mismo rango, en paralelo
+    // (consultas independientes, no hace falta encadenarlas).
+    const [productPrices, creditsByEmployee] = await Promise.all([
+      fetchPurchasePrices(productIds),
+      fetchCreditsByEmployee({ from, to }),
+    ]);
 
     let totalIncome = 0;
     let totalCost = 0;
@@ -232,11 +317,16 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
           employeeTotals[empKey] = {
             id: empKey,
             name: sale.cashierName || sale.soldBy || empKey,
-            total: 0, count: 0,
+            total: 0, count: 0, cash: 0,
           };
         }
         employeeTotals[empKey].total += saleTotal;
         employeeTotals[empKey].count += 1;
+        // Efectivo de ventas pagadas: las de crédito quedan con paymentMethod
+        // 'credit' (ver savePreSaleToFirestore/PaymentSelector), así que este
+        // filtro ya las excluye sin tocar el resto del cómputo.
+        const pm = (sale.paymentMethod || sale.payment_method || "").toLowerCase().trim();
+        if (pm === "cash" || pm === "efectivo") employeeTotals[empKey].cash += saleTotal;
       }
 
       // Cliente
@@ -269,6 +359,16 @@ export async function getSalesSummaryOptimized({ from, to, topN = 10 }) {
         totalDiscounts += Number(it.discount || 0) + Number(it.autoDiscountTotal || 0);
       });
       totalCost += saleCost;
+    });
+
+    // Fusiona el detalle de crédito de cada vendedor. Un vendedor puede tener
+    // créditos en el rango sin ventas propias que lo hayan creado en employeeTotals
+    // todavía (p. ej. solo créditos, ninguna venta de contado) — se crea el bucket.
+    Object.entries(creditsByEmployee).forEach(([empKey, credit]) => {
+      if (!employeeTotals[empKey]) {
+        employeeTotals[empKey] = { id: empKey, name: empKey, total: 0, count: 0, cash: 0 };
+      }
+      Object.assign(employeeTotals[empKey], credit);
     });
 
     const result = {

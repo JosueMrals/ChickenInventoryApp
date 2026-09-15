@@ -128,6 +128,9 @@ export async function registerQuickSaleFull({
       pending,
       status: "pending",
       createdAt,
+      // Venta rápida: sin flujo de despacho, no hay entregador que asignar.
+      createdBy: user?.email || "N/A",
+      entregadorId: null,
     });
   }
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Image,
   PermissionsAndroid,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import ProductPickerModal from '../components/ProductPickerModal';
@@ -21,14 +22,24 @@ import {
   createGoodsReceipt,
   computeReceiptTotals,
   validateReceptionDraft,
+  fetchSupplierNames,
 } from '../../../services/receptionService';
 import { uploadInvoicePhoto, deleteInvoicePhoto } from '../services/invoicePhotosService';
 import styles, { COLORS } from '../styles/receptionStyles';
 import { formatCurrency } from '../../../utils/formatMoney';
 
+// El bodeguero no ve/captura costo (LineItemModal hideCost): unitCost llega
+// como '' sin tocar. Distinguir "no informado" (null) de "cero" evita guardar
+// C$0.00 como si fuera un dato real (ver receptionService.normalizeReceiptItem).
+const parseCost = (v) => (v === '' || v == null ? null : Number(v));
+
 export default function ReceptionCreateScreen({ navigation, route }) {
   const { role } = route?.params ?? {};
+  const isBodeguero = role === 'bodeguero';
+  const insets = useSafeAreaInsets();
   const [supplier, setSupplier] = useState('');
+  const [supplierNames, setSupplierNames] = useState([]);
+  const [supplierSuggestOpen, setSupplierSuggestOpen] = useState(false);
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [invoicePhoto, setInvoicePhoto] = useState(null); // { url, path, uploadedAt }
@@ -43,6 +54,19 @@ export default function ReceptionCreateScreen({ navigation, route }) {
 
   // Candado de envío: evita doble creación por doble tap (una recepción duplica stock).
   const submittingRef = useRef(false);
+
+  // Buscador de proveedor para todos los roles. El bodeguero solo puede elegir
+  // uno ya registrado; el admin además puede escribir uno nuevo.
+  useEffect(() => {
+    fetchSupplierNames().then(setSupplierNames).catch(() => setSupplierNames([]));
+  }, []);
+
+  const supplierMatches = useMemo(() => {
+    const term = supplier.trim().toLowerCase();
+    if (!term) return [];
+    return supplierNames.filter((n) => n.toLowerCase().includes(term) && n !== supplier);
+  }, [supplier, supplierNames]);
+  const supplierIsKnown = supplierNames.includes(supplier.trim());
 
   // ── Captura / selección de la foto de la factura ───────────────────────────
   const pickInvoicePhoto = async (fromCamera) => {
@@ -146,7 +170,7 @@ export default function ReceptionCreateScreen({ navigation, route }) {
         lines.map((l) => ({
           productId: l.productId,
           quantity: Number(l.quantity) || 0,
-          unitCost: Number(l.unitCost) || 0,
+          unitCost: parseCost(l.unitCost),
         }))
       ),
     [lines]
@@ -160,12 +184,17 @@ export default function ReceptionCreateScreen({ navigation, route }) {
       productName: l.productName,
       category: l.category,
       quantity: Number(l.quantity) || 0,
-      unitCost: Number(l.unitCost) || 0,
+      unitCost: parseCost(l.unitCost),
     }));
 
     const validation = validateReceptionDraft({ items, supplier, reference });
     if (!validation.ok) {
       Alert.alert('Revisa la recepción', validation.message);
+      return;
+    }
+
+    if (isBodeguero && !supplierIsKnown) {
+      Alert.alert('Proveedor no encontrado', 'Elige un proveedor de la lista. Solo un administrador puede registrar uno nuevo.');
       return;
     }
 
@@ -205,7 +234,7 @@ export default function ReceptionCreateScreen({ navigation, route }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn}>
           <Icon name="chevron-back" size={26} color="#fff" />
         </TouchableOpacity>
@@ -223,11 +252,40 @@ export default function ReceptionCreateScreen({ navigation, route }) {
             <Text style={[styles.label, { marginBottom: 6 }]}>Proveedor <Text style={styles.required}>*</Text></Text>
             <TextInput
               style={styles.input}
-              placeholder="Nombre del proveedor"
+              placeholder="Buscar proveedor..."
               placeholderTextColor={COLORS.muted}
               value={supplier}
-              onChangeText={setSupplier}
+              onChangeText={(v) => {
+                setSupplier(v);
+                setSupplierSuggestOpen(true);
+              }}
+              onFocus={() => setSupplierSuggestOpen(true)}
+              editable={!isBodeguero || supplierNames.length > 0}
             />
+            {supplierSuggestOpen && supplierMatches.length > 0 && (
+              <View style={styles.supplierSuggestions}>
+                <ScrollView keyboardShouldPersistTaps="handled">
+                  {supplierMatches.map((name) => (
+                    <TouchableOpacity
+                      key={name}
+                      style={styles.supplierSuggestionRow}
+                      onPress={() => {
+                        setSupplier(name);
+                        setSupplierSuggestOpen(false);
+                      }}
+                    >
+                      <Text style={styles.supplierSuggestionText}>{name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+            {isBodeguero && supplier.trim() && !supplierIsKnown && (
+              <Text style={styles.supplierEmptyHint}>
+                Ese proveedor no existe. Solo un administrador puede crearlo.
+              </Text>
+            )}
+
             <Text style={[styles.label, { marginBottom: 6 }]}>N.º de factura <Text style={styles.required}>*</Text></Text>
             <TextInput
               style={styles.input}
@@ -285,13 +343,17 @@ export default function ReceptionCreateScreen({ navigation, route }) {
                   <Text style={styles.value} numberOfLines={1}>{line.productName}</Text>
                   {incomplete ? (
                     <Text style={[styles.lineSub, { color: COLORS.amber }]}>Toca para ingresar cantidad</Text>
+                  ) : isBodeguero ? (
+                    <Text style={styles.lineSub}>
+                      {qty} u  ·  stock {line.stock} → {line.stock + qty}
+                    </Text>
                   ) : (
                     <Text style={styles.lineSub}>
                       {qty} u × {formatCurrency(cost)}  ·  stock {line.stock} → {line.stock + qty}
                     </Text>
                   )}
                 </View>
-                {!incomplete && <Text style={[styles.lineQty, { marginRight: 8 }]}>{formatCurrency(qty * cost)}</Text>}
+                {!incomplete && !isBodeguero && <Text style={[styles.lineQty, { marginRight: 8 }]}>{formatCurrency(qty * cost)}</Text>}
                 <Icon name="chevron-forward" size={20} color={COLORS.faint} />
               </TouchableOpacity>
             );
@@ -313,10 +375,12 @@ export default function ReceptionCreateScreen({ navigation, route }) {
                 <Text style={styles.label}>Unidades totales</Text>
                 <Text style={styles.value}>{totals.totalUnits}</Text>
               </View>
-              <View style={[styles.rowBetween, { marginTop: 8 }]}>
-                <Text style={styles.label}>Costo total</Text>
-                <Text style={[styles.value, { fontSize: 18 }]}>{formatCurrency(totals.totalCost)}</Text>
-              </View>
+              {!isBodeguero && (
+                <View style={[styles.rowBetween, { marginTop: 8 }]}>
+                  <Text style={styles.label}>Costo total</Text>
+                  <Text style={[styles.value, { fontSize: 18 }]}>{formatCurrency(totals.totalCost)}</Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -361,6 +425,7 @@ export default function ReceptionCreateScreen({ navigation, route }) {
         onClose={closeLineModal}
         onSave={saveLine}
         onRemove={removeLine}
+        hideCost={isBodeguero}
       />
     </View>
   );

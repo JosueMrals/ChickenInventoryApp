@@ -1,11 +1,12 @@
 // Ficha de cliente en solo lectura. Se comparte entre la lista de clientes del
 // entregador y el ticket de entrega (icono de vista rápida), para que la
 // información del cliente se vea igual en toda la app.
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Modal, TouchableOpacity, StyleSheet, Linking, Alert, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import PhotoGallery from './PhotoGallery';
 import { getEffectiveCreditLimit } from '../../../utils/creditUtils';
+import { getCustomerOutstandingCredit } from '../../credits/services/creditsService';
 
 // Nicaragua: los números locales se marcan sin prefijo; para WhatsApp sí hace falta.
 const WHATSAPP_COUNTRY_CODE = '505';
@@ -48,6 +49,22 @@ function QuickAction({ icon, label, onPress, disabled }) {
 }
 
 export default function CustomerInfoSheet({ visible, customer, onClose }) {
+  // null = aún no resuelto o sin conexión ("no verificado"); no 0, que se leería
+  // como "no debe nada" y mostraría disponible de más. Mismo criterio que
+  // getCustomerOutstandingCredit (ver creditsService.js).
+  const [outstanding, setOutstanding] = useState(null);
+  const customerId = customer?.id;
+
+  useEffect(() => {
+    if (!visible || !customerId) { setOutstanding(null); return; }
+    let cancelled = false;
+    setOutstanding(null);
+    getCustomerOutstandingCredit(customerId).then((value) => {
+      if (!cancelled) setOutstanding(value);
+    });
+    return () => { cancelled = true; };
+  }, [visible, customerId]);
+
   if (!customer) return null;
 
   const fullName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.customerName || 'Cliente';
@@ -57,6 +74,12 @@ export default function CustomerInfoSheet({ visible, customer, onClose }) {
   const discount = Number(customer.discount) || 0;
   const effectiveCredit = getEffectiveCreditLimit(customer);
   const photos = customer.photos || [];
+
+  const hasOutstandingSignal = outstanding !== null;
+  const available = hasOutstandingSignal ? Math.max(effectiveCredit.total - outstanding, 0) : null;
+  const usage = hasOutstandingSignal && effectiveCredit.total > 0
+    ? Math.min(outstanding / effectiveCredit.total, 1)
+    : 0;
 
   const call = () => openUrl(`tel:${phone}`, 'Este dispositivo no puede realizar llamadas.');
   const whatsapp = () =>
@@ -111,6 +134,25 @@ export default function CustomerInfoSheet({ visible, customer, onClose }) {
                   : `C$${effectiveCredit.base.toFixed(2)}`
               }
             />
+
+            {effectiveCredit.total > 0 && (
+              <View style={s.creditBlock}>
+                <View style={s.creditBlockHeader}>
+                  <Text style={s.infoLabel}>Crédito disponible</Text>
+                  <Text style={[s.creditAvailable, usage >= 1 && s.creditAvailableDanger]}>
+                    {hasOutstandingSignal ? `C$${available.toFixed(2)}` : '—'}
+                  </Text>
+                </View>
+                <View style={s.usageBarWrap}>
+                  <View style={[s.usageBar, usage >= 1 && s.usageBarDanger, { width: `${usage * 100}%` }]} />
+                </View>
+                <Text style={s.creditHint}>
+                  {hasOutstandingSignal
+                    ? `${Math.round(usage * 100)}% del límite en uso · debe C$${outstanding.toFixed(2)}`
+                    : 'Sin conexión: no se pudo verificar la deuda actual.'}
+                </Text>
+              </View>
+            )}
 
             {/* Fotos del local/fachada: ubicar al cliente en ruta. Solo consulta:
                 sin onDelete, la galería no muestra el botón de borrar. */}
@@ -189,6 +231,14 @@ const s = StyleSheet.create({
   infoIcon: { marginTop: 2, marginRight: 10 },
   infoLabel: { fontSize: 11, fontWeight: '600', color: '#8E8E93' },
   infoValue: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginTop: 1 },
+  creditBlock: { paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
+  creditBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  creditAvailable: { fontSize: 14, fontWeight: '800', color: '#34C759' },
+  creditAvailableDanger: { color: '#FF3B30' },
+  usageBarWrap: { height: 6, borderRadius: 4, backgroundColor: '#F0F0F5', overflow: 'hidden' },
+  usageBar: { height: 6, borderRadius: 4, backgroundColor: '#007AFF' },
+  usageBarDanger: { backgroundColor: '#FF3B30' },
+  creditHint: { fontSize: 10, fontWeight: '600', color: '#8E8E93', marginTop: 5 },
   photosBlock: { paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F0F0F0', marginBottom: 8 },
   photosHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   photosTitle: { fontSize: 11, fontWeight: '600', color: '#8E8E93' },

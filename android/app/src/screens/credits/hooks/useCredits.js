@@ -43,6 +43,16 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
 
   const [totals, setTotals] = useState({ paid: 0, pending: 0 });
 
+  // Scope por dueño: vendedor ve solo lo que él creó. Admin y entregador ven
+  // la cartera completa — el entregador necesita poder cobrar cualquier
+  // crédito cuando el cliente lo solicite, no solo el de su ruta asignada
+  // (las reglas de Firestore ya permiten a isEntregador() leer y abonar
+  // cualquier crédito; este filtro era solo del lado cliente).
+  const ownerScopeEmail = role === 'vendedor'
+    ? ((typeof user?.email === 'string' && user.email.trim()) || auth()?.currentUser?.email || null)
+    : null;
+  const ownerScopeUid = null;
+
   // El status va al query: antes se traía la colección `credits` entera y se
   // filtraba en JS. Cambiar de pestaña ahora resuscribe con el filtro aplicado.
   useEffect(() => {
@@ -55,7 +65,7 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
         setLoadError(null);
         setLoading(false);
       },
-      { status, from: dateFrom, to: dateTo },
+      { status, from: dateFrom, to: dateTo, createdBy: ownerScopeEmail, entregadorId: ownerScopeUid },
       // Un query fallido (índice en construcción, permisos) debe cortar la carga
       // y mostrar el motivo; antes dejaba la pantalla girando indefinidamente.
       (error) => {
@@ -65,7 +75,7 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
       },
     );
     return unsub;
-  }, [filter, dateFrom, dateTo, reloadKey]);
+  }, [filter, dateFrom, dateTo, reloadKey, ownerScopeEmail, ownerScopeUid]);
 
   // Los totales se suman en el servidor sobre TODA la colección: la lista está
   // acotada, así que calcularlos sobre `credits` daría montos incompletos.
@@ -73,13 +83,14 @@ export const useCredits = (user, role, initialFilter = 'pending') => {
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
-  // Los totales siguen el mismo rango de fechas que la lista: si no, el encabezado
-  // mostraría el saldo de toda la cartera bajo una vista filtrada a una semana.
+  // Los totales siguen el mismo rango de fechas Y el mismo scope de dueño que
+  // la lista: si no, el encabezado mostraría el saldo de toda la cartera sobre
+  // una lista ya acotada al vendedor o entregador.
   const refreshTotals = useCallback(async () => {
-    const next = await getCreditTotals({ from: dateFrom, to: dateTo });
+    const next = await getCreditTotals({ from: dateFrom, to: dateTo, createdBy: ownerScopeEmail, entregadorId: ownerScopeUid });
     // getCreditTotals es asíncrono y la pantalla puede cerrarse antes de que resuelva.
     if (mountedRef.current) setTotals(next);
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, ownerScopeEmail, ownerScopeUid]);
 
   useEffect(() => {
     refreshTotals();
