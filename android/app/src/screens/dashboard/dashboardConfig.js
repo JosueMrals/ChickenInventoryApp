@@ -8,22 +8,25 @@ export const MODULE_GROUPS_BY_ROLE = {
   admin: [
     { label: 'Ventas', keys: ['pre-sale', 'products-new'] },
     { label: 'Clientes y Créditos', keys: ['customers', 'credits'] },
-    { label: 'Operaciones', keys: ['routes', 'prepare-presales', 'reception', 'returns', 'my-deliveries', 'staff-purchase'] },
+    { label: 'Operaciones', keys: ['routes', 'prepare-presales', 'reception', 'returns', 'my-deliveries', 'staff-purchase', 'cash-closing'] },
     { label: 'Administración', keys: ['reports', 'users', 'payroll', 'settings'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   vendedor: [
     { label: 'Ventas', keys: ['pre-sale', 'products-new'] },
     { label: 'Clientes y Créditos', keys: ['customers', 'credits'] },
+    { label: 'Caja y Nómina', keys: ['cash-closing', 'payroll'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   bodeguero: [
     { label: 'Almacén', keys: ['prepare-presales', 'reception', 'returns', 'products-new', 'staff-purchase'] },
+    { label: 'Nómina', keys: ['payroll'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   entregador: [
     { label: 'Mis Entregas', keys: ['my-deliveries', 'returns'] },
     { label: 'Consulta', keys: ['customers', 'credits'] },
+    { label: 'Caja y Nómina', keys: ['cash-closing', 'payroll'] },
     { label: 'Otros', keys: ['settings'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
@@ -48,8 +51,10 @@ export const ALL_MODULES = [
   { key: 'reception', label: 'Recepción de Mercancía', icon: 'download-outline', color: '#27AE60', screen: 'Reception', roles: ['admin', 'bodeguero'] },
   { key: 'returns', label: 'Devoluciones', icon: 'return-up-back-outline', color: '#E67E22', screen: 'Returns', roles: ['admin', 'bodeguero', 'entregador'] },
   { key: 'my-deliveries', label: 'Mis Entregas', icon: 'bicycle-outline', color: '#2DCE89', screen: 'MyDeliveries', roles: ['admin', 'entregador'] },
-  { key: 'payroll', label: 'Nómina', icon: 'wallet-outline', color: '#007AFF', screen: 'Payroll', roles: ['admin'] },
+  { key: 'payroll', label: 'Nómina', icon: 'wallet-outline', color: '#007AFF', screen: 'Payroll', roles: ['admin', 'vendedor', 'bodeguero', 'entregador'] },
   { key: 'staff-purchase', label: 'Entrega a Personal', icon: 'bag-handle-outline', color: '#5856D6', screen: 'StaffPurchase', roles: ['admin', 'bodeguero'] },
+  // El admin abre/cierra su propio turno igual que vendedor/entregador y además revisa los de los demás.
+  { key: 'cash-closing', label: 'Cierre de Caja', icon: 'calculator-outline', color: '#007AFF', screen: 'CashClosing', roles: ['admin', 'vendedor', 'entregador'] },
   { key: 'profile', label: 'Mi Perfil', icon: 'person-circle-outline', color: '#5AC8FA', screen: 'Profile', roles: ['admin', 'vendedor', 'bodeguero', 'entregador', 'user'] },
 ];
 

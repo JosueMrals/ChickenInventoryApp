@@ -333,6 +333,61 @@ service cloud.firestore {
     }
 
     // =====================================================
+    //  💰 CASH COLLECTIONS — cobros individuales (entregas y abonos)
+    //  a la espera de que su turno los reclame en un Cierre de Caja
+    // =====================================================
+    match /cashCollections/{collectionId} {
+      allow read: if isOperativo();
+
+      // Los cobros de entrega los crea completePreSalePayment (Admin SDK, sin
+      // pasar por reglas). Aquí solo entran los abonos de crédito, que sí se
+      // escriben desde el cliente (vendedor o admin cobrando directamente).
+      allow create: if (isAdmin() || isVendedor())
+        && request.auth.uid == request.resource.data.uid
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.turnoId == null;
+
+      // Reclamarlo en un turno al cerrarlo: solo cambia turnoId, de null a un
+      // id fijo. El monto y el dueño del cobro son inmutables.
+      allow update: if isOperativo()
+        && request.auth.uid == resource.data.uid
+        && request.resource.data.uid == resource.data.uid
+        && resource.data.turnoId == null
+        && request.resource.data.turnoId is string
+        && request.resource.data.amount == resource.data.amount;
+
+      allow delete: if false;
+    }
+
+    // =====================================================
+    //  🧮 CASH CLOSINGS — Cierre de Caja (turnos de vendedor/entregador/admin)
+    // =====================================================
+    match /cashClosings/{closingId} {
+      allow read: if isOperativo();
+
+      // Abrir turno: nace abierto y sin cobros reclamados todavía.
+      allow create: if isOperativo()
+        && request.auth.uid == request.resource.data.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.collectionIds.size() == 0;
+
+      // Cerrar el propio turno: de 'open' a 'pending_review'. Es el propio
+      // dueño quien lo cierra, igual que lo abrió.
+      allow update: if isOperativo()
+        && request.auth.uid == resource.data.uid
+        && resource.data.status == 'open'
+        && request.resource.data.status == 'pending_review';
+
+      // Revisión del admin: de 'pending_review' a 'complete' o 'shortage'.
+      allow update: if isAdmin()
+        && resource.data.status == 'pending_review'
+        && (request.resource.data.status == 'complete' || request.resource.data.status == 'shortage');
+
+      allow delete: if false;
+    }
+
+    // =====================================================
     //  🗺 ROUTES — rutas de reparto
     // =====================================================
     match /routes/{routeId} {

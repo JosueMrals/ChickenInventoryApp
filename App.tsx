@@ -49,6 +49,11 @@ import PayrollHistoryScreen from './android/app/src/screens/payroll/screens/Payr
 import StaffPurchaseScreen from './android/app/src/screens/payroll/screens/StaffPurchaseScreen';
 // ------------------------
 
+// --- CIERRE DE CAJA ---
+import CashClosingScreen from './android/app/src/screens/cashClosing/screens/CashClosingScreen';
+import CashClosingHistoryScreen from './android/app/src/screens/cashClosing/screens/CashClosingHistoryScreen';
+// ------------------------
+
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
 import ProductsStack from './android/app/src/navigation/ProductsStack';
 import ReceptionStack from './android/app/src/navigation/ReceptionStack';
@@ -89,6 +94,8 @@ const ReturnsScreenAny = ReturnsScreen as React.ComponentType<any>;
 const WarehouseDashboardScreenAny = WarehouseDashboardScreen as React.ComponentType<any>;
 const PayrollScreenAny = PayrollScreen as React.ComponentType<any>;
 const StaffPurchaseScreenAny = StaffPurchaseScreen as React.ComponentType<any>;
+const CashClosingScreenAny = CashClosingScreen as React.ComponentType<any>;
+const CashClosingHistoryScreenAny = CashClosingHistoryScreen as React.ComponentType<any>;
 const ReceptionStackAny = ReceptionStack as React.ComponentType<any>;
 
 function AppDrawer({ route, navigation }: any) {
@@ -305,6 +312,17 @@ function AppDrawer({ route, navigation }: any) {
       />
       <Drawer.Screen name="StaffPurchase" options={{ headerShown: false, drawerLabel: 'Entrega a Personal' }}>
         {(props) => <StaffPurchaseScreenAny {...props} user={user} role={role} />}
+      </Drawer.Screen>
+
+      {/* CIERRE DE CAJA — turnos de vendedor/entregador/admin y su revisión */}
+      <Drawer.Screen name="CashClosing" options={{ headerShown: false, drawerLabel: 'Cierre de Caja' }}>
+        {(props) => <CashClosingScreenAny {...props} user={user} role={role} />}
+      </Drawer.Screen>
+      <Drawer.Screen
+        name="CashClosingHistory"
+        options={{ headerShown: false, drawerItemStyle: { display: 'none' } }}
+      >
+        {(props) => <CashClosingHistoryScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
 
       {/* ROUTES MODULE */}

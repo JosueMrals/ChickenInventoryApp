@@ -8,11 +8,12 @@
  */
 
 const mockState = { docs: {}, writes: [] };
+let mockAutoId = 0;
 
 jest.mock('@react-native-firebase/firestore', () => {
   const firestore = () => ({
     collection: () => ({
-      doc: (id) => ({ id }),
+      doc: (id) => ({ id: id || `auto-${++mockAutoId}` }),
     }),
     runTransaction: async (fn) => fn({
       get: async (ref) => ({
@@ -22,7 +23,11 @@ jest.mock('@react-native-firebase/firestore', () => {
       }),
       update: (ref, payload) => {
         mockState.docs[ref.id] = { ...mockState.docs[ref.id], ...payload };
-        mockState.writes.push({ id: ref.id, payload });
+        mockState.writes.push({ id: ref.id, op: 'update', payload });
+      },
+      set: (ref, payload) => {
+        mockState.docs[ref.id] = { ...payload };
+        mockState.writes.push({ id: ref.id, op: 'set', payload });
       },
     }),
   });

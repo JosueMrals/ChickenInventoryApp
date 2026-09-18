@@ -6,7 +6,7 @@ import globalStyles from '../../../styles/globalStyles';
 import styles, { COLORS, formatMoney } from '../styles/payrollStyles';
 import AccountSection, { AccountLine } from '../components/AccountSection';
 import AdvanceModal from '../components/AdvanceModal';
-import { useStaffAccount } from '../hooks/usePayroll';
+import { useStaffAccount, useOwnStaffAccount } from '../hooks/usePayroll';
 import { useSubmitLock } from '../../../hooks/useSubmitLock';
 import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
 import { formatTimestamp } from '../../returns/utils/format';
@@ -18,16 +18,51 @@ import {
   setSalary,
   settleStaffPeriod,
 } from '../services/payrollService';
-import { ROLE_LABELS } from '../types';
+import { ROLE_LABELS, StaffAccount } from '../types';
 
 interface Props {
   navigation: NavigationProp<any>;
   route: RouteProp<any>;
 }
 
+/**
+ * El admin puede ver y editar cualquier cuenta; cualquier otro rol solo llega
+ * aquí a ver la SUYA (readOnly=true, ver PayrollScreen), sin poder tocar nada.
+ * Cada caso usa una suscripción distinta (toda la plantilla vs. solo el
+ * propio uid), así que se separan en dos componentes: mezclar los hooks en
+ * uno solo tras un `if` es justo el patrón que abre y cierra suscripciones
+ * de más entre renders.
+ */
 export default function StaffAccountScreen({ navigation, route }: Props) {
   const uid = (route.params as any)?.uid as string;
+  const readOnly = !!(route.params as any)?.readOnly;
+
+  return readOnly ? (
+    <OwnStaffAccountScreen uid={uid} navigation={navigation} />
+  ) : (
+    <AdminStaffAccountScreen uid={uid} navigation={navigation} />
+  );
+}
+
+function AdminStaffAccountScreen({ uid, navigation }: { uid: string; navigation: NavigationProp<any> }) {
   const { account, loading } = useStaffAccount(uid);
+  return <StaffAccountBody account={account} loading={loading} navigation={navigation} readOnly={false} />;
+}
+
+function OwnStaffAccountScreen({ uid, navigation }: { uid: string; navigation: NavigationProp<any> }) {
+  const { account, loading } = useOwnStaffAccount(uid);
+  return <StaffAccountBody account={account} loading={loading} navigation={navigation} readOnly />;
+}
+
+interface BodyProps {
+  account: StaffAccount | null;
+  loading: boolean;
+  navigation: NavigationProp<any>;
+  readOnly: boolean;
+}
+
+function StaffAccountBody({ account, loading, navigation, readOnly }: BodyProps) {
+  const uid = account?.staff?.uid || '';
   const { runLocked } = useSubmitLock();
   const { bottomPadding } = useAdaptiveBottom();
 
@@ -202,7 +237,7 @@ export default function StaffAccountScreen({ navigation, route }: Props) {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="chevron-back" size={28} color="#FFF" />
         </TouchableOpacity>
-        <Text style={globalStyles.title} numberOfLines={1}>{staffName}</Text>
+        <Text style={globalStyles.title} numberOfLines={1}>{readOnly ? 'Mi Nómina' : staffName}</Text>
         <View style={{ width: 28 }} />
       </View>
 
@@ -216,31 +251,37 @@ export default function StaffAccountScreen({ navigation, route }: Props) {
             </Text>
           </View>
 
-          <View style={[styles.salaryRow, { marginTop: 10 }]}>
-            <TextInput
-              style={styles.salaryInput}
-              value={salaryText}
-              onChangeText={setSalaryText}
-              keyboardType="numeric"
-              placeholder="0.00"
-              placeholderTextColor={COLORS.muted}
-            />
-            <TouchableOpacity
-              style={[styles.secondaryButton, savingSalary && styles.disabledButton]}
-              onPress={handleSaveSalary}
-              disabled={savingSalary}
-              activeOpacity={0.8}
-            >
-              {savingSalary ? (
-                <ActivityIndicator size="small" color={COLORS.accent} />
-              ) : (
-                <>
-                  <Icon name="save-outline" size={15} color={COLORS.accent} />
-                  <Text style={styles.secondaryButtonText}>Guardar</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
+          {readOnly ? (
+            <Text style={[styles.footerNetValue, { marginTop: 10 }]}>
+              {account.staff.salary == null ? 'Sin configurar' : formatMoney(account.staff.salary)}
+            </Text>
+          ) : (
+            <View style={[styles.salaryRow, { marginTop: 10 }]}>
+              <TextInput
+                style={styles.salaryInput}
+                value={salaryText}
+                onChangeText={setSalaryText}
+                keyboardType="numeric"
+                placeholder="0.00"
+                placeholderTextColor={COLORS.muted}
+              />
+              <TouchableOpacity
+                style={[styles.secondaryButton, savingSalary && styles.disabledButton]}
+                onPress={handleSaveSalary}
+                disabled={savingSalary}
+                activeOpacity={0.8}
+              >
+                {savingSalary ? (
+                  <ActivityIndicator size="small" color={COLORS.accent} />
+                ) : (
+                  <>
+                    <Icon name="save-outline" size={15} color={COLORS.accent} />
+                    <Text style={styles.secondaryButtonText}>Guardar</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         <AccountSection
@@ -250,14 +291,17 @@ export default function StaffAccountScreen({ navigation, route }: Props) {
           total={account.advancesTotal}
           lines={advanceLines}
           emptyText="Sin adelantos en este periodo."
-          actionLabel="Registrar adelanto"
-          onAction={() => setAdvanceModal(true)}
-          onRemoveLine={(line) =>
-            confirmRemove(
-              'Eliminar adelanto',
-              `¿Eliminar el adelanto de ${formatMoney(line.amount)}?`,
-              () => deleteAdvance(line.id),
-            )
+          actionLabel={readOnly ? undefined : 'Registrar adelanto'}
+          onAction={readOnly ? undefined : () => setAdvanceModal(true)}
+          onRemoveLine={
+            readOnly
+              ? undefined
+              : (line) =>
+                  confirmRemove(
+                    'Eliminar adelanto',
+                    `¿Eliminar el adelanto de ${formatMoney(line.amount)}?`,
+                    () => deleteAdvance(line.id),
+                  )
           }
         />
 
@@ -268,12 +312,15 @@ export default function StaffAccountScreen({ navigation, route }: Props) {
           total={account.purchasesTotal}
           lines={purchaseLines}
           emptyText="No ha solicitado productos en este periodo."
-          onRemoveLine={(line) =>
-            confirmRemove(
-              'Anular entrega',
-              `¿Anular esta entrega de ${formatMoney(line.amount)}? Los productos vuelven al inventario.`,
-              () => cancelStaffPurchase(line.id),
-            )
+          onRemoveLine={
+            readOnly
+              ? undefined
+              : (line) =>
+                  confirmRemove(
+                    'Anular entrega',
+                    `¿Anular esta entrega de ${formatMoney(line.amount)}? Los productos vuelven al inventario.`,
+                    () => cancelStaffPurchase(line.id),
+                  )
           }
           removeIcon="arrow-undo-outline"
         />
@@ -288,38 +335,42 @@ export default function StaffAccountScreen({ navigation, route }: Props) {
         />
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: bottomPadding }]}>
-        <View style={styles.footerNetRow}>
-          <Text style={styles.footerNetLabel}>Neto a pagar</Text>
-          <Text style={[styles.footerNetValue, account.netPay < 0 && { color: COLORS.danger }]}>
-            {formatMoney(account.netPay)}
-          </Text>
+      {!readOnly && (
+        <View style={[styles.footer, { paddingBottom: bottomPadding }]}>
+          <View style={styles.footerNetRow}>
+            <Text style={styles.footerNetLabel}>Neto a pagar</Text>
+            <Text style={[styles.footerNetValue, account.netPay < 0 && { color: COLORS.danger }]}>
+              {formatMoney(account.netPay)}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, (settling || account.staff.salary == null) && styles.disabledButton]}
+            onPress={handleSettle}
+            disabled={settling || account.staff.salary == null}
+            activeOpacity={0.85}
+          >
+            {settling ? (
+              <ActivityIndicator color={COLORS.surface} />
+            ) : (
+              <>
+                <Icon name="checkmark-circle-outline" size={19} color={COLORS.surface} />
+                <Text style={styles.primaryButtonText}>Pagar y cerrar periodo</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
+      )}
 
-        <TouchableOpacity
-          style={[styles.primaryButton, (settling || account.staff.salary == null) && styles.disabledButton]}
-          onPress={handleSettle}
-          disabled={settling || account.staff.salary == null}
-          activeOpacity={0.85}
-        >
-          {settling ? (
-            <ActivityIndicator color={COLORS.surface} />
-          ) : (
-            <>
-              <Icon name="checkmark-circle-outline" size={19} color={COLORS.surface} />
-              <Text style={styles.primaryButtonText}>Pagar y cerrar periodo</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      <AdvanceModal
-        visible={advanceModal}
-        staffName={staffName}
-        saving={savingAdvance}
-        onClose={() => setAdvanceModal(false)}
-        onSubmit={handleAddAdvance}
-      />
+      {!readOnly && (
+        <AdvanceModal
+          visible={advanceModal}
+          staffName={staffName}
+          saving={savingAdvance}
+          onClose={() => setAdvanceModal(false)}
+          onSubmit={handleAddAdvance}
+        />
+      )}
     </View>
   );
 }

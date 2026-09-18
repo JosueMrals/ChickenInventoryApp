@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { NavigationProp } from '@react-navigation/native';
@@ -21,8 +21,34 @@ interface Props {
  * "Periodo abierto" es todo lo acumulado desde el último cierre: no hay fechas
  * fijas configuradas porque el negocio paga quincenal o mensual según el caso,
  * y el corte lo marca el admin al pagar (ver StaffAccountScreen).
+ *
+ * Esta vista con la lista completa expone salarios de toda la plantilla, así
+ * que es exclusiva del admin: quien no lo es entra directo a su propia cuenta
+ * en modo lectura (StaffAccountScreen con readOnly).
  */
-export default function PayrollScreen({ navigation, role }: Props) {
+export default function PayrollScreen({ navigation, role, user }: Props) {
+  const isAdmin = !role || role === 'admin';
+
+  useEffect(() => {
+    if (!isAdmin && user?.uid) {
+      navigation.replace('StaffAccount', { uid: user.uid, readOnly: true });
+    }
+  }, [isAdmin, navigation, user]);
+
+  // No-admin: ni siquiera se monta la lista de abajo, que suscribe a los
+  // salarios de TODA la plantilla — eso solo puede verlo el admin.
+  if (!isAdmin) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={COLORS.accent} />
+      </View>
+    );
+  }
+
+  return <AdminPayrollList navigation={navigation} />;
+}
+
+function AdminPayrollList({ navigation }: { navigation: NavigationProp<any> }) {
   const { accounts, totals, loading, error } = usePayroll();
 
   const openAccount = useCallback(
@@ -31,25 +57,6 @@ export default function PayrollScreen({ navigation, role }: Props) {
     },
     [navigation],
   );
-
-  // Gate de rol: la nómina expone salarios de toda la plantilla.
-  if (role && role !== 'admin') {
-    return (
-      <View style={styles.container}>
-        <View style={globalStyles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Icon name="chevron-back" size={28} color="#FFF" />
-          </TouchableOpacity>
-          <Text style={globalStyles.title}>Nómina</Text>
-          <View style={{ width: 28 }} />
-        </View>
-        <View style={styles.emptyState}>
-          <Icon name="lock-closed-outline" size={48} color={COLORS.muted} />
-          <Text style={styles.emptyText}>Solo el administrador puede ver la nómina.</Text>
-        </View>
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>

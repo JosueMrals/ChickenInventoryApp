@@ -437,11 +437,16 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
     }
 
     const preSaleRef = db.collection('presales').doc(safePreSaleId);
+    // Id determinístico (no `.doc()` random): una pre-venta solo se cobra una
+    // vez por este flujo (el guard de abajo bloquea un segundo intento), y si
+    // Firestore reintenta la transacción por contención, un id nuevo cada vez
+    // duplicaría el cobro en Cierre de Caja.
+    const cashCollectionRef = db.collection('cashCollections').doc(`presale-${safePreSaleId}`);
 
     // Estados que bloquean el cobro definitivamente
     const TERMINAL_BLOCKING = new Set(['paid', 'cancelled', 'delivered']);
 
-    await db.runTransaction(async (t) => {
+    const retainedAmount = await db.runTransaction(async (t) => {
         const doc = await t.get(preSaleRef);
         if (!doc.exists) throw new functions.https.HttpsError('not-found', 'Pre-venta no encontrada');
 
@@ -577,10 +582,75 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
         }
 
         t.update(preSaleRef, preSaleUpdate);
+
+        // Cierre de Caja: lo que el entregador retiene en mano es lo cobrado
+        // hasta cubrir el total (el resto, si sobró, es cambio que ya devolvió).
+        const retained = Math.min(paidAmount, total);
+        if (retained > 0) {
+            t.set(cashCollectionRef, {
+                uid,
+                userName: userEmail,
+                amount: retained,
+                method: null,
+                sourceType: 'presale',
+                sourceId: safePreSaleId,
+                customerName: buildCustomerName(pData),
+                at: admin.firestore.FieldValue.serverTimestamp(),
+                turnoId: null,
+            });
+        }
+        return retained;
     });
+
+    // Fuera de la transacción a propósito (ver ensureOpenTurno): si no se
+    // abrió turno a mano, el primer cobro del día lo abre solo. No debe hacer
+    // fallar el cobro ya confirmado si esto tropieza.
+    if (retainedAmount > 0) {
+        try {
+            const role = userDoc.exists ? userDoc.data().role : null;
+            await ensureOpenTurno(uid, userEmail, role);
+        } catch (turnoError) {
+            console.error('[completePreSalePayment] ensureOpenTurno:', turnoError);
+        }
+    }
 
     return { success: true };
 });
+
+/**
+ * Cierre de Caja: usa el turno abierto del trabajador si existe, o abre uno
+ * nuevo. Se llama fuera de cualquier transacción de cobro a propósito: si esa
+ * transacción se reintenta, esto no debe reintentarse con ella.
+ *
+ * ponytail: no es transaccional — dos cobros casi simultáneos sin turno
+ * previo podrían abrir dos turnos. Ventana angosta y de bajo impacto (el
+ * admin igual revisa cada turno cerrado); si se vuelve un problema real,
+ * envolver en una transacción con un id determinístico por uid.
+ */
+async function ensureOpenTurno(uid, userName, role) {
+    const openQuery = await db.collection('cashClosings')
+        .where('uid', '==', uid)
+        .where('status', '==', 'open')
+        .limit(1)
+        .get();
+    if (!openQuery.empty) return;
+
+    await db.collection('cashClosings').doc().set({
+        uid,
+        userName,
+        role: role || null,
+        status: 'open',
+        openedAt: admin.firestore.FieldValue.serverTimestamp(),
+        closedAt: null,
+        collectionIds: [],
+        expectedAmount: 0,
+        receivedAmount: null,
+        shortageAmount: 0,
+        reviewedAt: null,
+        reviewedBy: null,
+        shortageId: null,
+    });
+}
 
 exports.getDashboardStats = functions.https.onCall(async (reqData, context) => {
     ensureAppCheck(context);

@@ -93,3 +93,5 @@ android/.github
 android/firebase
 android/.claude
 .serena/
+# Worktrees temporales de Claude Code
+.claude/worktrees/

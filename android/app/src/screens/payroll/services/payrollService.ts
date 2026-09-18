@@ -312,6 +312,82 @@ export const subscribePendingShortages = (
       },
     );
 
+// ── Consulta acotada a un trabajador (su propia nómina) ───────────────────────
+// A diferencia de subscribeStaff/subscribePendingAdvances/etc. (traen TODA la
+// plantilla, uso exclusivo del admin), estas filtran por uid en el servidor:
+// es lo único que puede ver quien abre su nómina sin ser admin.
+
+export const subscribeStaffMember = (
+  uid: string,
+  onUpdate: (staff: StaffMember | null) => void,
+  onError?: (e: Error) => void,
+) =>
+  usersCollection.doc(uid).onSnapshot(
+    (doc: any) => {
+      if (!doc.exists()) return onUpdate(null);
+      const data = doc.data() || {};
+      const rawSalary = data.salary;
+      onUpdate({
+        uid: doc.id,
+        nombre: data.nombre,
+        apellido: data.apellido,
+        email: data.email,
+        role: data.role as StaffRole,
+        salary: rawSalary == null ? null : toNumber(rawSalary),
+      });
+    },
+    (error: Error) => {
+      console.error('[payrollService] subscribeStaffMember:', error);
+      onError?.(error);
+      onUpdate(null);
+    },
+  );
+
+export const subscribeOwnAdvances = (
+  uid: string,
+  onUpdate: (advances: Advance[]) => void,
+  onError?: (e: Error) => void,
+) =>
+  advancesCollection.where('uid', '==', uid).where('settlementId', '==', null).onSnapshot(
+    (snapshot: any) =>
+      onUpdate((snapshot?.docs || []).map((doc: any) => ({ id: doc.id, ...doc.data() })) as Advance[]),
+    (error: Error) => {
+      console.error('[payrollService] subscribeOwnAdvances:', error);
+      onError?.(error);
+      onUpdate([]);
+    },
+  );
+
+export const subscribeOwnPurchases = (
+  uid: string,
+  onUpdate: (purchases: StaffPurchase[]) => void,
+  onError?: (e: Error) => void,
+) =>
+  purchasesCollection.where('uid', '==', uid).where('settlementId', '==', null).onSnapshot(
+    (snapshot: any) =>
+      onUpdate((snapshot?.docs || []).map((doc: any) => ({ id: doc.id, ...doc.data() })) as StaffPurchase[]),
+    (error: Error) => {
+      console.error('[payrollService] subscribeOwnPurchases:', error);
+      onError?.(error);
+      onUpdate([]);
+    },
+  );
+
+export const subscribeOwnShortages = (
+  uid: string,
+  onUpdate: (shortages: Shortage[]) => void,
+  onError?: (e: Error) => void,
+) =>
+  shortagesCollection.where('entregadorId', '==', uid).where('status', '==', 'pending').onSnapshot(
+    (snapshot: any) =>
+      onUpdate((snapshot?.docs || []).map((doc: any) => ({ id: doc.id, ...doc.data() })) as Shortage[]),
+    (error: Error) => {
+      console.error('[payrollService] subscribeOwnShortages:', error);
+      onError?.(error);
+      onUpdate([]);
+    },
+  );
+
 // ── Cálculo del estado de cuenta ──────────────────────────────────────────────
 
 /**

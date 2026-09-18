@@ -1,6 +1,8 @@
 import { firestore, auth } from '../../../services/firebaseConfig';
 import { computeAbono } from '../../../utils/creditUtils';
 import { NON_PAYABLE_PRESALE_STATUSES } from '../../../services/preSaleService';
+import { captureError } from '../../../services/errorMonitoring';
+import { ensureOpenTurno } from '../../cashClosing/services/cashClosingService';
 import {
   sanitizeDocId,
   assertCreditIdValid,
@@ -36,8 +38,32 @@ const buildAbonoRecord = (abonoCalc, nowTs, paymentActor) => {
   return abono;
 };
 
+/**
+ * Cierre de Caja: registra el abono cobrado como un cobro pendiente de
+ * reclamar en el turno del vendedor/admin que lo cobró.
+ */
+function recordCashCollection(tx, ref, { uid, userName, amount, creditId, customerName, nowTs }) {
+  if (!uid || amount <= 0) return;
+  tx.set(ref, {
+    uid,
+    userName,
+    amount,
+    method: null,
+    sourceType: 'creditAbono',
+    sourceId: creditId,
+    customerName: customerName || null,
+    at: nowTs,
+    turnoId: null,
+  });
+}
+
 async function applyAbonoTransaction(creditRef, amount, paymentActor, nowTs) {
   let result = null;
+  const uid = auth()?.currentUser?.uid || null;
+  // Generado fuera de la transacción: si Firestore la reintenta por
+  // contención, un id nuevo cada vez duplicaría el cobro en Cierre de Caja.
+  const collectionRef = firestore().collection('cashCollections').doc();
+
   await firestore().runTransaction(async (tx) => {
     const creditSnap = await tx.get(creditRef);
     if (!creditSnap.exists()) throw new Error('El crédito no existe o fue eliminado.');
@@ -52,6 +78,15 @@ async function applyAbonoTransaction(creditRef, amount, paymentActor, nowTs) {
       status: abonoCalc.status,
       updatedAt: nowTs,
       payments: firestore.FieldValue.arrayUnion(buildAbonoRecord(abonoCalc, nowTs, paymentActor)),
+    });
+
+    recordCashCollection(tx, collectionRef, {
+      uid,
+      userName: paymentActor,
+      amount: abonoCalc.applied,
+      creditId: creditRef.id,
+      customerName: creditData.customerName || creditData.clientName,
+      nowTs,
     });
 
     result = {
@@ -112,6 +147,16 @@ export const abonarCredito = async (creditId, amount, userEmail) => {
 
   if (result?.estado === 'paid' && result?.linkedPreSaleId) {
     await syncLinkedPreSaleAfterPayment(result, safeCreditId, nowTs);
+  }
+
+  // Cierre de Caja: si nadie abrió turno a mano, este abono lo abre solo.
+  // No debe tumbar el abono ya confirmado si esto falla.
+  if (result?.appliedAmount > 0) {
+    try {
+      await ensureOpenTurno({ uid: auth()?.currentUser?.uid || null, userName: paymentActor, role: null });
+    } catch (turnoError) {
+      captureError(turnoError, { scope: 'creditsService.ensureOpenTurno', creditId: safeCreditId });
+    }
   }
 
   return result;
