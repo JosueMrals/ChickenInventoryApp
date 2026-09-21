@@ -6,7 +6,7 @@ import { renderHook, act } from '@testing-library/react-hooks';
 const mockFetchSalesByCustomer = jest.fn();
 
 // Mock the module paths as they are resolved relative to the source file
-jest.mock('../../android/app/src/screens/sales/services/saleService', () => ({
+jest.mock('../../android/app/src/screens/customer/services/salesService', () => ({
   fetchSalesByCustomer: (...args) => mockFetchSalesByCustomer(...args),
 }), { virtual: true });
 

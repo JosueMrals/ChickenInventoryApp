@@ -23,6 +23,7 @@ import { ROLE_LABELS, StaffAccount } from '../types';
 interface Props {
   navigation: NavigationProp<any>;
   route: RouteProp<any>;
+  role?: string;
 }
 
 /**
@@ -32,10 +33,18 @@ interface Props {
  * propio uid), así que se separan en dos componentes: mezclar los hooks en
  * uno solo tras un `if` es justo el patrón que abre y cierra suscripciones
  * de más entre renders.
+ *
+ * FASE S1.10.1 — S1.10-F3: `route.params.readOnly` lo decide quien navega, no
+ * el rol real — un cliente modificado podría llamar a esta pantalla con
+ * `readOnly:false` para un no-admin. El efectivo se fuerza a `true` cuando
+ * `role` no es admin, sin importar lo que traiga el parámetro; para admin se
+ * respeta el parámetro tal cual (defensa en profundidad: las escrituras
+ * reales las bloquean las Rules de `payrollAdvances`/`staffPurchases`/
+ * `payrollSettlements`/`users`, esto solo evita ofrecer la UI editable).
  */
-export default function StaffAccountScreen({ navigation, route }: Props) {
+export default function StaffAccountScreen({ navigation, route, role }: Props) {
   const uid = (route.params as any)?.uid as string;
-  const readOnly = !!(route.params as any)?.readOnly;
+  const readOnly = role && role !== 'admin' ? true : !!(route.params as any)?.readOnly;
 
   return readOnly ? (
     <OwnStaffAccountScreen uid={uid} navigation={navigation} />

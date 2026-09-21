@@ -19,6 +19,11 @@ const purchasesCollection = firestore().collection('staffPurchases');
 const shortagesCollection = firestore().collection('deliveryShortages');
 const settlementsCollection = firestore().collection('payrollSettlements');
 const productsCollection = firestore().collection('products');
+// S1.10-F1: el salario vive aparte de `users` — ese documento lo lee
+// cualquier rol operativo (`users.read: isOperativo()`), y Firestore no puede
+// ocultar un campo suyo sin ocultar el documento entero. `staffSalaries/{uid}`
+// tiene su propia regla de lectura (admin o el propio trabajador).
+const salariesCollection = firestore().collection('staffSalaries');
 
 const toNumber = (value: any): number => {
   const n = Number(value);
@@ -27,6 +32,34 @@ const toNumber = (value: any): number => {
 
 /** Redondeo a 2 decimales: son montos de dinero, no flotantes crudos. */
 const money = (value: number): number => Number(value.toFixed(2));
+
+/**
+ * Precio real de un producto para una entrega a personal. Mismo criterio que
+ * `useStaffPurchaseCart.resolvePrice` (`salePrice` manda, `price` es el
+ * respaldo) — se duplica aquí, no se importa, porque ese hook vive en la capa
+ * de UI y este archivo es el que factura contra nómina: el precio que se
+ * cobra tiene que salir del documento releído en la transacción, no de lo que
+ * el carrito calculó en pantalla.
+ */
+const resolveProductPrice = (product: any): number => {
+  const value = product?.salePrice ?? product?.price;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * Hash corto y determinístico (djb2) de una cadena — sin dependencia nueva
+ * (no hay `crypto` fiable en React Native sin un polyfill). S1.10-F6 lo usa
+ * para construir el id del settlement a partir de QUÉ se está liquidando, no
+ * de un contador: ver `settleStaffPeriod`.
+ */
+const hashKey = (value: string): string => {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash * 33) + value.charCodeAt(i)) % 1000000007;
+  }
+  return Math.abs(hash).toString(36);
+};
 
 export const buildStaffName = (data: any): string => {
   const nombre = typeof data?.nombre === 'string' ? data.nombre.trim() : '';
@@ -40,46 +73,87 @@ export const buildStaffName = (data: any): string => {
 /**
  * Trabajadores con rol operativo. `salary` es `null` mientras el admin no lo
  * configure — no 0, que se leería como "trabaja gratis".
+ *
+ * S1.10-F1: `salary` ya no vive en `users` — se combina aquí con
+ * `staffSalaries` (dos suscripciones independientes, unidas en memoria) para
+ * que el resto del módulo siga recibiendo el mismo `StaffMember[]` de antes.
  */
 export const subscribeStaff = (
   onUpdate: (staff: StaffMember[]) => void,
   onError?: (e: Error) => void,
-) =>
-  usersCollection
+): (() => void) => {
+  let users: Omit<StaffMember, 'salary'>[] = [];
+  let salaryByUid: Record<string, number> = {};
+  let usersReady = false;
+  let salariesReady = false;
+
+  const emit = () => {
+    if (!usersReady || !salariesReady) return;
+    const list = users.map((u) => ({
+      ...u,
+      salary: u.uid in salaryByUid ? salaryByUid[u.uid] : null,
+    })) as StaffMember[];
+    list.sort((a, b) => buildStaffName(a).localeCompare(buildStaffName(b), 'es'));
+    onUpdate(list);
+  };
+
+  const unsubUsers = usersCollection
     .where('role', 'in', STAFF_ROLES)
     .onSnapshot(
       (snapshot) => {
-        const list = (snapshot?.docs || []).map((doc) => {
+        users = (snapshot?.docs || []).map((doc) => {
           const data = doc.data() || {};
-          const rawSalary = data.salary;
           return {
             uid: doc.id,
             nombre: data.nombre,
             apellido: data.apellido,
             email: data.email,
             role: data.role as StaffRole,
-            salary: rawSalary == null ? null : toNumber(rawSalary),
-          } as StaffMember;
+          };
         });
-        list.sort((a, b) => buildStaffName(a).localeCompare(buildStaffName(b), 'es'));
-        onUpdate(list);
+        usersReady = true;
+        emit();
       },
       (error) => {
-        console.error('[payrollService] subscribeStaff:', error);
+        console.error('[payrollService] subscribeStaff (users):', error);
         onError?.(error as Error);
         onUpdate([]);
       },
     );
+
+  const unsubSalaries = salariesCollection.onSnapshot(
+    (snapshot) => {
+      salaryByUid = {};
+      (snapshot?.docs || []).forEach((doc) => {
+        salaryByUid[doc.id] = toNumber(doc.data()?.salary);
+      });
+      salariesReady = true;
+      emit();
+    },
+    (error) => {
+      console.error('[payrollService] subscribeStaff (salaries):', error);
+      onError?.(error as Error);
+      onUpdate([]);
+    },
+  );
+
+  return () => {
+    unsubUsers();
+    unsubSalaries();
+  };
+};
 
 export const setSalary = async (uid: string, salary: number): Promise<void> => {
   if (!uid) throw new Error('Trabajador inválido.');
   if (!Number.isFinite(salary) || salary < 0) {
     throw new Error('El salario debe ser un monto válido mayor o igual a cero.');
   }
-  await usersCollection.doc(uid).update({
+  // `.set()`, no `.update()`: la primera vez que se configura el salario de un
+  // trabajador, `staffSalaries/{uid}` todavía no existe.
+  await salariesCollection.doc(uid).set({
     salary: money(salary),
-    salaryUpdatedAt: firestore.FieldValue.serverTimestamp(),
-    salaryUpdatedBy: auth().currentUser?.email || 'N/A',
+    updatedAt: firestore.FieldValue.serverTimestamp(),
+    updatedBy: auth().currentUser?.email || 'N/A',
   });
 };
 
@@ -203,14 +277,13 @@ export const createStaffPurchase = async ({
     throw new Error('Agrega al menos un producto con cantidad.');
   }
 
-  // Un mismo producto puede venir en varias líneas: se valida el total, no cada
-  // línea por separado.
+  // Un mismo producto puede venir en varias líneas: se agrupa por producto
+  // para pedir stock/precio una sola vez por id, no por línea.
   const qtyByProduct = lines.reduce<Record<string, number>>((acc, line) => {
     acc[line.productId] = (acc[line.productId] || 0) + toNumber(line.quantity);
     return acc;
   }, {});
 
-  const total = money(lines.reduce((sum, line) => sum + toNumber(line.total), 0));
   const purchaseRef = purchasesCollection.doc();
   const user = auth().currentUser;
 
@@ -232,6 +305,26 @@ export const createStaffPurchase = async ({
       }
     });
 
+    // El precio se cobra contra nómina, así que sale del producto REAL
+    // releído en esta misma transacción — nunca de `item.unitPrice`/`.total`,
+    // que el cliente pudo declarar arbitrariamente (S1.10-F5).
+    const priceByProduct: Record<string, number> = {};
+    snaps.forEach((snap, idx) => {
+      priceByProduct[productIds[idx]] = resolveProductPrice(snap.data());
+    });
+
+    const verifiedLines: StaffPurchaseItem[] = lines.map((line) => {
+      const unitPrice = priceByProduct[line.productId];
+      return {
+        productId: line.productId,
+        productName: line.productName,
+        quantity: line.quantity,
+        unitPrice,
+        total: money(unitPrice * toNumber(line.quantity)),
+      };
+    });
+    const total = money(verifiedLines.reduce((sum, line) => sum + line.total, 0));
+
     refs.forEach((ref, idx) => {
       tx.update(ref, {
         stock: firestore.FieldValue.increment(-qtyByProduct[productIds[idx]]),
@@ -242,7 +335,7 @@ export const createStaffPurchase = async ({
     tx.set(purchaseRef, {
       uid,
       userName,
-      items: lines,
+      items: verifiedLines,
       total,
       createdAt: firestore.FieldValue.serverTimestamp(),
       createdBy: user?.email || 'N/A',
@@ -317,31 +410,59 @@ export const subscribePendingShortages = (
 // plantilla, uso exclusivo del admin), estas filtran por uid en el servidor:
 // es lo único que puede ver quien abre su nómina sin ser admin.
 
+/** S1.10-F1: mismo criterio de combinación que `subscribeStaff`, para un solo uid. */
 export const subscribeStaffMember = (
   uid: string,
   onUpdate: (staff: StaffMember | null) => void,
   onError?: (e: Error) => void,
-) =>
-  usersCollection.doc(uid).onSnapshot(
+): (() => void) => {
+  let userData: any; // undefined = no ha llegado, null = no existe
+  let salaryValue: number | null = null;
+  let salaryReady = false;
+
+  const emit = () => {
+    if (userData === undefined || !salaryReady) return;
+    if (userData === null) return onUpdate(null);
+    onUpdate({
+      uid,
+      nombre: userData.nombre,
+      apellido: userData.apellido,
+      email: userData.email,
+      role: userData.role as StaffRole,
+      salary: salaryValue,
+    });
+  };
+
+  const unsubUser = usersCollection.doc(uid).onSnapshot(
     (doc: any) => {
-      if (!doc.exists()) return onUpdate(null);
-      const data = doc.data() || {};
-      const rawSalary = data.salary;
-      onUpdate({
-        uid: doc.id,
-        nombre: data.nombre,
-        apellido: data.apellido,
-        email: data.email,
-        role: data.role as StaffRole,
-        salary: rawSalary == null ? null : toNumber(rawSalary),
-      });
+      userData = doc.exists() ? doc.data() || {} : null;
+      emit();
     },
     (error: Error) => {
-      console.error('[payrollService] subscribeStaffMember:', error);
+      console.error('[payrollService] subscribeStaffMember (user):', error);
       onError?.(error);
       onUpdate(null);
     },
   );
+
+  const unsubSalary = salariesCollection.doc(uid).onSnapshot(
+    (doc: any) => {
+      salaryValue = doc.exists() ? toNumber(doc.data()?.salary) : null;
+      salaryReady = true;
+      emit();
+    },
+    (error: Error) => {
+      console.error('[payrollService] subscribeStaffMember (salary):', error);
+      onError?.(error);
+      onUpdate(null);
+    },
+  );
+
+  return () => {
+    unsubUser();
+    unsubSalary();
+  };
+};
 
 export const subscribeOwnAdvances = (
   uid: string,
@@ -449,7 +570,26 @@ export const settleStaffPeriod = async (account: StaffAccount): Promise<Settleme
     throw new Error('Configura el salario del trabajador antes de cerrar el periodo.');
   }
 
-  const settlementRef = settlementsCollection.doc();
+  // S1.10-F6: el id del settlement sale de QUÉ se está liquidando (el
+  // conjunto de adelantos/compras/faltantes que trae `account`, tal como
+  // estaban al presionar "pagar"), no de un contador ni de un id aleatorio.
+  // Dos intentos que parten del MISMO estado visible (doble tap, dos
+  // dispositivos mirando la misma cuenta, un reintento que reusa el mismo
+  // `account` en memoria) calculan el MISMO id — Firestore solo deja que UNO
+  // de los dos lo cree; el otro lo encuentra ya existente (ver el `tx.get()`
+  // de abajo) y se rechaza con un error claro en vez de duplicar el pago.
+  // Límite conocido, aceptado explícitamente (ver informe de cierre): un
+  // reintento MANUAL, más tarde, después de que la pantalla ya se refrescó
+  // mostrando el periodo en cero, calcula un id "vacío" distinto y SÍ podría
+  // crear un segundo pago de salario completo — el negocio no tiene un
+  // concepto de periodo con fecha que permita distinguir ese caso de un
+  // segundo periodo real sin deducciones.
+  const dedupSource = [
+    ...account.advances.map((a) => a.id),
+    ...account.purchases.map((p) => p.id),
+    ...account.shortages.map((s) => s.id),
+  ].sort().join(',') || 'empty';
+  const settlementRef = settlementsCollection.doc(`${staff.uid}_${hashKey(dedupSource)}`);
   const user = auth().currentUser;
 
   const advanceRefs = account.advances.map((a) => advancesCollection.doc(a.id));
@@ -458,10 +598,23 @@ export const settleStaffPeriod = async (account: StaffAccount): Promise<Settleme
 
   return firestore().runTransaction(async (tx) => {
     // Todas las lecturas antes de cualquier escritura (requisito de Firestore).
+    const existingSettlementSnap = await tx.get(settlementRef);
+    if (existingSettlementSnap.exists()) {
+      throw new Error(
+        'Ya se registró un pago para estas deducciones. Actualiza la pantalla antes de reintentar.',
+      );
+    }
+
     const staffSnap = await tx.get(usersCollection.doc(staff.uid));
     // `exists` es un MÉTODO en @react-native-firebase v23: `snap.exists` a secas
     // devuelve la función, que siempre es truthy, y la guarda nunca dispararía.
     if (!staffSnap.exists()) throw new Error('El trabajador ya no existe.');
+
+    // S1.10-F1: el salario real sale de `staffSalaries`, no de `users`.
+    const salarySnap = await tx.get(salariesCollection.doc(staff.uid));
+    if (!salarySnap.exists()) {
+      throw new Error('Configura el salario del trabajador antes de cerrar el periodo.');
+    }
 
     const [advanceSnaps, purchaseSnaps, shortageSnaps] = await Promise.all([
       Promise.all(advanceRefs.map((ref) => tx.get(ref))),
@@ -470,11 +623,21 @@ export const settleStaffPeriod = async (account: StaffAccount): Promise<Settleme
     ]);
 
     // El salario que se paga es el del servidor, no el que traía la pantalla.
-    const salary = money(toNumber(staffSnap.data()?.salary));
+    const salary = money(toNumber(salarySnap.data()?.salary));
 
-    const liveAdvances = advanceSnaps.filter((s) => s.exists() && !s.data()?.settlementId);
-    const livePurchases = purchaseSnaps.filter((s) => s.exists() && !s.data()?.settlementId);
-    const liveShortages = shortageSnaps.filter((s) => s.exists() && s.data()?.status === 'pending');
+    // `s.data()?.uid`/`entregadorId` releído del servidor decide si el
+    // documento pertenece a ESTE trabajador — no basta con que `account`
+    // (armado en pantalla) lo incluyera: un cliente modificado podría colar
+    // el id de un adelanto/compra/faltante ajeno (S1.10-F4).
+    const liveAdvances = advanceSnaps.filter(
+      (s) => s.exists() && !s.data()?.settlementId && s.data()?.uid === staff.uid,
+    );
+    const livePurchases = purchaseSnaps.filter(
+      (s) => s.exists() && !s.data()?.settlementId && s.data()?.uid === staff.uid,
+    );
+    const liveShortages = shortageSnaps.filter(
+      (s) => s.exists() && s.data()?.status === 'pending' && s.data()?.entregadorId === staff.uid,
+    );
 
     const advancesTotal = money(
       liveAdvances.reduce((sum, s) => sum + toNumber(s.data()?.amount), 0),

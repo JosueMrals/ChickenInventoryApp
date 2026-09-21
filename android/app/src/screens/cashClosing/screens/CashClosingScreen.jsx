@@ -16,7 +16,7 @@ const buildUserName = (user) => user?.nombre || user?.displayName || user?.email
 
 /** "Mi turno": abrir/cerrar y ver lo cobrado en vivo. */
 function MyTurnoCard({ uid, user, role }) {
-  const { turno, collections, total, loading } = useMyTurno(uid);
+  const { turno, collections, expenses, total, cashExpensesTotal, netAmount, loading } = useMyTurno(uid);
   const { runLocked } = useSubmitLock();
   const [busy, setBusy] = useState(false);
 
@@ -40,9 +40,12 @@ function MyTurnoCard({ uid, user, role }) {
     const reviewNote = role === 'admin'
       ? 'Quedará pendiente de revisión en "Turnos por revisar".'
       : 'El admin revisará ese monto contra el efectivo entregado.';
+    const amountNote = cashExpensesTotal > 0
+      ? `Se cerrará tu turno con ${formatMoney(total)} cobrados menos ${formatMoney(cashExpensesTotal)} de gastos en efectivo = ${formatMoney(netAmount)} a entregar.`
+      : `Se cerrará tu turno con ${formatMoney(total)} cobrados.`;
     Alert.alert(
       'Cerrar turno',
-      `Se cerrará tu turno con ${formatMoney(total)} cobrados. ${reviewNote}`,
+      `${amountNote} ${reviewNote}`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -51,7 +54,7 @@ function MyTurnoCard({ uid, user, role }) {
             runLocked(async () => {
               setBusy(true);
               try {
-                await closeTurno(turno, collections.map((c) => c.id));
+                await closeTurno(turno, collections.map((c) => c.id), expenses.map((e) => e.id));
               } catch (e) {
                 Alert.alert('Error', e?.message || 'No se pudo cerrar el turno.');
               } finally {
@@ -61,7 +64,7 @@ function MyTurnoCard({ uid, user, role }) {
         },
       ],
     );
-  }, [turno, total, collections, role, runLocked]);
+  }, [turno, total, collections, expenses, cashExpensesTotal, netAmount, role, runLocked]);
 
   if (loading) {
     return (
@@ -75,6 +78,11 @@ function MyTurnoCard({ uid, user, role }) {
     <View style={styles.turnoCard}>
       <Text style={styles.turnoLabel}>{turno ? 'Cobrado en tu turno' : 'Mi turno'}</Text>
       <Text style={styles.turnoAmount}>{turno ? formatMoney(total) : 'Cerrado'}</Text>
+      {turno && cashExpensesTotal > 0 && (
+        <Text style={styles.turnoMeta}>
+          Gastos en efectivo: -{formatMoney(cashExpensesTotal)} · A entregar: {formatMoney(netAmount)}
+        </Text>
+      )}
       {turno && <Text style={styles.turnoMeta}>Abierto {formatTimestamp(turno.openedAt)}</Text>}
 
       <TouchableOpacity

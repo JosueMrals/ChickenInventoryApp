@@ -9,6 +9,7 @@ import { firestore, auth } from '../../../services/firebaseConfig';
 
 const collectionsRef = () => firestore().collection('cashCollections');
 const closingsRef = () => firestore().collection('cashClosings');
+const expensesRef = () => firestore().collection('expenses');
 
 const toNumber = (value) => {
   const n = Number(value);
@@ -75,6 +76,7 @@ const createTurno = async ({ uid, userName, role }) => {
     closedAt: null,
     collectionIds: [],
     expectedAmount: 0,
+    cashExpensesTotal: 0,
     receivedAmount: null,
     shortageAmount: 0,
     reviewedAt: null,
@@ -107,35 +109,64 @@ export const ensureOpenTurno = async ({ uid, userName, role }) => {
   return existingId || createTurno({ uid, userName, role });
 };
 
+// Un gasto CASH sigue elegible si, al releerlo dentro de la transacción,
+// todavía no fue liquidado ni decidido en contra, y sigue siendo del dueño
+// del turno (nunca se confía en lo que traía la UI — FASE E3 §7).
+const isEligibleCashExpense = (snap, uid) => {
+  if (!snap.exists()) return false;
+  const d = snap.data();
+  return d.paymentMethod === 'CASH'
+    && d.cashClosingId == null
+    && (d.status === 'PENDING' || d.status === 'APPROVED')
+    && d.createdByUid === uid;
+};
+
 /**
  * Cierra el turno: relee los cobros aún sin reclamar (por si alguno llegó o
  * se reclamó entre lo que mostraba la pantalla y el toque de "Cerrar turno")
  * y los marca con el id de este cierre. El total esperado sale de lo
  * releído, nunca de lo que traía la UI — mismo patrón que settleStaffPeriod.
+ *
+ * FASE E3: además relee los gastos CASH candidatos (`expenseIds`, reunidos
+ * fuera de la transacción por subscribeMyEligibleCashExpenses) y resta su
+ * suma de expectedAmount. PENDING participa igual que APPROVED (Modelo A,
+ * FASE E1.1) — entrar al cierre no equivale a aprobar el gasto. PERSONAL,
+ * CARD y TRANSFER nunca se leen aquí (no son candidatos posibles).
  */
-export const closeTurno = async (turno, collectionIds) => {
+export const closeTurno = async (turno, collectionIds, expenseIds = []) => {
   if (!turno?.id) throw new Error('Turno inválido.');
   const turnoRef = closingsRef().doc(turno.id);
   const collectionRefs = (collectionIds || []).map((id) => collectionsRef().doc(id));
+  const expenseRefs = (expenseIds || []).map((id) => expensesRef().doc(id));
 
   return firestore().runTransaction(async (tx) => {
     const turnoSnap = await tx.get(turnoRef);
     if (!turnoSnap.exists()) throw new Error('El turno ya no existe.');
     if (turnoSnap.data()?.status !== 'open') throw new Error('Este turno ya fue cerrado.');
 
+    // Todas las lecturas antes de cualquier escritura (requisito de Firestore).
     const collectionSnaps = await Promise.all(collectionRefs.map((ref) => tx.get(ref)));
+    const expenseSnaps = await Promise.all(expenseRefs.map((ref) => tx.get(ref)));
+
     const live = collectionSnaps.filter((s) => s.exists() && s.data()?.turnoId == null);
-    const total = sumCollections(live.map((s) => s.data()));
+    const collectionsTotal = sumCollections(live.map((s) => s.data()));
+
+    const liveExpenses = expenseSnaps.filter((s) => isEligibleCashExpense(s, turno.uid));
+    const cashExpensesTotal = sumCollections(liveExpenses.map((s) => s.data()));
+
+    const total = money(collectionsTotal - cashExpensesTotal);
 
     tx.update(turnoRef, {
       status: 'pending_review',
       closedAt: firestore.FieldValue.serverTimestamp(),
       collectionIds: live.map((s) => s.id),
       expectedAmount: total,
+      cashExpensesTotal,
     });
     live.forEach((snap) => tx.update(snap.ref, { turnoId: turnoRef.id }));
+    liveExpenses.forEach((snap) => tx.update(snap.ref, { cashClosingId: turnoRef.id }));
 
-    return { id: turnoRef.id, expectedAmount: total };
+    return { id: turnoRef.id, expectedAmount: total, cashExpensesTotal };
   });
 };
 

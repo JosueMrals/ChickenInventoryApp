@@ -333,12 +333,6 @@ exports.updateOwnProfile = functions.https.onCall(async (reqData, context) => {
 exports.dispatchPreSale = functions.https.onCall(async (reqData, context) => {
     ensureAppCheck(context);
     const data = getPayload(reqData);
-    // Lógica existente...
-    // (Simplificado para evitar duplicar código en esta vista,
-    // pero en el archivo real mantendría la lógica original si estuviera editando)
-    // Como estoy reescribiendo el archivo completo, debo incluir la lógica original.
-
-    // ... Copiando lógica original ...
     let uid;
     if (context.auth) uid = context.auth.uid;
     else if (data && data.authToken) {

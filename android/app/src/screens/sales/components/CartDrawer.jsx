@@ -8,6 +8,7 @@ import { registerQuickSaleFull } from '../../quicksalesNew/services/quickSaleSer
 import PaymentSelector from './PaymentSelector';
 import { useCreditExposure } from '../../../hooks/useCreditExposure';
 import { formatCurrency } from '../../../utils/formatMoney';
+import { useSubmitLock } from '../../../hooks/useSubmitLock';
 
 
 export default function CartDrawer({
@@ -26,7 +27,7 @@ export default function CartDrawer({
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [transferNumber, setTransferNumber] = useState('');
   const [saleDiscount, setSaleDiscount] = useState('');
-
+  const { submitting, runLocked } = useSubmitLock();
 
   const subtotal = cart.totals.subtotal || 0;
   const customerDiscount = (customer && customer.discount) ? Number(customer.discount) : 0;
@@ -155,7 +156,11 @@ export default function CartDrawer({
                 <Text style={styles.btnText}>Vaciar</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={validateCreditAndRegister} style={[styles.btn, styles.btnPrimary]}>
+              <TouchableOpacity
+                onPress={() => runLocked(validateCreditAndRegister)}
+                disabled={submitting}
+                style={[styles.btn, styles.btnPrimary, submitting && { opacity: 0.6 }]}
+              >
                 <Text style={styles.btnText}>Confirmar {formatCurrency(finalTotal)}</Text>
               </TouchableOpacity>
             </View>

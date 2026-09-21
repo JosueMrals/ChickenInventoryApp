@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import * as salesService from '../../sales/services/saleService';
+import * as salesService from '../services/salesService';
 import { startOfToday, startOfWeek, startOfMonth } from '../../utils/dateHelpers';
 
 export function useSalesHistory(customerId) {

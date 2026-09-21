@@ -10,7 +10,11 @@ import { ROLE_LABELS, Settlement } from '../types';
 
 interface Props {
   navigation: NavigationProp<any>;
+  role?: string;
 }
+
+/** El header comparte este espaciador con el gate de rol de abajo. */
+const HEADER_SPACER = { width: 28 };
 
 /** Una deducción del recibo; se oculta en cero para no llenar de "C$0.00". */
 const DeductionRow = ({ label, amount }: { label: string; amount: number }) => {
@@ -23,18 +27,44 @@ const DeductionRow = ({ label, amount }: { label: string; amount: number }) => {
   );
 };
 
-/** Historial de pagos cerrados: el detalle de cada periodo ya liquidado. */
-export default function PayrollHistoryScreen({ navigation }: Props) {
+/**
+ * Historial de pagos cerrados: el detalle de cada periodo ya liquidado de TODA
+ * la plantilla — exclusivo del admin, igual que `PayrollScreen`. Las Rules ya
+ * protegen el dato (`subscribeSettlements` sin filtro de uid falla cerrado
+ * para un no-admin), pero el gate propio evita mostrar un error de permisos
+ * en pantalla si alguien navega aquí sin pasar por el ícono de historial
+ * (S1.10-F2, defensa en profundidad — no sustituye a Rules).
+ */
+export default function PayrollHistoryScreen({ navigation, role }: Props) {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (role && role !== 'admin') return undefined;
     const unsubscribe = subscribeSettlements((list) => {
       setSettlements(list);
       setLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [role]);
+
+  if (role && role !== 'admin') {
+    return (
+      <View style={styles.container}>
+        <View style={globalStyles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Icon name="chevron-back" size={28} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={globalStyles.title}>Historial de Pagos</Text>
+          <View style={HEADER_SPACER} />
+        </View>
+        <View style={styles.emptyState}>
+          <Icon name="lock-closed-outline" size={48} color={COLORS.muted} />
+          <Text style={styles.emptyText}>Solo el admin puede ver el historial de pagos.</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -43,7 +73,7 @@ export default function PayrollHistoryScreen({ navigation }: Props) {
           <Icon name="chevron-back" size={28} color="#FFF" />
         </TouchableOpacity>
         <Text style={globalStyles.title}>Historial de Pagos</Text>
-        <View style={{ width: 28 }} />
+        <View style={HEADER_SPACER} />
       </View>
 
       {loading ? (

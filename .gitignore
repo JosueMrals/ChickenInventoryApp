@@ -41,6 +41,12 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+# Firebase Emulator Suite (npm run test:emulator)
+firestore-debug.log
+firebase-debug.*.log
+ui-debug.log
+.firebase/
+
 # fastlane
 #
 # It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
@@ -89,9 +95,13 @@ ios/**/GoogleService-Info.plist
 .env.*
 !.env.example
 android/gradle.local.properties
+android/gradle.properties
 android/.github
 android/firebase
 android/.claude
 .serena/
 # Worktrees temporales de Claude Code
 .claude/worktrees/
+/audit-reports
+AUDIT_REPORT.md
+CLAUDE.md

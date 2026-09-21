@@ -142,6 +142,147 @@ describe('closeTurno', () => {
   test('rechaza cerrar un turno inexistente', async () => {
     await expect(closeTurno({ id: 'no-existe' }, [])).rejects.toThrow(/ya no existe/);
   });
+
+  // FASE E3 — gastos CASH liquidados en el mismo cierre.
+  describe('con gastos CASH (FASE E3)', () => {
+    test('sin gastos: expected = collections (Caso 1)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], []);
+
+      expect(result.expectedAmount).toBe(5000);
+      expect(mockState.docs['turno-1'].cashExpensesTotal).toBe(0);
+    });
+
+    test('CASH PENDING descuenta del esperado (Caso 2)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'CASH', status: 'PENDING', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(4500);
+      expect(result.cashExpensesTotal).toBe(500);
+      expect(mockState.docs['turno-1'].cashExpensesTotal).toBe(500);
+      expect(mockState.docs.e1.cashClosingId).toBe('turno-1');
+      expect(mockState.docs.e1.status).toBe('PENDING'); // entrar al cierre no aprueba el gasto
+    });
+
+    test('CASH APPROVED también descuenta (Caso 3 — Modelo A, E1.1)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'CASH', status: 'APPROVED', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(4500);
+      expect(mockState.docs.e1.cashClosingId).toBe('turno-1');
+    });
+
+    test('CASH REJECTED no descuenta ni se liquida (Caso 4)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'CASH', status: 'REJECTED', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(5000);
+      expect(mockState.docs.e1.cashClosingId).toBeNull();
+    });
+
+    test('CASH CANCELLED no descuenta ni se liquida (Caso 5)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'CASH', status: 'CANCELLED', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(5000);
+      expect(mockState.docs.e1.cashClosingId).toBeNull();
+    });
+
+    test('PERSONAL nunca se liquida ni afecta el esperado (Caso 5 del enunciado)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'PERSONAL', status: 'PENDING', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(5000);
+      expect(mockState.docs.e1.cashClosingId).toBeNull();
+    });
+
+    test('CARD nunca se liquida ni afecta el esperado (Caso 6)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'CARD', status: 'PENDING', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(5000);
+      expect(mockState.docs.e1.cashClosingId).toBeNull();
+    });
+
+    test('TRANSFER nunca se liquida ni afecta el esperado (Caso 7)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'TRANSFER', status: 'PENDING', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(5000);
+      expect(mockState.docs.e1.cashClosingId).toBeNull();
+    });
+
+    test('dos gastos CASH suman correctamente', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'CASH', status: 'PENDING', cashClosingId: null };
+      mockState.docs.e2 = { createdByUid: 'u1', amount: 300, paymentMethod: 'CASH', status: 'APPROVED', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1', 'e2']);
+
+      expect(result.expectedAmount).toBe(4200);
+      expect(result.cashExpensesTotal).toBe(800);
+    });
+
+    test('un gasto ya liquidado en otro cierre no se incluye de nuevo (evita doble liquidación)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'CASH', status: 'PENDING', cashClosingId: 'otro-cierre' };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(5000); // no se descontó
+      expect(mockState.docs.e1.cashClosingId).toBe('otro-cierre'); // intacto
+    });
+
+    test('un gasto de otro usuario no se incluye (aislamiento por uid)', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      mockState.docs.e1 = { createdByUid: 'otro-usuario', amount: 500, paymentMethod: 'CASH', status: 'PENDING', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], ['e1']);
+
+      expect(result.expectedAmount).toBe(5000);
+      expect(mockState.docs.e1.cashClosingId).toBeNull();
+    });
+
+    test('un gasto creado durante el cierre (no listado como candidato) queda para el siguiente', async () => {
+      seedTurno();
+      mockState.docs.c1 = { uid: 'u1', amount: 5000, turnoId: null };
+      // e1 existe pero closeTurno() nunca lo recibió como candidato (llegó
+      // después de que la pantalla reunió la lista) — comportamiento
+      // determinista: simplemente no se lee ni se toca.
+      mockState.docs.e1 = { createdByUid: 'u1', amount: 500, paymentMethod: 'CASH', status: 'PENDING', cashClosingId: null };
+
+      const result = await closeTurno({ id: 'turno-1', uid: 'u1' }, ['c1'], []);
+
+      expect(result.expectedAmount).toBe(5000);
+      expect(mockState.docs.e1.cashClosingId).toBeNull(); // sigue disponible para el próximo cierre
+    });
+  });
 });
 
 describe('reviewTurno', () => {

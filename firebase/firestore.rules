@@ -3,25 +3,62 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // =====================================================
-    //  🔐 REGLA GLOBAL – Exigir autenticación
-    //  Escritura por colección explícita (principio de mínimo privilegio).
+    //  🔐 REGLA GLOBAL — deny-by-default (FASE S1.2)
+    //  Antes concedía `read` a cualquier autenticado para CUALQUIER
+    //  documento (S1-01, CRITICAL): permitía volcar colecciones completas
+    //  (get Y list) aunque la regla específica de cada colección pareciera
+    //  restringirlo — la auditoría S1.0 lo verificó empíricamente en
+    //  Emulator. Cada colección ya tenía su propia regla de lectura
+    //  explícita (auditada en S1.2: todas la tienen), así que quitar este
+    //  permiso global no depende de ningún fallback — una colección nueva
+    //  sin match propio queda DENEGADA por defecto, intencionalmente.
     // =====================================================
     match /{document=**} {
-      allow read: if request.auth != null;
-      allow write: if false;
+      allow read, write: if false;
     }
 
     // =====================================================
     //  👤 USERS — roles, perfiles
     // =====================================================
     match /users/{userId} {
-      allow read: if request.auth != null;
+      // FASE S1.2: antes leía cualquier autenticado (mismo alcance que el
+      // catch-all que se acaba de cerrar). Se acota a operativo — todo
+      // usuario real de esta app tiene uno de los 4 roles desde su creación
+      // (createUser los asigna atómicamente); un auto-registrado sin rol
+      // (FASE S1.1) no tiene ninguna razón legítima para listar el
+      // directorio de usuarios.
+      allow read: if isOperativo();
 
-      // Permite auto-registro del propio perfil o creación por admin.
-      allow create: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      // Permite auto-registro del propio perfil (sin rol — ver abajo) o
+      // creación por admin. FASE S1.1: antes, el auto-registro no validaba
+      // `role` en absoluto — un usuario podía escribir `role: 'admin'` en su
+      // propio documento y syncUserRoleClaim lo propagaba a un Custom Claim
+      // real (S1-02, CRITICAL). Ningún flujo real de la app se auto-registra
+      // hoy (createUser es la única vía de alta, vía Admin SDK, que no pasa
+      // por estas Rules) — así que cerrar esto no le quita ninguna capacidad
+      // a nadie: un auto-registro solo puede nacer SIN rol (ninguno de los
+      // 4 roles de la app es "no privilegiado" — los 4 dan isOperativo()).
+      // S1.10-F1: `salary` ya no puede escribirse aquí — vive en
+      // `staffSalaries/{uid}`, con su propia regla de lectura acotada. Se
+      // exige AUSENTE (no solo "sin cambiar"), para que además cubra el paso
+      // de limpieza de la migración: un `FieldValue.delete()` de un `salary`
+      // legado dentro de `users/{uid}` deja el campo ausente de
+      // `request.resource.data` — eso SÍ debe permitirse, es justo lo que
+      // cierra la doble fuente de verdad.
+      allow create: if request.auth != null && (
+        (request.auth.uid == userId
+          && (!('role' in request.resource.data) || request.resource.data.role == null))
+        || isAdmin()
+      ) && !('salary' in request.resource.data)
+        && !('salaryUpdatedAt' in request.resource.data)
+        && !('salaryUpdatedBy' in request.resource.data);
 
       // Solo admin puede editar/eliminar perfiles
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin()
+        && !('salary' in request.resource.data)
+        && !('salaryUpdatedAt' in request.resource.data)
+        && !('salaryUpdatedBy' in request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // =====================================================
@@ -111,15 +148,59 @@ service cloud.firestore {
     match /sales/{saleId} {
       allow read: if isOperativo();
 
-      // Crear: admin o vendedor
-      allow create: if isAdmin() || isVendedor();
+      // FASE S1.4.1 — S1.4-F0/F1. `isAdmin()||isVendedor()` sin mirar
+      // `request.resource.data` permitía cualquier campo, cualquier valor,
+      // incluyendo un `preSaleId` real con `total`/`items`/`customerId`
+      // fabricados (auditoría S1.4.0). Dos ramas, una por cada shape real —
+      // ver `audit-reports/fase-s1-4-0-sales-create-audit.md` secciones 5-7.
 
-      // Permitir actualización solo para receiptImageUrl
-      allow update: if (isAdmin() || isVendedor() || isEntregador())
-        && request.resource.data
-          .diff(resource.data)
-          .affectedKeys()
-          .hasOnly(['receiptImageUrl']);
+      // 1) Venta directa — registerQuickSaleFull (quicksalesNew/services/
+      //    quickSaleService.js, usado hoy por SalesScreen/CartDrawer).
+      //    `soldBy`/`soldById`/`createdAt` deben venir del actor autenticado,
+      //    no del payload — cierran la parte de S1.4-F1 que sí es barata y
+      //    segura de cerrar en Rules (spoofing de autor/fecha). `total`/
+      //    `subtotal`/`amountPaid`/`change` NO se validan entre sí a propósito
+      //    (S1.4-F1, riesgo aceptado — ver reporte, sección "matemática
+      //    financiera completa").
+      allow create: if (isAdmin() || isVendedor())
+        && request.resource.data.keys().hasOnly([
+             'receiptNumber', 'subtotal', 'total', 'tip', 'amountPaid', 'change',
+             'paymentMethod', 'transferNumber', 'items', 'createdAt', 'soldBy',
+             'soldById', 'customerId', 'customerName', 'customerPhone'])
+        && request.resource.data.soldBy == request.auth.token.email
+        && request.resource.data.soldById == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.items is list && request.resource.data.items.size() > 0
+        && request.resource.data.subtotal is number && request.resource.data.subtotal >= 0
+        && request.resource.data.total is number && request.resource.data.total >= 0
+        && request.resource.data.amountPaid is number && request.resource.data.amountPaid >= 0
+        && request.resource.data.change is number && request.resource.data.change >= 0;
+
+      // 2) Conversión de Pre-sale — convertPreSaleToSale (preSaleService.js).
+      //    `preSaleId` debe apuntar a una presale real, en un estado
+      //    convertible, y cada campo que el writer real COPIA sin transformar
+      //    debe ser idéntico al documento releído (cierra S1.4-F0: ya no se
+      //    puede apuntar `preSaleId` a una presale real y mandar
+      //    total/items/customer/route de otra). `paymentMethod`/`amountPaid`/
+      //    `change` NO se comparan contra la presale — PreSalePaymentScreen.jsx
+      //    los deja elegir independientemente (p. ej. una presale 'cash' puede
+      //    cobrarse con tarjeta), el writer real nunca los copia de la presale.
+      allow create: if (isAdmin() || isVendedor())
+        && request.resource.data.keys().hasOnly([
+             'preSaleId', 'preSaleNumber', 'saleNumber', 'customer', 'customerId',
+             'customerName', 'items', 'bonuses', 'subtotal', 'totalDiscount',
+             'categoryDiscountTotal', 'total', 'paymentMethod', 'amountPaid', 'change',
+             'route', 'routeId', 'createdAt', 'createdBy', 'originalCreatedBy',
+             'inventoryDeducted'])
+        && isConvertiblePreSale(request.resource.data)
+        && request.resource.data.createdBy == request.auth.token.email
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.inventoryDeducted == true;
+
+      // S1.4-F4: el audit de S1.4.0 no encontró ningún writer real que
+      // escriba `receiptImageUrl` — permiso muerto, cerrado como en
+      // `presales.delete` (S1.3).
+      allow update: if false;
 
       // Ventas NO pueden borrarse
       allow delete: if false;
@@ -138,7 +219,13 @@ service cloud.firestore {
     //  FINANCIALS — ingresos y egresos
     // =====================================================
     match /financials/{financialId} {
-      allow read: if isAdmin() || isVendedor();
+      // FASE S1.2: `isVendedor()` en `read` no tiene ningún lector real —
+      // el único consumidor es reportsService.getFinancialDetail(), usado
+      // exclusivamente por el módulo Reports, admin-only (ver CLAUDE.md).
+      // Se acota a admin; `create` no se toca en esta fase (fuera del
+      // alcance de S1-01, que es específicamente de lectura — documentado
+      // como deuda técnica en el reporte de la fase).
+      allow read: if isAdmin();
       allow create: if isAdmin() || isVendedor();
       allow update, delete: if false;
     }
@@ -147,10 +234,58 @@ service cloud.firestore {
     //  💰 CREDITS — historial de créditos, abonos
     // =====================================================
     match /credits/{creditId} {
-      allow read: if isAdmin() || isVendedor() || isEntregador();
+      // FASE S1.2: se agrega isBodeguero() — ProductHandoverScreen.jsx (el
+      // handover masivo de bodega) releé el crédito enlazado ANTES de
+      // asignarle `entregadorId` (requisito de transacciones de Firestore:
+      // toda lectura antes de cualquier escritura). La regla de `update` de
+      // abajo YA reconoce a bodeguero para exactamente esta transición —
+      // sin este read, el catch-all era lo único que permitía completarla;
+      // al quitarlo (S1-01), este flujo real se habría roto.
+      allow read: if isAdmin() || isVendedor() || isEntregador() || isBodeguero();
 
-      // Crear créditos desde pre-venta
-      allow create: if (isAdmin() || isVendedor()) && isValidCreditState(request.resource.data);
+      // FASE S1.6.1 — S1.6-F0/F4. Dos shapes reales, cada una con su propio
+      // hasOnly y su propia validación cruzada — ver
+      // `audit-reports/fase-s1-6-0-credits-security-audit.md` secciones 4/8.
+
+      // 1) Crédito desde pre-venta — creditsService.createCreditFromPreSale.
+      //    `customerId`/`total`/`createdBy` deben coincidir con la pre-venta
+      //    real releída (cierra S1.6-F0). `createdBy` se compara contra
+      //    `preSale.createdBy`, NO contra `request.auth.token.email`: el
+      //    writer real preserva al creador ORIGINAL de la pre-venta (quien
+      //    cobra el crédito suele ser otro vendedor/admin) — PreSalePaymentScreen.jsx
+      //    llama `createCreditFromPreSale(presale, presale.createdBy, ...)`.
+      //    `createdAt` NO se valida contra `request.time`: el writer real usa
+      //    `new Date()` en cliente, no `serverTimestamp()` — documentado como
+      //    limitación aceptada (S1.6-F4), no se modifica el servicio en esta fase.
+      //    `entregadorId` tampoco se valida contra la pre-venta: muchas
+      //    pre-ventas no tienen ese campo todavía al crear el crédito
+      //    (se asigna recién al despachar), y comparar contra una clave
+      //    ausente haría fallar la evaluación de la regla.
+      allow create: if (isAdmin() || isVendedor())
+        && 'preSaleId' in request.resource.data
+        && request.resource.data.keys().hasOnly([
+             'preSaleId', 'customerId', 'customerName', 'clientName', 'dueDate',
+             'total', 'paid', 'pending', 'status', 'createdAt', 'createdBy', 'entregadorId'])
+        && isValidCreditState(request.resource.data)
+        && isValidCreditFromPreSale(request.resource.data);
+
+      // 2) Crédito desde venta rápida — quickSaleService.registerQuickSaleFull.
+      //    `saleId` se genera en la MISMA transacción que crea `sales` (no es
+      //    un valor externo que el caller pueda apuntar a una venta ajena —
+      //    ver auditoría S1.6.0 sección 12), así que no requiere `get()`
+      //    cruzado. `createdBy`/`createdAt` SÍ se validan contra
+      //    `request.auth`/`request.time`: a diferencia del shape 1, este
+      //    writer usa directamente `auth().currentUser.email` y
+      //    `serverTimestamp()` — cierra S1.6-F4 en este camino.
+      allow create: if (isAdmin() || isVendedor())
+        && 'saleId' in request.resource.data
+        && request.resource.data.keys().hasOnly([
+             'saleId', 'customerId', 'customerName', 'total', 'paid', 'pending',
+             'status', 'createdAt', 'createdBy', 'entregadorId'])
+        && isValidCreditState(request.resource.data)
+        && request.resource.data.createdBy == request.auth.token.email
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.entregadorId == null;
 
       // Actualizar créditos (abonos) con validaciones de consistencia
       // Compatible con créditos legacy (saleId/clientId/clientName y otros campos inmutables).
@@ -178,6 +313,15 @@ service cloud.firestore {
       // total == paid + pending, así que no se puede "perder" un abono por aquí.
       // `status` se permite porque una devolución puede dejar el saldo en cero
       // (pending → paid); la coherencia status↔pending se exige explícitamente.
+      // FASE S1.6.1 — S1.6-F1. `total` debe coincidir con la pre-venta ENLAZADA
+      // (`resource.data.preSaleId`, el campo que el crédito YA tiene — nunca
+      // un valor que llegue en el payload) tal como queda DESPUÉS de esta
+      // misma transacción. `updatePreSaleInFirestore`/`applyReturnToCredit`
+      // escriben `presales` y `credits` en la MISMA transacción — `get()` ve
+      // el estado ANTERIOR a la transacción completa (confirmado empíricamente
+      // en S1.4.1), así que compararía el total NUEVO del crédito contra el
+      // total VIEJO de la pre-venta y rechazaría toda sincronización legítima.
+      // `getAfter()` sí ve el estado posterior a los writes de esta transacción.
       allow update: if (isAdmin() || isVendedor() || isBodeguero())
         && request.resource.data
             .diff(resource.data)
@@ -188,7 +332,10 @@ service cloud.firestore {
         && (
           (request.resource.data.status == 'paid' && request.resource.data.pending == 0) ||
           (request.resource.data.status == 'pending' && request.resource.data.pending > 0)
-        );
+        )
+        && 'preSaleId' in resource.data
+        && request.resource.data.total ==
+             getAfter(/databases/$(database)/documents/presales/$(resource.data.preSaleId)).data.total;
 
       // Bodega asigna entregadorId al despachar. dispatchPreSale (Cloud Function,
       // Admin SDK) no pasa por aquí; esta rama cubre el handover masivo cliente de
@@ -211,8 +358,140 @@ service cloud.firestore {
     match /presales/{preSaleId} {
       allow read: if isOperativo();
       allow create: if isAdmin() || isVendedor();
-      allow update: if isOperativo();
-      allow delete: if isAdmin() || isVendedor();
+
+      // FASE S1.3 — S1-03 / S1.3.0-F1,F2,F3. `isOperativo()` sin distinguir rol,
+      // transición ni campo permitía a cualquier operativo reescribir cualquier
+      // presale entera (auditoría S1.3.0, 10/10 ataques exitosos). Cada rama de
+      // abajo corresponde 1:1 a un writer real identificado en esa auditoría —
+      // ver `audit-reports/fase-s1-3-0-presales-state-machine-audit.md` sección 6.
+
+      // 1) Edición de contenido no terminal — updatePreSaleInFirestore
+      //    (admin/vendedor). `status` solo se mueve dentro de la MISMA etapa de
+      //    bodega al convertir cash↔credit (isValidPaymentMethodConversion).
+      //    FASE S1.3.1: `inventoryDeducted*` NO está en esta lista a propósito.
+      //    updatePreSaleInFirestore solo los copia hacia adelante con el mismo
+      //    valor ya leído (`freshData.inventoryDeducted*`), nunca los cambia —
+      //    por eso nunca aparecen en `affectedKeys()` para ese writer real, y
+      //    permitirlos aquí solo habría dejado a admin/vendedor alterar el
+      //    estado de inventario con un valor arbitrario sin pasar por el writer
+      //    que de verdad lo mueve (create/edit con delta de stock, o rama 4).
+      allow update: if (isAdmin() || isVendedor())
+        && isEditablePreSaleStatus(resource.data.status)
+        && isValidPaymentMethodConversion(resource.data.status, request.resource.data.status)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'customer', 'customerId', 'customerName', 'subtotal', 'totalDiscount',
+             'categoryDiscountTotal', 'total', 'paymentMethod', 'creditDueDate',
+             'updatedAt', 'updatedBy', 'items', 'bonuses', 'route', 'routeId',
+             'status', 'creditId']);
+
+      // 2) Avance/retroceso de bodega — updatePreSaleStatusGuarded,
+      //    updateAggregateProductStatus (isBodeguero() únicamente, nunca
+      //    isOperativo()). updateAggregateProductStatus puede saltar directo
+      //    pending→ready_for_delivery (o retroceder) según avancen los ítems, no
+      //    necesariamente un paso a la vez — isValidWarehousePreSaleTransition
+      //    permite cualquier par dentro del mismo riel cash/crédito, no solo
+      //    adyacentes.
+      allow update: if isBodeguero()
+        && isEditablePreSaleStatus(resource.data.status)
+        && isValidWarehousePreSaleTransition(resource.data.status, request.resource.data.status)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'items', 'bonuses', 'updatedAt', 'lastWorker']);
+
+      // 3) Despacho — dispatchPreSale (Cloud Function, Admin SDK, no pasa por
+      //    aquí) y ProductHandoverScreen.processHandover (handover masivo,
+      //    escritura CLIENTE directa — S1.3.0-F2). Antes esta transición solo
+      //    estaba protegida por rol en la Cloud Function; el camino masivo no
+      //    verificaba rol en código y dependía por completo de `isOperativo()`.
+      allow update: if isBodeguero()
+        && resource.data.status in ['ready_for_delivery', 'credit_ready_for_delivery']
+        && request.resource.data.status == 'dispatched'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'entregadorId', 'dispatchedAt', 'dispatchedBy', 'fechaEntregaRepartidor']);
+
+      // 4) Cobro por el entregador asignado — equivalente cliente de
+      //    completePreSalePayment (S1.3.0-F3: ese ownership solo vivía dentro de
+      //    la Cloud Function, que usa Admin SDK y no pasa por Rules). Cierra el
+      //    robo de entrega: sin `resource.data.entregadorId == request.auth.uid`
+      //    cualquier entregador podía cobrar una entrega ajena.
+      allow update: if isEntregador()
+        && resource.data.entregadorId == request.auth.uid
+        && resource.data.status == 'dispatched'
+        && request.resource.data.status in ['paid', 'credit_dispatched']
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'amountPaid', 'change', 'fechaPago', 'creditId',
+                       'inventoryDeducted', 'inventoryDeductedAt', 'inventoryDeductedBy', 'updatedAt']);
+
+      // 5) Cobro directo en mostrador — convertPreSaleToSale (admin/vendedor,
+      //    PreSalePaymentScreen dentro de PreSaleStack). Independiente de la
+      //    rama 4: no requiere entregador ni `entregadorId`, y escribe `saleId`.
+      allow update: if (isAdmin() || isVendedor())
+        && resource.data.status in ['pending', 'dispatched']
+        && request.resource.data.status == 'paid'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'saleId', 'fechaPago', 'amountPaid', 'change',
+                       'paymentMethod', 'updatedAt', 'updatedBy']);
+
+      // 6) Saldar un crédito ya despachado — syncLinkedPreSaleAfterPayment,
+      //    disparado desde creditsService.abonarCredito cuando el abono deja el
+      //    crédito enlazado en `paid`. Mismo conjunto de roles que
+      //    `credits.update` (rama de abonos) ya reconoce — no se amplía.
+      //    Acotado a 'dispatched'/'credit_dispatched' (los dos estados donde el
+      //    código documenta que vive un crédito por cobrar) en vez del guard más
+      //    amplio de la función (excluye solo cancelled/returned/
+      //    partially_returned): ese guard más amplio, combinado con el mismo
+      //    conjunto de roles, habría dejado a cualquier entregador mover a
+      //    'paid' una presale ajena con un payload de 3 campos — el mismo robo
+      //    de cobro que la rama 4 cierra con ownership.
+      allow update: if (isAdmin() || isVendedor() || isEntregador())
+        && resource.data.status in ['dispatched', 'credit_dispatched']
+        && request.resource.data.status == 'paid'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'fechaPago', 'updatedAt']);
+
+      // 7) Conversión cash↔crédito y eliminar crédito — createCreditFromPreSale
+      //    (pending/dispatched→credit_pending) y eliminarCredito (credit_*→su
+      //    equivalente de contado, CREDIT_TO_CASH_STATUS). Admin/vendedor, igual
+      //    que el resto de creditsService.js.
+      allow update: if (isAdmin() || isVendedor())
+        && isValidCreditConversionTransition(resource.data.status, request.resource.data.status)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'paymentMethod', 'creditId', 'creditDueDate', 'updatedAt']);
+
+      // 8) Cancelación (soft-cancel) — deletePreSaleInFirestore. Solo desde
+      //    pending/credit_pending: BLOCKING_DELETE_ORDER_STATUSES bloquea
+      //    cualquier estado donde bodega ya trabajó la orden.
+      allow update: if (isAdmin() || isVendedor())
+        && resource.data.status in ['pending', 'credit_pending']
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'cancelledAt', 'cancelledBy', 'cancellationReason',
+                       'updatedAt', 'updatedBy', 'inventoryRestored', 'inventoryRestoredAt',
+                       'inventoryRestoredBy', 'creditId']);
+
+      // 9) Devolución aprobada — returnService.approveReturnRequest. Vendedor
+      //    queda excluido. `isEntregador()` se retiró en FASE S1.5.1
+      //    (S1.5-F3): el único writer real de esta transición pasa por
+      //    `returnRequests.update` → `isWarehouseResolution()`, que exige
+      //    admin/bodeguero — un entregador nunca llega a completar esa
+      //    transacción, así que incluirlo aquí era una concesión inalcanzable
+      //    (ver auditoría S1.5.0, sección 16). El código no restringe el
+      //    status de origen de la presale (una devolución puede llegar
+      //    después de 'dispatched'/'paid'), así que no se inventa una
+      //    restricción que el flujo real no tiene.
+      allow update: if (isAdmin() || isBodeguero())
+        && request.resource.data.status in ['partially_returned', 'returned']
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['items', 'bonuses', 'subtotal', 'total', 'totalDiscount',
+                       'returnedSummary', 'returnedTotal', 'amountPaid', 'status',
+                       'returnedAt', 'lastReturnAt', 'returnApprovedBy']);
+
+      // `createdBy`/`createdAt`/`preSaleNumber` quedan inmutables por construcción:
+      // ninguna rama de arriba los incluye en su `hasOnly`, así que cualquier
+      // intento de tocarlos falla en TODAS las ramas sin necesitar una regla aparte.
+
+      // S1.3.0-F6: ningún writer real hace hard-delete (deletePreSaleInFirestore
+      // es un soft-cancel vía `status:'cancelled'`, ver rama 8). Sin uso legítimo.
+      allow delete: if false;
 
       match /history/{historyId} {
         allow read: if isOperativo();
@@ -227,18 +506,33 @@ service cloud.firestore {
     match /returnRequests/{returnId} {
       allow read: if isOperativo();
 
-      // El solicitante (entregador o vendedor) crea la solicitud, siempre
-      // pendiente de revisión y a su propio nombre.
+      // El solicitante (admin/vendedor/entregador) crea la solicitud, siempre
+      // pendiente de revisión y a su propio nombre. FASE S1.5.1: hasOnly con
+      // los campos reales de createReturnRequest (returnService.js) — antes
+      // cualquier otro campo pasaba sin restricción.
       allow create: if (isAdmin() || isVendedor() || isEntregador())
         && request.resource.data.status == 'pending_review'
-        && request.resource.data.requestedByUid == request.auth.uid;
+        && request.resource.data.requestedByUid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+             'presaleId', 'routeId', 'routeName', 'entregadorId', 'status', 'reason',
+             'requestedBy', 'requestedByUid', 'requestedByRole', 'requestedAt',
+             'customerName', 'saleTotal', 'items', 'bonuses', 'confirmedBy',
+             'confirmedAt', 'rejectedBy', 'rejectionNote']);
 
-      // Dos vías de escritura, ambas solo sobre solicitudes aún pendientes:
-      //  1) Bodega/admin resuelven: pending_review → approved | rejected.
-      //     Restringirlo a 'pending_review' evita re-aprobar y duplicar el stock devuelto.
-      //  2) El solicitante corrige la suya (razón/cantidades) sin cambiar de estado
-      //     ni de dueño; una vez resuelta, ya no puede tocarla.
-      allow update: if isOwnPendingFix() || isWarehouseResolution();
+      // Dos ramas, cada una con los campos reales de su writer (FASE S1.5.1):
+      //  A) El solicitante corrige la suya (razón/cantidades) sin cambiar de
+      //     estado ni de dueño — updateReturnRequest.
+      //  B) Bodega/admin resuelven: pending_review → approved | rejected —
+      //     approveReturnRequest/rejectReturnRequest. Restringido a
+      //     'pending_review' evita re-aprobar y duplicar el stock devuelto.
+      allow update: if isOwnPendingFix()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['reason', 'items', 'bonuses', 'updatedAt']);
+
+      allow update: if isWarehouseResolution()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'confirmedBy', 'confirmedAt', 'verifiedItems',
+                       'hasShortages', 'rejectedBy', 'rejectedAt', 'rejectionNote']);
 
       // El solicitante puede eliminar su solicitud mientras nadie la haya resuelto.
       allow delete: if isAdmin()
@@ -249,24 +543,93 @@ service cloud.firestore {
     //  ⚠ DELIVERY SHORTAGES — faltantes a cargo del entregador
     // =====================================================
     match /deliveryShortages/{shortageId} {
-      allow read: if isOperativo();
+      // FASE S1.8.1 — S1-06. Admin/bodeguero necesitan cartera completa
+      // (Payroll y ShortagesList, confirmado en S1.8.0 con evidencia real de
+      // producción); entregador solo la suya propia — ReturnsScreen.jsx YA
+      // pasa `entregadorId={isEntregador ? uid : null}` a ShortagesList, así
+      // que su query real ya viene acotada; esta regla solo cierra que un
+      // cliente modificado no pueda ignorar ese filtro. Vendedor: sin ningún
+      // reader real encontrado en S1.8.0 — DENY explícito, no `isOperativo()`.
+      allow read: if isAdmin() || isBodeguero()
+        || (isEntregador() && resource.data.entregadorId == request.auth.uid);
 
-      // Se registran al aprobar una devolución con faltantes (bodega/admin)
+      // FASE S1.8.1 — S1.8-F0. 4 shapes reales (S1.8.0 sección 3), cada uno
+      // con su propio actor, su propio hasOnly() y su propia validación
+      // cruzada contra el documento de origen — ver
+      // `audit-reports/fase-s1-8-1-delivery-shortages-security-rules-implementation.md`.
+
+      // Shape 1 — approveReturnRequest (returnService.js:425-448). Actor:
+      // admin/bodeguero, igual que isWarehouseResolution() de returnRequests.
       allow create: if (isAdmin() || isBodeguero())
-        && request.resource.data.status == 'pending';
+        && request.resource.data.status == 'pending'
+        && request.resource.data.totalMissingValue is number
+        && request.resource.data.totalMissingValue > 0
+        && request.resource.data.keys().hasOnly([
+             'returnRequestId', 'presaleId', 'routeId', 'routeName', 'customerName',
+             'entregadorId', 'items', 'totalMissingQty', 'totalMissingValue',
+             'status', 'recordedBy', 'recordedByUid', 'recordedAt'])
+        && request.resource.data.recordedByUid == request.auth.uid
+        && isValidShortageFromReturn(request.resource.data);
 
-      // Marcar como entregado posteriormente (reposición de stock).
-      // Solo pendiente → entregado: evita reponer el mismo faltante dos veces.
+      // Shape 2 — reviewTurno (cashClosingService.js:227-233). Actor: solo
+      // admin (cashClosings.update rama de revisión). Este shape NO guarda
+      // ninguna referencia de vuelta al cashClosing que lo originó (S1.8.0
+      // confirmó la asimetría; el prompt de esta fase prohíbe agregar un
+      // campo nuevo para resolverlo) — no hay `get()`/`getAfter()` posible
+      // contra "el cierre correcto". Lo único verificable sin inventar una
+      // relación es que `entregadorId` sea un usuario real.
+      allow create: if isAdmin()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.totalMissingValue is number
+        && request.resource.data.totalMissingValue > 0
+        && request.resource.data.keys().hasOnly([
+             'entregadorId', 'customerName', 'totalMissingValue', 'status', 'recordedAt'])
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.entregadorId));
+
+      // Shape 3a — reviewExpense, gasto CASH ya liquidado y rechazado después
+      // (expenseService.js:258-267). Actor: solo admin (expenses.update,
+      // rama de revisión, ya exige isAdmin() exclusivamente).
+      allow create: if isAdmin()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.totalMissingValue is number
+        && request.resource.data.totalMissingValue > 0
+        && request.resource.data.reason == 'expense_rejected_post_close'
+        && request.resource.data.keys().hasOnly([
+             'expenseId', 'cashClosingId', 'reason', 'entregadorId',
+             'totalMissingValue', 'status', 'recordedAt'])
+        && isValidShortageFromExpense(request.resource.data);
+
+      // Shape 3b — reviewExpense, reembolso PERSONAL ya pagado y el gasto se
+      // rechaza después (expenseService.js:309-317). Actor: solo admin.
+      allow create: if isAdmin()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.totalMissingValue is number
+        && request.resource.data.totalMissingValue > 0
+        && request.resource.data.reason == 'reimbursement_rejected_post_paid'
+        && request.resource.data.keys().hasOnly([
+             'expenseId', 'reason', 'entregadorId', 'totalMissingValue',
+             'status', 'recordedAt'])
+        && isValidShortageFromReimbursement(request.resource.data);
+
+      // Marcar como entregado posteriormente (reposición de stock) —
+      // fulfillShortage (returnService.js). hasOnly() fija el shape real;
+      // `totalMissingValue`/`entregadorId`/referencias de origen no están en
+      // la lista, así que quedan inmutables en esta transición (S1.8-F2).
       allow update: if (isAdmin() || isBodeguero())
         && resource.data.status == 'pending'
-        && request.resource.data.status == 'fulfilled';
+        && request.resource.data.status == 'fulfilled'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'fulfilledBy', 'fulfilledByUid', 'fulfilledAt', 'fulfillmentNote'])
+        && request.resource.data.fulfilledByUid == request.auth.uid;
 
-      // Segunda salida del faltante: en vez de reponer el producto, el admin lo
-      // descuenta del salario al cerrar la nómina. Igual que arriba, solo desde
-      // 'pending': un faltante ya repuesto o ya descontado no se vuelve a cobrar.
+      // Segunda salida del faltante: se descuenta del salario al liquidar
+      // nómina — payrollService.ts (settlePayrollPeriod). Mismo criterio:
+      // hasOnly() deja `totalMissingValue`/`entregadorId` inmutables aquí.
       allow update: if isAdmin()
         && resource.data.status == 'pending'
-        && request.resource.data.status == 'payroll_deducted';
+        && request.resource.data.status == 'payroll_deducted'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'payrollSettlementId', 'payrollDeductedAt']);
 
       allow delete: if false;
     }
@@ -280,17 +643,35 @@ service cloud.firestore {
       allow read: if isAdmin() || isOwnPayrollDoc();
 
       // Nace siempre sin saldar: así lo encuentran las consultas del periodo
-      // abierto (settlementId == null).
+      // abierto (settlementId == null). FASE S1.10.1 — S1.10-F0/F_exists/F_spoof:
+      // hasOnly() fija el shape real de addAdvance (payrollService.ts:111-140);
+      // `uid` debe ser un trabajador real (no ownership: el admin crea el
+      // adelanto A NOMBRE de otro, ese es el flujo legítimo); `createdBy`/
+      // `createdAt` se comparan contra el actor/reloj del servidor porque el
+      // writer real ya usa `auth().currentUser.email`/`serverTimestamp()`.
       allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+             'uid', 'userName', 'amount', 'note', 'createdAt', 'createdBy', 'settlementId'])
         && request.resource.data.amount is number
         && request.resource.data.amount > 0
-        && request.resource.data.settlementId == null;
+        && request.resource.data.settlementId == null
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.uid))
+        && request.resource.data.createdBy == request.auth.token.email
+        && request.resource.data.createdAt == request.time;
 
       // Solo para saldarlo al cerrar el periodo; el monto es inmutable.
+      // FASE S1.10.1 — S1.10-F0/F_settlementRef: hasOnly() fija que
+      // settleStaffPeriod (payrollService.ts:511) solo toca `settlementId` en
+      // esta transición; `getAfter()` (no `get()`: el settlement nace en la
+      // MISMA transacción, confirmado en `settleStaffPeriod`) exige que el
+      // settlement referenciado exista y sea del MISMO trabajador que este
+      // adelanto — cierra además el lado de `payrollAdvances` de S1.10-F4.
       allow update: if isAdmin()
         && resource.data.settlementId == null
         && request.resource.data.settlementId != null
-        && request.resource.data.amount == resource.data.amount;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['settlementId'])
+        && request.resource.data.amount == resource.data.amount
+        && getAfter(/databases/$(database)/documents/payrollSettlements/$(request.resource.data.settlementId)).data.uid == resource.data.uid;
 
       // Corregir un adelanto mal registrado, mientras no se haya pagado.
       allow delete: if isAdmin() && resource.data.settlementId == null;
@@ -302,17 +683,39 @@ service cloud.firestore {
     match /staffPurchases/{purchaseId} {
       allow read: if isAdmin() || isOwnPayrollDoc();
 
-      // La entrega la hace bodega (o admin) y descuenta inventario.
+      // La entrega la hace bodega (o admin) y descuenta inventario. FASE
+      // S1.10.1 — S1.10-F0/F_exists/F_spoof: hasOnly() fija el shape real de
+      // createStaffPurchase (payrollService.ts:191-255); `uid` debe ser un
+      // trabajador real (sin ownership sobre quién entrega: bodega registra
+      // entregas para cualquier compañero, ese es el flujo legítimo);
+      // `createdBy`/`createdByUid`/`createdAt` ya los puebla el writer real
+      // desde `auth().currentUser`/`serverTimestamp()`. `total`/`items` NO se
+      // validan aquí más allá del tipo — S1.10-F5 (integridad de precio) se
+      // cierra en el código (`createStaffPurchase` recalcula desde el
+      // producto real releído en la misma transacción, ver el servicio), no
+      // en Rules: Rules no puede iterar `items[]` sin un `get()` por línea.
       allow create: if (isAdmin() || isBodeguero())
+        && request.resource.data.keys().hasOnly([
+             'uid', 'userName', 'items', 'total', 'createdAt', 'createdBy',
+             'createdByUid', 'settlementId'])
         && request.resource.data.total is number
         && request.resource.data.total >= 0
-        && request.resource.data.settlementId == null;
+        && request.resource.data.settlementId == null
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.uid))
+        && request.resource.data.createdBy == request.auth.token.email
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time;
 
-      // Igual que los adelantos: solo saldar, sin tocar el monto.
+      // Igual que los adelantos: solo saldar, sin tocar el monto. FASE
+      // S1.10.1 — S1.10-F0/F_settlementRef, mismo criterio que
+      // `payrollAdvances.update` (getAfter(), no get(): el settlement nace en
+      // la misma transacción) — cierra el lado de `staffPurchases` de S1.10-F4.
       allow update: if isAdmin()
         && resource.data.settlementId == null
         && request.resource.data.settlementId != null
-        && request.resource.data.total == resource.data.total;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['settlementId'])
+        && request.resource.data.total == resource.data.total
+        && getAfter(/databases/$(database)/documents/payrollSettlements/$(request.resource.data.settlementId)).data.uid == resource.data.uid;
 
       // Anular una entrega (devuelve el stock) mientras no se haya pagado.
       allow delete: if (isAdmin() || isBodeguero()) && resource.data.settlementId == null;
@@ -324,12 +727,83 @@ service cloud.firestore {
     match /payrollSettlements/{settlementId} {
       allow read: if isAdmin() || isOwnPayrollDoc();
 
+      // FASE S1.10.1 — S1.10-F0/F_exists/F_spoof/F_netPay: hasOnly() fija el
+      // shape real de settleStaffPeriod (payrollService.ts:490-505); `uid`
+      // debe ser un trabajador real; `paidBy`/`paidAt` ya los puebla el
+      // writer real desde `auth().currentUser`/`serverTimestamp()`. La
+      // invariante de `netPay`/`deductionsTotal` es SOLO auto-consistencia
+      // interna del propio documento (todos los campos ya están en
+      // `request.resource.data`, sin `get()` externo) — no valida las sumas
+      // contra los documentos reales de `payrollAdvances`/`staffPurchases`/
+      // `deliveryShortages` (eso exigiría iterar arrays de tamaño variable,
+      // límite estructural ya documentado en S1.10.0, fuera de alcance).
+      // Tolerancia ±0.01, mismo patrón que `cashClosings` (S1.7.1).
+      //
+      // FASE S1.10 FINAL — S1.10-F1: `salary` SÍ se valida contra la fuente
+      // real (`staffSalaries/{uid}`, un solo `get()` acotado por documento,
+      // ya viable ahora que el salario no vive enterrado dentro de `users`).
+      //
+      // FASE S1.10 FINAL — S1.10-F6: el id del documento (`settlementId`, el
+      // wildcard de más arriba) debe empezar con `uid + '_'` — mismo patrón
+      // `String.split()` ya verificado en Storage Rules (S1.7.1). Esto no
+      // puede reconstruir el hash exacto que arma settleStaffPeriod (Rules no
+      // tiene una función de hash de cadenas), pero sí impide que un cliente
+      // cree un settlement con un id que no corresponda a su propio `uid` —
+      // la garantía de "solo uno de dos intentos concurrentes gana" la da
+      // Firestore al chocar sobre el MISMO id determinístico, no esta regla.
       allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+             'uid', 'userName', 'role', 'salary', 'advancesTotal', 'purchasesTotal',
+             'shortagesTotal', 'deductionsTotal', 'netPay', 'advanceIds', 'purchaseIds',
+             'shortageIds', 'paidAt', 'paidBy'])
         && request.resource.data.uid is string
-        && request.resource.data.netPay is number;
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.uid))
+        && settlementId.split('_')[0] == request.resource.data.uid
+        && request.resource.data.salary is number
+        && request.resource.data.salary ==
+             get(/databases/$(database)/documents/staffSalaries/$(request.resource.data.uid)).data.salary
+        && request.resource.data.advancesTotal is number
+        && request.resource.data.purchasesTotal is number
+        && request.resource.data.shortagesTotal is number
+        && request.resource.data.deductionsTotal is number
+        && request.resource.data.netPay is number
+        && (request.resource.data.advancesTotal + request.resource.data.purchasesTotal
+             + request.resource.data.shortagesTotal - request.resource.data.deductionsTotal) <= 0.01
+        && (request.resource.data.advancesTotal + request.resource.data.purchasesTotal
+             + request.resource.data.shortagesTotal - request.resource.data.deductionsTotal) >= -0.01
+        && (request.resource.data.salary - request.resource.data.deductionsTotal
+             - request.resource.data.netPay) <= 0.01
+        && (request.resource.data.salary - request.resource.data.deductionsTotal
+             - request.resource.data.netPay) >= -0.01
+        && request.resource.data.paidBy == request.auth.token.email
+        && request.resource.data.paidAt == request.time;
 
       // Un pago cerrado es un registro contable: no se reescribe ni se borra.
       allow update, delete: if false;
+    }
+
+    // =====================================================
+    //  🔒 STAFF SALARIES — salario base, separado de `users` (S1.10-F1)
+    // =====================================================
+    match /staffSalaries/{uid} {
+      // El propio trabajador puede ver su salario (StaffAccountScreen en modo
+      // lectura, "Mi Nómina"); nadie más que admin ve el de otro — a
+      // diferencia de `users.read`, que es isOperativo() sin ownership.
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+
+      // `setSalary` usa `.set()` (no `.update()`): la primera vez que se
+      // configura el salario de un trabajador, el documento no existe
+      // todavía — por eso `create` y `update` comparten exactamente la misma
+      // condición.
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['salary', 'updatedAt', 'updatedBy'])
+        && request.resource.data.salary is number
+        && request.resource.data.salary >= 0
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && request.resource.data.updatedBy == request.auth.token.email
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if false;
     }
 
     // =====================================================
@@ -340,22 +814,40 @@ service cloud.firestore {
       allow read: if isOperativo();
 
       // Los cobros de entrega los crea completePreSalePayment (Admin SDK, sin
-      // pasar por reglas). Aquí solo entran los abonos de crédito, que sí se
-      // escriben desde el cliente (vendedor o admin cobrando directamente).
-      allow create: if (isAdmin() || isVendedor())
+      // pasar por reglas). Aquí solo entran los abonos de crédito
+      // (recordCashCollection, creditsService.js), que sí se escriben desde el
+      // cliente. FASE S1.7.1 — S1.7-F1: `credits.update` (rama de abonos, desde
+      // S1.3.1) ya autoriza a isEntregador(), pero abonarCredito escribe
+      // `credits` y `cashCollections` en la MISMA transacción — sin
+      // isEntregador() aquí, esa escritura fallaba y revertía la transacción
+      // COMPLETA (confirmado empíricamente en S1.7.0: la transacción entera de
+      // un entregador terminaba en permission-denied). `sourceType` se fija a
+      // 'creditAbono' porque es el único valor que este writer real produce —
+      // cierra la posibilidad de que el nuevo rol cree un cashCollection con
+      // una etiqueta distinta (p. ej. suplantando 'presale', que hoy solo crea
+      // el Admin SDK) — y `hasOnly()` fija el shape exacto del writer real,
+      // para que "permitir entregador" no abra la puerta a un payload arbitrario.
+      allow create: if (isAdmin() || isVendedor() || isEntregador())
         && request.auth.uid == request.resource.data.uid
         && request.resource.data.amount is number
         && request.resource.data.amount > 0
-        && request.resource.data.turnoId == null;
+        && request.resource.data.turnoId == null
+        && request.resource.data.sourceType == 'creditAbono'
+        && request.resource.data.keys().hasOnly([
+             'uid', 'userName', 'amount', 'method', 'sourceType', 'sourceId',
+             'customerName', 'at', 'turnoId']);
 
       // Reclamarlo en un turno al cerrarlo: solo cambia turnoId, de null a un
-      // id fijo. El monto y el dueño del cobro son inmutables.
+      // id fijo. FASE S1.7.1 — S1.7-F3: `closeTurno` (cashClosingService.js)
+      // únicamente escribe `turnoId` en este `.update()` — `hasOnly()` lo fija
+      // explícitamente en vez de depender solo de comparaciones de igualdad
+      // campo por campo (que no cubrían `method`/`sourceType`/`sourceId`/
+      // `customerName`/`at`).
       allow update: if isOperativo()
         && request.auth.uid == resource.data.uid
-        && request.resource.data.uid == resource.data.uid
         && resource.data.turnoId == null
         && request.resource.data.turnoId is string
-        && request.resource.data.amount == resource.data.amount;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['turnoId']);
 
       allow delete: if false;
     }
@@ -374,15 +866,65 @@ service cloud.firestore {
 
       // Cerrar el propio turno: de 'open' a 'pending_review'. Es el propio
       // dueño quien lo cierra, igual que lo abrió.
+      // FASE S1.7.1 — S1.7-F0. Problema A (campos arbitrarios): hasOnly() fija
+      // el shape exacto que escribe closeTurno (cashClosingService.js:159-165)
+      // — status, closedAt, collectionIds, expectedAmount, cashExpensesTotal;
+      // ni updatedAt ni receivedAmount se tocan en esta transición real.
+      // Problema B (integridad de expectedAmount/collectionIds contra los
+      // cashCollections reales): NO se resuelve aquí — ver
+      // `audit-reports/fase-s1-7-1-cash-closings-cash-collections-storage-security-implementation.md`
+      // sección de limitaciones estructurales. `collectionIds` no tiene un
+      // tamaño acotado (un turno puede reclamar un número arbitrario de
+      // cobros), y Firestore Rules no puede sumar/iterar una colección ni
+      // llamar get()/getAfter() un número no acotado de veces (límite duro de
+      // la plataforma) — validar el agregado exigiría un get() por cada id de
+      // `collectionIds`, lo que rompería el cierre de turnos con muchos cobros
+      // sin ninguna garantía real (el límite es fijo, la cantidad de cobros
+      // de un día no lo es). Queda como S1.7-F0-B DEFERRED; lo que sí se cierra
+      // aquí es que no puedan colarse campos ni tipos fuera del contrato real.
       allow update: if isOperativo()
         && request.auth.uid == resource.data.uid
         && resource.data.status == 'open'
-        && request.resource.data.status == 'pending_review';
+        && request.resource.data.status == 'pending_review'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'closedAt', 'collectionIds', 'expectedAmount', 'cashExpensesTotal'])
+        && request.resource.data.collectionIds is list
+        && request.resource.data.expectedAmount is number
+        && request.resource.data.expectedAmount >= 0
+        && request.resource.data.cashExpensesTotal is number
+        && request.resource.data.cashExpensesTotal >= 0;
 
       // Revisión del admin: de 'pending_review' a 'complete' o 'shortage'.
+      // FASE S1.7.1 — S1.7-F0. hasOnly() fija el shape real de reviewTurno
+      // (cashClosingService.js:212-233). Se agrega además una invariante que
+      // SÍ es verificable sin agregación externa (compara contra
+      // `resource.data.expectedAmount`, un campo del MISMO documento, no de
+      // otra colección): `receivedAmount + shortageAmount == expectedAmount`,
+      // igual que exige computeReviewOutcome. Cuando hay faltante, `shortageId`
+      // se valida con getAfter() (una sola lectura, no una lista) contra el
+      // deliveryShortages real que reviewTurno crea en la misma transacción.
       allow update: if isAdmin()
         && resource.data.status == 'pending_review'
-        && (request.resource.data.status == 'complete' || request.resource.data.status == 'shortage');
+        && (request.resource.data.status == 'complete' || request.resource.data.status == 'shortage')
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'receivedAmount', 'shortageAmount', 'reviewedAt', 'reviewedBy', 'shortageId'])
+        && request.resource.data.receivedAmount is number
+        && request.resource.data.receivedAmount >= 0
+        && request.resource.data.shortageAmount is number
+        && request.resource.data.shortageAmount >= 0
+        && request.resource.data.shortageAmount <= resource.data.expectedAmount
+        && (request.resource.data.receivedAmount + request.resource.data.shortageAmount - resource.data.expectedAmount) <= 0.01
+        && (request.resource.data.receivedAmount + request.resource.data.shortageAmount - resource.data.expectedAmount) >= -0.01
+        && (
+          (request.resource.data.status == 'complete'
+            && request.resource.data.shortageAmount == 0
+            && request.resource.data.shortageId == null)
+          ||
+          (request.resource.data.status == 'shortage'
+            && request.resource.data.shortageAmount > 0
+            && request.resource.data.shortageId != null
+            && getAfter(/databases/$(database)/documents/deliveryShortages/$(request.resource.data.shortageId)).data.entregadorId == resource.data.uid)
+        );
 
       allow delete: if false;
     }
@@ -449,6 +991,182 @@ service cloud.firestore {
     }
 
     // =====================================================
+    // 🧾 EXPENSES — gastos operativos (combustible, viáticos, etc.)
+    // FASE E1: solo existencia + ownership + máquina de estados. No hay
+    // aprobación previa (nace PENDING y ya cuenta), pero exige comprobante.
+    // La asociación con cashClosings (cashClosingId null→id) la escribirá
+    // closeTurno() en una fase futura (E3) — todavía no hay `allow update`
+    // para ese campo.
+    // =====================================================
+    match /expenses/{expenseId} {
+      // OJO (mismo caso ya documentado en payrollAdvances): la regla global de
+      // arriba ya concede lectura a cualquier autenticado y los `allow` se
+      // OR-ean, así que esta condición todavía no restringe nada por sí sola
+      // — cualquier usuario operativo puede leer el gasto de otro hoy. Se deja
+      // explícita para el día que esa lectura global se acote.
+      allow read: if isOperativo() && (isAdmin() || resource.data.createdByUid == request.auth.uid);
+
+      // Nace siempre PENDING, sin cierre asignado, a nombre de quien la crea,
+      // y con comprobante. reimbursement solo existe (y coincide con amount)
+      // cuando paymentMethod es PERSONAL; en cualquier otro caso debe ser null.
+      allow create: if isOperativo()
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.status == 'PENDING'
+        && request.resource.data.cashClosingId == null
+        && request.resource.data.reviewedByUid == null
+        && request.resource.data.reviewedAt == null
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.category in
+             ['FUEL', 'VIATICOS', 'FOOD', 'MAINTENANCE', 'TOLL', 'PARKING', 'OTHER']
+        && request.resource.data.paymentMethod in ['CASH', 'TRANSFER', 'CARD', 'PERSONAL']
+        && request.resource.data.receipt.url is string
+        && request.resource.data.receipt.path is string
+        && (
+             (request.resource.data.paymentMethod == 'PERSONAL'
+               && request.resource.data.reimbursement.status == 'PENDING'
+               && request.resource.data.reimbursement.amount == request.resource.data.amount
+               && request.resource.data.reimbursement.paidAt == null)
+             || (request.resource.data.paymentMethod != 'PERSONAL'
+               && request.resource.data.reimbursement == null)
+           );
+
+      // El creador cancela su propio gasto: solo mientras sigue PENDING y sin
+      // cierre asignado (mismo principio de "un cierre cerrado no debe
+      // alterarse silenciosamente", aplicado aquí antes de llegar al cierre).
+      allow update: if isOperativo()
+        && request.auth.uid == resource.data.createdByUid
+        && resource.data.status == 'PENDING'
+        && resource.data.cashClosingId == null
+        && request.resource.data.status == 'CANCELLED'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+
+      // Admin revisa: PENDING → APPROVED | REJECTED, y además APPROVED →
+      // REJECTED (rechazo posterior a la aprobación — FASE E6.3.1, decisión
+      // del propietario: APPROVED ya no es terminal, pero solo hacia
+      // REJECTED, nunca de vuelta a APPROVED ni a CANCELLED). REJECTED y
+      // CANCELLED siguen siendo terminales: ninguna de las dos ramas de abajo
+      // parte de esos estados.
+      allow update: if isAdmin()
+        && (
+             (resource.data.status == 'PENDING'
+               && (request.resource.data.status == 'APPROVED' || request.resource.data.status == 'REJECTED'))
+             || (resource.data.status == 'APPROVED' && request.resource.data.status == 'REJECTED')
+           )
+        && request.resource.data.reviewedByUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'reviewedByUid', 'reviewedAt']);
+
+      // El propio dueño vincula su gasto CASH al cierre que lo liquidó —
+      // exactamente la transición que closeTurno() ejecuta (FASE E3). Solo
+      // cashClosingId cambia; status permanece igual (entrar al cierre no
+      // equivale a aprobarlo — Modelo A, FASE E1.1). null→string una sola
+      // vez: la propia precondición `cashClosingId==null` impide reasignarlo
+      // o desvincularlo después (evita doble liquidación).
+      allow update: if isOperativo()
+        && request.auth.uid == resource.data.createdByUid
+        && resource.data.paymentMethod == 'CASH'
+        && resource.data.cashClosingId == null
+        && request.resource.data.cashClosingId is string
+        && (resource.data.status == 'PENDING' || resource.data.status == 'APPROVED')
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cashClosingId']);
+
+      // Registro contable: no se borra (mismo criterio que goodsReceipts/sales).
+      allow delete: if false;
+    }
+
+    // =====================================================
+    //  🤝 REIMBURSEMENTS — obligación de reembolso de gastos PERSONAL
+    //  (FASE E6.1). Nace únicamente vía reviewExpense() al aprobar; nunca lo
+    //  crea el cliente a mano. Mismo patrón que payrollAdvances/staffPurchases:
+    //  create/update restringidos a admin, transiciones únicas, sin delete.
+    // =====================================================
+    match /reimbursements/{expenseId} {
+      // El propio empleado consulta lo suyo; el resto de reembolsos son de admin.
+      allow read: if isAdmin()
+        || (request.auth != null && resource.data.createdByUid == request.auth.uid);
+
+      // Nace siempre PENDING, sin pago ni cancelación todavía. Lo crea
+      // reviewExpense() actuando como admin (misma transacción que aprueba
+      // el Expense) — nunca el cliente por su cuenta.
+      allow create: if isAdmin()
+        && request.resource.data.expenseId == expenseId
+        && request.resource.data.createdByUid is string
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.status == 'PENDING'
+        && request.resource.data.paidAt == null
+        && request.resource.data.paidByUid == null
+        && request.resource.data.cancelledAt == null
+        && request.resource.data.cancelledByUid == null;
+
+      // Cancelación automática al rechazar el Expense (reviewExpense()):
+      // solo PENDING → CANCELLED, monto inmutable. Un reembolso ya PAID no
+      // cae en esta regla (exige resource.data.status == 'PENDING'), así que
+      // queda protegido sin necesidad de una condición negativa aparte.
+      allow update: if isAdmin()
+        && resource.data.status == 'PENDING'
+        && request.resource.data.status == 'CANCELLED'
+        && request.resource.data.amount == resource.data.amount
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'cancelledAt', 'cancelledByUid']);
+
+      // Pago (FASE E6.2): solo PENDING → PAID, monto/expenseId/createdByUid
+      // inmutables, el pagador debe ser quien firma la escritura. TRANSFER
+      // exige `reference` no vacía (decisión del propietario); CASH no exige
+      // evidencia adicional. Ninguna regla de update parte de status=='PAID',
+      // así que un reembolso pagado queda protegido sin condición negativa.
+      // FASE E6.3.1: un admin no puede pagar su propio reembolso
+      // (createdByUid == auth.uid queda excluido explícitamente).
+      allow update: if isAdmin()
+        && resource.data.status == 'PENDING'
+        && request.resource.data.status == 'PAID'
+        && request.resource.data.amount == resource.data.amount
+        && request.resource.data.expenseId == resource.data.expenseId
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.paidByUid == request.auth.uid
+        && resource.data.createdByUid != request.auth.uid
+        && request.resource.data.paymentMethod in ['CASH', 'TRANSFER']
+        && (request.resource.data.paymentMethod != 'TRANSFER'
+            || (request.resource.data.reference is string && request.resource.data.reference.size() > 0))
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'paidAt', 'paidByUid', 'paymentMethod', 'reference', 'notes']);
+
+      // Registro contable: no se borra.
+      allow delete: if false;
+    }
+
+    // =====================================================
+    //  💸 CASH OUTFLOWS — pago físico/financiero de reimbursements (FASE E6.2)
+    //  Ledger inmutable, separado de `reimbursements` (que es el estado
+    //  actual de la obligación). Nunca lo crea el cliente a mano — nace en la
+    //  misma transacción de payReimbursement() que marca el reembolso PAID.
+    //  NO representa un gasto nuevo (ese ya vive en `financials` desde que se
+    //  aprobó el Expense) — solo el movimiento de caja del pago.
+    // =====================================================
+    match /cashOutflows/{expenseId} {
+      // Mismo criterio que reimbursements: admin ve todo, el propio empleado
+      // ve los suyos (mismo dueño que el reembolso que este pago liquida).
+      allow read: if isAdmin()
+        || (request.auth != null
+            && get(/databases/$(database)/documents/reimbursements/$(expenseId)).data.createdByUid == request.auth.uid);
+
+      allow create: if isAdmin()
+        && request.resource.data.expenseId == expenseId
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.amount
+             == get(/databases/$(database)/documents/reimbursements/$(expenseId)).data.amount
+        && request.resource.data.paymentMethod in ['CASH', 'TRANSFER']
+        && request.resource.data.paidByUid == request.auth.uid
+        && (request.resource.data.paymentMethod != 'TRANSFER'
+            || (request.resource.data.reference is string && request.resource.data.reference.size() > 0));
+
+      allow update, delete: if false;
+    }
+
+    // =====================================================
     // ⚙ FUNCIONES COMUNES
     // =====================================================
     // El rol viaja en el custom claim del token, sincronizado desde users/{uid}
@@ -490,6 +1208,87 @@ service cloud.firestore {
 
     function isOperativo() {
       return isAdmin() || isVendedor() || isEntregador() || isBodeguero();
+    }
+
+    // ── Pre-sales (FASE S1.3) ─────────────────────────────────────────────
+    // Vocabulario real de `presales.status`, tomado de preSaleService.js
+    // (TERMINAL_PRESALE_STATUSES / CREDIT_TO_CASH_STATUS / ORDER_TO_ITEM_STATUS
+    // / BLOCKING_DELETE_ORDER_STATUSES). Sincronización JS↔Rules es manual: si
+    // esas constantes cambian, actualizar aquí (ver auditoría S1.3.0, sección 4).
+    // 'delivered' existe en esas constantes pero ningún writer actual lo asigna
+    // (S1.3.0-F7) — se incluye igual en la lista de terminales porque el código
+    // ya lo trata como tal, sin construirle una transición que no existe hoy.
+    function isTerminalPreSaleStatus(status) {
+      return status in ['paid', 'cancelled', 'dispatched', 'credit_dispatched',
+                         'delivered', 'partially_returned', 'returned'];
+    }
+
+    function isEditablePreSaleStatus(status) {
+      return status in ['pending', 'credit_pending', 'preparing', 'credit_preparing',
+                         'ready_for_delivery', 'credit_ready_for_delivery'];
+    }
+
+    // updatePreSaleStatusGuarded / updateAggregateProductStatus: cualquier par
+    // dentro del MISMO riel (cash o crédito) — el avance de bodega se decide por
+    // el estado agregado de los ítems, no siempre un paso a la vez, y puede
+    // retroceder (preparing→pending) cuando todos los ítems regresan.
+    function isValidWarehousePreSaleTransition(from, to) {
+      return (from in ['pending', 'preparing', 'ready_for_delivery']
+                && to in ['pending', 'preparing', 'ready_for_delivery'])
+        || (from in ['credit_pending', 'credit_preparing', 'credit_ready_for_delivery']
+                && to in ['credit_pending', 'credit_preparing', 'credit_ready_for_delivery']);
+    }
+
+    // updatePreSaleInFirestore: cambiar `paymentMethod` mueve `status` a su
+    // equivalente en el otro riel, en la MISMA etapa de bodega — nunca salta
+    // etapa (creditStatusMap / CREDIT_TO_CASH_STATUS son mapeos 1:1).
+    function isValidPaymentMethodConversion(from, to) {
+      return from == to
+        || (from == 'pending' && to == 'credit_pending')
+        || (from == 'credit_pending' && to == 'pending')
+        || (from == 'preparing' && to == 'credit_preparing')
+        || (from == 'credit_preparing' && to == 'preparing')
+        || (from == 'ready_for_delivery' && to == 'credit_ready_for_delivery')
+        || (from == 'credit_ready_for_delivery' && to == 'ready_for_delivery');
+    }
+
+    // creditsService.createCreditFromPreSale (pending/dispatched→credit_pending,
+    // ver assertPreSaleCreditable) y eliminarCredito (credit_*→su equivalente de
+    // contado, CREDIT_TO_CASH_STATUS).
+    function isValidCreditConversionTransition(from, to) {
+      return (from == 'pending' && to == 'credit_pending')
+        || (from == 'dispatched' && to == 'credit_pending')
+        || (from == 'credit_pending' && to == 'pending')
+        || (from == 'credit_preparing' && to == 'preparing')
+        || (from == 'credit_ready_for_delivery' && to == 'ready_for_delivery');
+    }
+
+    // ── Sales (FASE S1.4.1) ──────────────────────────────────────────────────
+    // convertPreSaleToSale (preSaleService.js) arma `salePayload` desde el
+    // parámetro `preSale` que trae la pantalla, no desde una relectura del
+    // servidor (S1.4.0-F0) — solo `status` se verificaba en código. Esta
+    // función es el equivalente en Rules de esa relectura: exige que
+    // `preSaleId` sea una presale real, en un estado convertible, y que cada
+    // campo que el writer copia SIN transformar (ver payload real en
+    // preSaleService.js líneas ~542-564) sea idéntico al documento actual —
+    // así `preSaleId` ya no puede apuntar a una presale real mientras el resto
+    // del payload describe otra cosa.
+    function isConvertiblePreSale(data) {
+      let preSale = get(/databases/$(database)/documents/presales/$(data.preSaleId)).data;
+      return preSale.status in ['pending', 'dispatched']
+        && data.preSaleNumber == preSale.preSaleNumber
+        && data.customer == preSale.customer
+        && data.customerId == preSale.customerId
+        && data.customerName == preSale.customerName
+        && data.items == preSale.items
+        && data.bonuses == preSale.bonuses
+        && data.subtotal == preSale.subtotal
+        && data.totalDiscount == preSale.totalDiscount
+        && data.categoryDiscountTotal == preSale.categoryDiscountTotal
+        && data.total == preSale.total
+        && data.route == preSale.route
+        && data.routeId == preSale.routeId
+        && data.originalCreatedBy == preSale.createdBy;
     }
 
     // ── Nómina ─────────────────────────────────────────────────────────────
@@ -538,6 +1337,66 @@ service cloud.firestore {
 
     function getPaymentsSize(data) {
       return ('payments' in data && data.payments is list) ? data.payments.size() : 0;
+    }
+
+    // FASE S1.6.1 (S1.6-F0) — createCreditFromPreSale copia customerId/total/
+    // createdBy directamente de la pre-venta releída (preSaleService.js /
+    // creditsService.js:183-211) y solo la crea desde status pending/dispatched
+    // (assertPreSaleCreditable, ya usado también por presales rama 7). `paid`
+    // siempre nace en 0 en ese writer real. `get()` (no `getAfter()`) es
+    // correcto aquí: la transacción de creación no modifica `total`/
+    // `customerId`/`createdBy` de la pre-venta, solo `status`/`creditId`/
+    // `creditDueDate` — no hay problema de estado "futuro" que perseguir.
+    function isValidCreditFromPreSale(data) {
+      let preSale = get(/databases/$(database)/documents/presales/$(data.preSaleId)).data;
+      return preSale.status in ['pending', 'dispatched']
+        && data.customerId == preSale.customerId
+        && data.total == preSale.total
+        && data.createdBy == preSale.createdBy
+        && data.paid == 0;
+    }
+
+    // FASE S1.8.1 (S1.8-F0) — deliveryShortages, shape 1 (approveReturnRequest,
+    // returnService.js:420). El writer real resuelve `entregadorId` con un
+    // fallback: primero `returnRequest.entregadorId`, y solo si ese es null
+    // cae a `presale.entregadorId` — se replica la misma precedencia aquí, no
+    // "coincide con cualquiera de los dos" (eso sería más permisivo que el
+    // writer real). Ninguno de los dos documentos cambia `entregadorId` en
+    // esta misma transacción (confirmado: la rama 9 de presales.update y la
+    // rama B de returnRequests.update no lo incluyen en su hasOnly), así que
+    // get() —no getAfter()— es correcto aquí.
+    function isValidShortageFromReturn(data) {
+      let rr = get(/databases/$(database)/documents/returnRequests/$(data.returnRequestId)).data;
+      let expectedEntregadorId = rr.entregadorId != null
+        ? rr.entregadorId
+        : get(/databases/$(database)/documents/presales/$(rr.presaleId)).data.entregadorId;
+      return data.presaleId == rr.presaleId
+        && data.routeId == rr.routeId
+        && data.routeName == rr.routeName
+        && data.customerName == rr.customerName
+        && data.entregadorId == expectedEntregadorId;
+    }
+
+    // FASE S1.8.1 (S1.8-F0) — deliveryShortages, shape 3a (reviewExpense,
+    // expenseService.js:258-267). `expenses.update` (rama de revisión) no
+    // toca `amount`/`createdByUid`/`cashClosingId` — get() es correcto.
+    function isValidShortageFromExpense(data) {
+      let exp = get(/databases/$(database)/documents/expenses/$(data.expenseId)).data;
+      return data.cashClosingId == exp.cashClosingId
+        && data.entregadorId == exp.createdByUid
+        && data.totalMissingValue == exp.amount;
+    }
+
+    // FASE S1.8.1 (S1.8-F0) — deliveryShortages, shape 3b (reviewExpense,
+    // expenseService.js:309-317). Este shape solo nace cuando el reembolso
+    // YA estaba 'PAID' — la única rama que cancela un reimbursement exige
+    // status=='PENDING' (mutuamente excluyente con 'PAID'), así que ese
+    // documento tampoco cambia en la misma transacción — get() es correcto.
+    function isValidShortageFromReimbursement(data) {
+      let reimb = get(/databases/$(database)/documents/reimbursements/$(data.expenseId)).data;
+      return reimb.status == 'PAID'
+        && data.entregadorId == reimb.createdByUid
+        && data.totalMissingValue == reimb.amount;
     }
 
     function isValidCounterPayload(data) {

@@ -50,6 +50,30 @@ service firebase.storage {
       allow delete: if isAdmin() || isBodeguero();
     }
 
+    // =====================================================
+    // 🧾 Fotos de comprobantes de gastos — expenseReceipts/{fileName}
+    // Cualquier rol operativo registra sus propios gastos, así que cualquiera
+    // sube su comprobante (a diferencia de goodsReceipts, que solo bodega/admin).
+    // =====================================================
+    // FASE S1.7.1 — S1.7-F2. uploadExpenseReceipt(localUri, uid)
+    // (expenseReceiptsService.js) nombra el archivo `${uid}_${timestamp}.jpg`
+    // — el uid real del subidor vive en el propio nombre. Los UID de Firebase
+    // Auth de este proyecto son alfanuméricos sin '_' (generados por
+    // admin.auth().createUser sin uid explícito, ver functions/index.js
+    // createUser), así que `fileName.split('_')[0]` aísla ese uid de forma
+    // confiable. El único caller real de deleteExpenseReceipt
+    // (CreateExpenseScreen.jsx) borra su propia foto recién subida —
+    // "cualquier operativo borra cualquier comprobante" era más amplio que
+    // ese único uso real.
+    match /expenseReceipts/{fileName} {
+      allow read: if isOperativo();
+      allow write: if isOperativo()
+        && request.resource.size < 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isAdmin()
+        || (isOperativo() && fileName.split('_')[0] == request.auth.uid);
+    }
+
     // Todo lo demás, denegado por defecto.
     match /{allPaths=**} {
       allow read, write: if false;

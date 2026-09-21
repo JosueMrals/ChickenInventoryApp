@@ -112,18 +112,29 @@ describe('rejectReturnRequest', () => {
 });
 
 describe('approveReturnRequest', () => {
-  const returnRequest = {
-    id: 'r1',
-    presaleId: null,
-    items: [{ productId: 'p1', productName: 'Pollo', quantity: 2, unitPrice: 50 }],
-    bonuses: [],
-  };
+  // FASE S1.5.1 (S1.5-F0): ya no hay un objeto `returnRequest` de parámetro —
+  // approveReturnRequest lee `items`/`bonuses`/`presaleId` del propio doc
+  // releído (`mockState.docs.r1`), así que el doc debe traer esos campos como
+  // los traería `createReturnRequest` en producción. Sin presaleId no hay
+  // pre-venta contra la cual acotar (getAvailableReturnQty devuelve 0), así
+  // que se agrega una pre-venta real con la misma cantidad para no romper el
+  // caso "aprueba normalmente" con el tope nuevo de S1.5-F1.
+  beforeEach(() => {
+    mockState.docs.ps1 = {
+      items: [{ productId: 'p1', productName: 'Pollo', quantity: 2, unitPrice: 50, total: 100 }],
+      bonuses: [], subtotal: 100, total: 100, totalDiscount: 0, status: 'dispatched',
+    };
+  });
 
   test('aprueba normalmente desde pending_review y restaura stock una vez', async () => {
-    mockState.docs.r1 = { status: 'pending_review' };
+    mockState.docs.r1 = {
+      status: 'pending_review', presaleId: 'ps1',
+      items: [{ productId: 'p1', productName: 'Pollo', quantity: 2, unitPrice: 50 }],
+      bonuses: [],
+    };
     mockState.docs.p1 = { stock: 10 };
 
-    await approveReturnRequest({ returnRequestId: 'r1', returnRequest });
+    await approveReturnRequest({ returnRequestId: 'r1' });
 
     expect(mockState.docs.r1.status).toBe('approved');
     expect(mockState.docs.p1.stock).toBe(12); // 10 + 2, una sola vez
@@ -132,11 +143,15 @@ describe('approveReturnRequest', () => {
   test('rechaza una segunda aprobación y NO duplica la restauración de stock', async () => {
     // El servidor ya la tiene aprobada (p.ej. otro bodeguero se adelantó); el
     // stock ya se restauró en esa primera aprobación.
-    mockState.docs.r1 = { status: 'approved' };
+    mockState.docs.r1 = {
+      status: 'approved', presaleId: 'ps1',
+      items: [{ productId: 'p1', productName: 'Pollo', quantity: 2, unitPrice: 50 }],
+      bonuses: [],
+    };
     mockState.docs.p1 = { stock: 12 };
 
     await expect(
-      approveReturnRequest({ returnRequestId: 'r1', returnRequest })
+      approveReturnRequest({ returnRequestId: 'r1' })
     ).rejects.toThrow(/aprobada/);
 
     expect(mockState.docs.p1.stock).toBe(12); // sin cambio: no se dobló
