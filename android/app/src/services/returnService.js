@@ -146,6 +146,19 @@ export function buildItemKey(item, index, type) {
   return `${type}-${index}-${item.productId || item.productName}`;
 }
 
+// ── Tope real de lo devolvible (S1.5-F1) ──────────────────────────────────────
+// Cuánto de este producto sigue facturado en la pre-venta REAL (releída dentro
+// de la transacción), sin importar cuánto pida la solicitud. Sin pre-venta, o
+// con un producto que esa pre-venta nunca tuvo, no hay nada que devolver: 0.
+// Misma clave que usa applyReturnToPresale para no desalinear ambos topes.
+export function getAvailableReturnQty(presaleData, item, isBonus) {
+  if (!presaleData) return 0;
+  const key = item.productId || item.productName;
+  const list = isBonus ? presaleData.bonuses : presaleData.items;
+  const line = (list || []).find((l) => (l.productId || l.id || l.productName) === key);
+  return line ? Number(line.quantity) || 0 : 0;
+}
+
 // ── Recálculo de la factura tras una devolución aprobada ─────────────────────
 // Pura (sin Firestore) para poder probarla: recibe el doc de pre-venta y las
 // líneas verificadas, devuelve los campos a escribir en la pre-venta.
@@ -267,61 +280,75 @@ export function applyReturnToCredit(creditData, newPresaleTotal) {
   };
 }
 
-export async function approveReturnRequest({ returnRequestId, returnRequest, verifiedQuantities = null }) {
+// FASE S1.5.1 — S1.5-F0/F1. Ya no recibe `returnRequest` del caller: todo dato
+// persistido (presaleId, items, bonuses, entregadorId, routeId...) se toma de
+// `returnSnap.data()`, releído dentro de la MISMA transacción — antes se usaba
+// el objeto que trajo la pantalla (el listener en vivo) para decidir qué
+// documentos escribir, lo que permitía que `returnRequestId` apuntara a una
+// solicitud real mientras el resto de los datos describía otra cosa. La
+// cantidad restaurada a inventario, además, ahora está acotada por
+// `getAvailableReturnQty` contra la pre-venta real: ni un producto ajeno a la
+// factura ni una cantidad mayor a la todavía facturada pueden mover stock.
+export async function approveReturnRequest({ returnRequestId, verifiedQuantities = null }) {
   const user = auth().currentUser;
   if (!user) throw new Error('No autenticado');
-
-  const withReceived = (list, type) =>
-    (list || []).map((item, index) => {
-      const expected = Number(item.quantity) || 0;
-      const key = buildItemKey(item, index, type);
-      const raw = verifiedQuantities?.[key];
-      const received = raw == null ? expected : Math.max(0, Math.min(expected, Number(raw) || 0));
-      return {
-        ...item,
-        isBonus: type === 'bonus',
-        expectedQty: expected,
-        receivedQty: received,
-        missingQty: expected - received,
-      };
-    });
-
-  const verifiedItems = [
-    ...withReceived(returnRequest.items, 'item'),
-    ...withReceived(returnRequest.bonuses, 'bonus'),
-  ];
-
-  const shortages = verifiedItems.filter((i) => i.missingQty > 0);
-  const stockItems = verifiedItems.filter((i) => i.productId && i.receivedQty > 0);
 
   const returnRef = returnsCollection.doc(returnRequestId);
 
   await firestore().runTransaction(async (tx) => {
     // Todas las lecturas ANTES de cualquier escritura (requisito de Firestore).
-    // Relectura de la solicitud misma: sin esto, una aprobación duplicada (doble
-    // tap sin red, o dos bodegueros con la misma solicitud abierta) restauraba el
-    // stock DOS veces — la solicitud pasada por parámetro es la copia que trajo
-    // el listener en vivo, no necesariamente el estado real del servidor.
+    // Fuente de verdad única de aquí en adelante: `realReturnRequest`.
     const returnSnap = await tx.get(returnRef);
     if (!returnSnap.exists()) throw new Error('La solicitud de devolución ya no existe.');
-    const currentReturnStatus = returnSnap.data()?.status;
+    const realReturnRequest = returnSnap.data() || {};
+    const currentReturnStatus = realReturnRequest.status;
     if (currentReturnStatus !== 'pending_review') {
       throw new Error(`Esta solicitud ya fue ${describeReturnStatus(currentReturnStatus)} por otro usuario.`);
     }
+
+    // Pre-venta real ANTES de calcular cantidades: getAvailableReturnQty topa
+    // expectedQty/receivedQty contra lo que la factura todavía tiene, no
+    // contra lo que dice la solicitud.
+    let presaleRef = null;
+    let presaleData = null;
+    if (realReturnRequest.presaleId) {
+      presaleRef = firestore().collection('presales').doc(realReturnRequest.presaleId);
+      const presaleSnap = await tx.get(presaleRef);
+      if (presaleSnap.exists()) presaleData = presaleSnap.data();
+      else presaleRef = null;
+    }
+
+    const withReceived = (list, type) =>
+      (list || []).map((item, index) => {
+        const isBonus = type === 'bonus';
+        // Tope real (S1.5-F1): nunca más de lo que la pre-venta releída tiene
+        // facturado para este producto. Producto ajeno a la factura → 0.
+        const available = getAvailableReturnQty(presaleData, item, isBonus);
+        const expected = Math.min(Number(item.quantity) || 0, available);
+        const key = buildItemKey(item, index, type);
+        const raw = verifiedQuantities?.[key];
+        const received = raw == null ? expected : Math.max(0, Math.min(expected, Number(raw) || 0));
+        return {
+          ...item,
+          isBonus,
+          expectedQty: expected,
+          receivedQty: received,
+          missingQty: expected - received,
+        };
+      });
+
+    const verifiedItems = [
+      ...withReceived(realReturnRequest.items, 'item'),
+      ...withReceived(realReturnRequest.bonuses, 'bonus'),
+    ];
+
+    const shortages = verifiedItems.filter((i) => i.missingQty > 0);
+    const stockItems = verifiedItems.filter((i) => i.productId && i.receivedQty > 0);
 
     const productRefs = stockItems.map((item) =>
       firestore().collection('products').doc(item.productId)
     );
     const snapshots = await Promise.all(productRefs.map((ref) => tx.get(ref)));
-
-    let presaleRef = null;
-    let presaleData = null;
-    if (returnRequest.presaleId) {
-      presaleRef = firestore().collection('presales').doc(returnRequest.presaleId);
-      const presaleSnap = await tx.get(presaleRef);
-      if (presaleSnap.exists()) presaleData = presaleSnap.data();
-      else presaleRef = null;
-    }
 
     // Crédito enlazado: se lee AQUÍ (con el resto de lecturas) porque una
     // transacción no admite leer después de escribir. Se resuelve solo por
@@ -390,17 +417,17 @@ export async function approveReturnRequest({ returnRequestId, returnRequest, ver
 
     // Registro permanente de faltantes contra el entregador
     if (shortages.length > 0) {
-      const entregadorId = returnRequest.entregadorId || presaleData?.entregadorId || null;
+      const entregadorId = realReturnRequest.entregadorId || presaleData?.entregadorId || null;
       const totalMissingQty = shortages.reduce((sum, i) => sum + i.missingQty, 0);
       const totalMissingValue = shortages.reduce(
         (sum, i) => sum + i.missingQty * (Number(i.unitPrice) || 0), 0
       );
       tx.set(shortagesCollection.doc(), {
         returnRequestId,
-        presaleId: returnRequest.presaleId || null,
-        routeId: returnRequest.routeId || null,
-        routeName: returnRequest.routeName || null,
-        customerName: returnRequest.customerName || '',
+        presaleId: realReturnRequest.presaleId || null,
+        routeId: realReturnRequest.routeId || null,
+        routeName: realReturnRequest.routeName || null,
+        customerName: realReturnRequest.customerName || '',
         entregadorId,
         items: shortages.map((i) => ({
           productId: i.productId || null,

@@ -6,6 +6,18 @@ import {
 import Svg, { Rect, Text as SvgText, Line } from "react-native-svg";
 import Icon from "react-native-vector-icons/Ionicons";
 import { getFinancialDetail } from "../services/reportsService";
+import { EXPENSE_CATEGORIES, PAYMENT_METHODS } from "../../expenses/services/expenseService";
+import { CATEGORY_LABELS, PAYMENT_METHOD_LABELS } from "../../expenses/utils/expenseLabels";
+
+// FASE E5: nota de impacto por método de pago — mismo criterio ya fijado en
+// FASE E1.1/E3 (CASH afecta Cash Closing, PERSONAL genera reembolso, CARD/
+// TRANSFER solo quedan reportados). Puramente informativo, no recalcula nada.
+const PM_IMPACT_NOTE = {
+  CASH: "Afecta Cash Closing",
+  PERSONAL: "Genera reembolso · no afecta Cash Closing",
+  CARD: "No afecta Cash Closing",
+  TRANSFER: "No afecta Cash Closing",
+};
 
 const SCREEN_W = Dimensions.get("window").width - 28;
 
@@ -109,6 +121,12 @@ export default function FinancialPanelPRO({ dateFrom, dateTo, refreshKey = 0 }) 
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [showTx, setShowTx]   = useState(false);
+  // FASE E5: filtros client-side sobre financialDocs ya cargado — no disparan
+  // ninguna consulta nueva a Firestore, no afectan los KPIs/extExpenses de
+  // arriba (esos siguen mostrando el total real del rango de fechas).
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [pmFilter, setPmFilter]             = useState("ALL");
+  const [userFilter, setUserFilter]         = useState("ALL");
   const lastKey = useRef(null);
 
   useEffect(() => {
@@ -148,9 +166,21 @@ export default function FinancialPanelPRO({ dateFrom, dateTo, refreshKey = 0 }) 
     paymentMethods, timeseries,
     extIncomes, extExpenses, financialDocs,
     totalIncome, totalExpenses, netProfit,
+    expenseBreakdown, expenseUsers,
   } = data;
 
   const hasFinancials = financialDocs?.length > 0;
+  const hasExpenseBreakdown = expenseBreakdown?.count > 0;
+  const hasExpenseUsers = expenseUsers?.length > 0;
+  // Filtro solo aplica a la lista de transacciones — los docs de ingreso no
+  // tienen category/paymentMethod/createdByUid, así que activar un filtro los
+  // excluye naturalmente (comportamiento correcto: filtrar por atributo de gasto).
+  const visibleDocs = (financialDocs || []).filter((tx) => {
+    if (categoryFilter !== "ALL" && tx.category !== categoryFilter) return false;
+    if (pmFilter !== "ALL" && tx.paymentMethod !== pmFilter) return false;
+    if (userFilter !== "ALL" && tx.createdByUid !== userFilter) return false;
+    return true;
+  });
 
   return (
     <ScrollView style={f.screen} contentContainerStyle={{ paddingBottom: 32 }}>
@@ -202,6 +232,30 @@ export default function FinancialPanelPRO({ dateFrom, dateTo, refreshKey = 0 }) 
           bold separator
           color={netProfit >= 0 ? "#7C3AED" : "#DC2626"} />
       </View>
+
+      {/* ── Gastos operativos (FASE E5) ───────────────────────────── */}
+      {hasExpenseBreakdown && (
+        <View style={f.card}>
+          <View style={f.cardHeader}>
+            <Icon name="cash-outline" size={15} color="#007AFF" />
+            <Text style={f.cardTitle}>Gastos operativos ({expenseBreakdown.count})</Text>
+          </View>
+          <BreakRow label="Total aprobado" value={C$(expenseBreakdown.total)} bold color="#DC2626" />
+
+          <Text style={[f.groupLabel, { marginTop: 10 }]}>POR CATEGORÍA</Text>
+          {Object.entries(expenseBreakdown.byCategory).map(([cat, amount]) => (
+            <BreakRow key={cat} label={CATEGORY_LABELS[cat] || cat} value={C$(amount)} indent />
+          ))}
+
+          <Text style={[f.groupLabel, { marginTop: 10 }]}>POR MÉTODO DE PAGO</Text>
+          {Object.entries(expenseBreakdown.byPaymentMethod).map(([pm, amount]) => (
+            <View key={pm}>
+              <BreakRow label={PAYMENT_METHOD_LABELS[pm] || pm} value={C$(amount)} indent />
+              {PM_IMPACT_NOTE[pm] && <Text style={[f.pmSub, { paddingLeft: 16, marginTop: -4 }]}>{PM_IMPACT_NOTE[pm]}</Text>}
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* ── Métodos de pago ───────────────────────────────────────── */}
       {paymentMethods?.length > 0 && (
@@ -321,26 +375,80 @@ export default function FinancialPanelPRO({ dateFrom, dateTo, refreshKey = 0 }) 
               <Text style={f.txKpiLbl}>Balance ext.</Text>
             </View>
           </View>
-          {showTx && financialDocs.map((tx, i) => {
-            const isIncome = tx.type === "income";
-            return (
-              <View key={tx.id || i} style={f.txRow}>
-                <View style={[f.txDot, { backgroundColor: isIncome ? "#059669" : "#DC2626" }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={f.txDesc}>{tx.description || tx.concept || (isIncome ? "Ingreso" : "Gasto")}</Text>
-                  <Text style={f.txDate}>
-                    {tx.createdAt?.toDate
-                      ? tx.createdAt.toDate().toLocaleDateString("es-NI")
-                      : "—"}
-                    {tx.category ? ` · ${tx.category}` : ""}
-                  </Text>
-                </View>
-                <Text style={[f.txAmount, { color: isIncome ? "#059669" : "#DC2626" }]}>
-                  {isIncome ? "+" : "-"}{C$(tx.amount)}
-                </Text>
-              </View>
-            );
-          })}
+          {showTx && (
+            <>
+              {hasExpenseBreakdown && (
+                <>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={f.filterRow}>
+                    {["ALL", ...EXPENSE_CATEGORIES].map((c) => (
+                      <TouchableOpacity
+                        key={c}
+                        style={[f.filterChip, categoryFilter === c && f.filterChipActive]}
+                        onPress={() => setCategoryFilter(c)}
+                      >
+                        <Text style={[f.filterChipText, categoryFilter === c && f.filterChipTextActive]}>
+                          {c === "ALL" ? "Todas" : CATEGORY_LABELS[c] || c}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={f.filterRow}>
+                    {["ALL", ...PAYMENT_METHODS].map((m) => (
+                      <TouchableOpacity
+                        key={m}
+                        style={[f.filterChip, pmFilter === m && f.filterChipActive]}
+                        onPress={() => setPmFilter(m)}
+                      >
+                        <Text style={[f.filterChipText, pmFilter === m && f.filterChipTextActive]}>
+                          {m === "ALL" ? "Todos" : PAYMENT_METHOD_LABELS[m] || m}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  {hasExpenseUsers && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={f.filterRow}>
+                      {[{ uid: "ALL", name: "Todos" }, ...expenseUsers].map((u) => (
+                        <TouchableOpacity
+                          key={u.uid}
+                          style={[f.filterChip, userFilter === u.uid && f.filterChipActive]}
+                          onPress={() => setUserFilter(u.uid)}
+                        >
+                          <Text style={[f.filterChipText, userFilter === u.uid && f.filterChipTextActive]}>
+                            {u.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  )}
+                </>
+              )}
+              {visibleDocs.map((tx, i) => {
+                const isIncome = tx.type === "income";
+                return (
+                  <View key={tx.id || i} style={f.txRow}>
+                    <View style={[f.txDot, { backgroundColor: isIncome ? "#059669" : "#DC2626" }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={f.txDesc}>{tx.description || tx.concept || (isIncome ? "Ingreso" : "Gasto")}</Text>
+                      <Text style={f.txDate}>
+                        {tx.createdAt?.toDate
+                          ? tx.createdAt.toDate().toLocaleDateString("es-NI")
+                          : "—"}
+                        {tx.category ? ` · ${CATEGORY_LABELS[tx.category] || tx.category}` : ""}
+                        {tx.paymentMethod ? ` · ${PAYMENT_METHOD_LABELS[tx.paymentMethod] || tx.paymentMethod}` : ""}
+                        {!isIncome ? ` · ${tx.createdByName || "Usuario no disponible"}` : ""}
+                      </Text>
+                    </View>
+                    <Text style={[f.txAmount, { color: isIncome ? "#059669" : "#DC2626" }]}>
+                      {isIncome ? "+" : "-"}{C$(tx.amount)}
+                    </Text>
+                  </View>
+                );
+              })}
+              {visibleDocs.length === 0 && (
+                <Text style={f.emptyText}>Sin transacciones para este filtro.</Text>
+              )}
+            </>
+          )}
         </View>
       )}
     </ScrollView>
@@ -402,6 +510,16 @@ const f = StyleSheet.create({
   trendStat:   { fontSize: 11, color: "#6B7280" },
   emptyChart:  { alignItems: "center", justifyContent: "center", paddingVertical: 24, gap: 8 },
   emptyChartText: { color: "#9CA3AF", fontSize: 13 },
+
+  // Filtros de gastos (FASE E5)
+  filterRow: { flexDirection: "row", marginBottom: 8 },
+  filterChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 30,
+    backgroundColor: "#F1F5F9", marginRight: 6,
+  },
+  filterChipActive: { backgroundColor: "#007AFF" },
+  filterChipText: { fontSize: 11, fontWeight: "600", color: "#6B7280" },
+  filterChipTextActive: { color: "#fff" },
 
   // Transacciones externas
   txKpiRow:  { flexDirection: "row", alignItems: "center", backgroundColor: "#F8FAFC", borderRadius: 10, padding: 12, marginBottom: 10 },

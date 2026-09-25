@@ -9,6 +9,7 @@ const _docsCache    = new Map();
 const _summaryCache = new Map();
 const _userSalesCache = new Map();
 const _creditsByEmployeeCache = new Map();
+const _usersCache = new Map();
 
 function _cacheKey(from, to) {
   return `${from?.getTime?.() ?? "null"}_${to?.getTime?.() ?? "null"}`;
@@ -43,6 +44,105 @@ function buildTimeseries(dailyMap) {
 }
 
 /**
+ * Pura: agrupa los `financials` tipo 'expense' por categoría y método de pago.
+ * Testeable sin Firestore. No recalcula extExpenses — solo lo explica; la
+ * suma de `byCategory`/`byPaymentMethod` siempre coincide con `extExpenses`.
+ */
+export function computeExpenseBreakdown(financialDocs = []) {
+  const expenses = financialDocs.filter((f) => f.type === "expense");
+  const byCategory = {};
+  const byPaymentMethod = {};
+  let total = 0;
+
+  expenses.forEach((f) => {
+    const amount = Number(f.amount || 0);
+    const category = f.category || "OTHER";
+    const paymentMethod = f.paymentMethod || "UNKNOWN";
+    total += amount;
+    byCategory[category] = (byCategory[category] || 0) + amount;
+    byPaymentMethod[paymentMethod] = (byPaymentMethod[paymentMethod] || 0) + amount;
+  });
+
+  return { total, count: expenses.length, byCategory, byPaymentMethod };
+}
+
+/**
+ * Pura: arma la lista de usuarios que aparecen como autores de gastos
+ * (`financials` tipo 'expense' con `createdByUid`), para alimentar el filtro
+ * "por usuario" (FASE E5.1) sin volver a consultar `expenses` ni `users` por
+ * cada documento. Deduplicada y ordenada por nombre.
+ */
+export function computeExpenseUsers(financialDocs = []) {
+  const seen = new Map();
+  financialDocs
+    .filter((f) => f.type === "expense" && f.createdByUid)
+    .forEach((f) => {
+      if (!seen.has(f.createdByUid)) seen.set(f.createdByUid, f.createdByName || f.createdByUid);
+    });
+  return Array.from(seen, ([uid, name]) => ({ uid, name })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Pura: agrupa `reimbursements` en pendientes/pagados — total, cantidad, por
+ * empleado y por método. FASE E6.2. NUNCA se suma a `extExpenses`/
+ * `computeExpenseBreakdown`: el gasto económico ya está contado una sola vez
+ * en `financials` desde la aprobación (FASE E4/E6.2.0 §10-11) — esto es
+ * puramente informativo sobre el estado del pago/flujo de caja.
+ */
+export function computeReimbursementSummary(reimbursementDocs = []) {
+  const summary = {
+    pendingCount: 0, pendingTotal: 0,
+    paidCount: 0, paidTotal: 0,
+    byEmployee: {},
+    byMethod: {},
+  };
+
+  reimbursementDocs.forEach((r) => {
+    const amount = Number(r.amount || 0);
+    if (r.status === "PENDING") {
+      summary.pendingCount += 1;
+      summary.pendingTotal += amount;
+    } else if (r.status === "PAID") {
+      summary.paidCount += 1;
+      summary.paidTotal += amount;
+      const method = r.paymentMethod || "UNKNOWN";
+      summary.byMethod[method] = (summary.byMethod[method] || 0) + amount;
+    } else {
+      return; // CANCELLED no cuenta ni como pendiente ni como pagado
+    }
+
+    const uid = r.createdByUid || "UNKNOWN";
+    if (!summary.byEmployee[uid]) {
+      summary.byEmployee[uid] = { uid, pendingTotal: 0, paidTotal: 0 };
+    }
+    if (r.status === "PENDING") summary.byEmployee[uid].pendingTotal += amount;
+    if (r.status === "PAID") summary.byEmployee[uid].paidTotal += amount;
+  });
+
+  return summary;
+}
+
+/**
+ * Mapa uid → nombre de todos los usuarios, en una sola consulta cacheada
+ * (mismo patrón que el catálogo de `customers`/`products` en getClientsReport/
+ * getProductsReport) — nunca un `getDoc` por cada `financials` (FASE E5.1 §7).
+ */
+async function fetchUsersMap() {
+  const hit = _usersCache.get("all");
+  if (hit && Date.now() - hit.ts < CACHE_TTL) return hit.data;
+
+  const snap = await col("users").get();
+  const map = {};
+  snap.forEach((d) => {
+    const u = d.data();
+    map[d.id] = `${u.nombre || ""} ${u.apellido || ""}`.trim() || u.user || d.id;
+  });
+
+  _usersCache.set("all", { ts: Date.now(), data: map });
+  return map;
+}
+
+/**
  * Invalida TODAS las cachés del módulo. La usa el pull-to-refresh de la pantalla
  * de reportes: sin esto los datos quedaban congelados hasta 5 minutos (el TTL) y
  * no había forma de forzar una relectura tras registrar una venta.
@@ -59,6 +159,41 @@ export function clearAllReportsCaches() {
   _financialDetailCache.clear();
   _clientsReportCache.clear();
   _productsReportCache.clear();
+  _usersCache.clear();
+  _reimbursementsCache.clear();
+}
+
+// ─── Reporte de reembolsos (FASE E6.2) ────────────────────────────────────────
+const _reimbursementsCache = new Map();
+
+/**
+ * Trae TODOS los `reimbursements` (catálogo pequeño y acotado — mismo criterio
+ * que `getClientsReport`/`getProductsReport`, no un rango de fechas) junto con
+ * el nombre de cada empleado (reutiliza `fetchUsersMap`, sin consulta extra
+ * por documento) y arma el resumen con `computeReimbursementSummary`.
+ */
+export async function getReimbursementsSummary() {
+  const hit = _reimbursementsCache.get("all");
+  if (hit && Date.now() - hit.ts < CACHE_TTL) return hit.data;
+
+  try {
+    const [snap, usersMap] = await Promise.all([
+      col("reimbursements").get(),
+      fetchUsersMap().catch(() => ({})),
+    ]);
+
+    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const summary = computeReimbursementSummary(docs);
+    Object.values(summary.byEmployee).forEach((e) => {
+      e.name = usersMap[e.uid] || e.uid;
+    });
+
+    _reimbursementsCache.set("all", { ts: Date.now(), data: summary });
+    return summary;
+  } catch (e) {
+    console.error("ERROR getReimbursementsSummary:", e);
+    return null;
+  }
 }
 
 const extractProductId = (it) =>
@@ -410,8 +545,8 @@ export async function getFinancialDetail({ from, to }) {
   if (hit && Date.now() - hit.ts < CACHE_TTL) return hit.data;
 
   try {
-    // Fetch sales (cached) + financials en paralelo
-    const [allDocs, finSnap] = await Promise.all([
+    // Fetch sales (cached) + financials + usuarios (cached) en paralelo
+    const [allDocs, finSnap, usersMap] = await Promise.all([
       fetchAllSalesDocs({ from, to }),
       (() => {
         let q = col("financials").orderBy("createdAt", "desc");
@@ -419,6 +554,7 @@ export async function getFinancialDetail({ from, to }) {
         if (to)   q = q.where("createdAt", "<=", toTs(to));
         return q.get().catch(() => ({ forEach: () => {} }));
       })(),
+      fetchUsersMap().catch(() => ({})),
     ]);
 
     // Precios de compra para calcular costo de mercancía
@@ -480,11 +616,25 @@ export async function getFinancialDetail({ from, to }) {
     const financialDocs = [];
     finSnap.forEach((doc) => {
       const f = { id: doc.id, ...doc.data() };
+      // Nombre resuelto vía el mapa ya cargado — nunca una consulta por doc
+      // (FASE E5.1). Financials históricos sin createdByUid (previos a E5.1)
+      // quedan explícitamente como "Usuario no disponible", nunca se infiere.
+      f.createdByName = f.createdByUid ? (usersMap[f.createdByUid] || "Usuario no disponible") : null;
       financialDocs.push(f);
       const amount = Number(f.amount || 0);
       if (f.type === "income")  extIncomes  += amount;
       if (f.type === "expense") extExpenses += amount;
     });
+
+    // Desglose de gastos operativos (FASE E5) — solo agrupa lo que ya se sumó
+    // arriba en extExpenses; no cambia esa cifra, solo la explica por
+    // categoría/método. `financialDocs` ya trae category/paymentMethod desde
+    // FASE E4 (el mirror los escribe); un financial externo/manual sin esos
+    // campos simplemente cae en "OTHER"/"UNKNOWN".
+    const expenseBreakdown = computeExpenseBreakdown(financialDocs);
+    // Lista de usuarios para el filtro (FASE E5.1) — solo autores reales de
+    // gastos, deducida de los mismos financialDocs ya traídos.
+    const expenseUsers = computeExpenseUsers(financialDocs);
 
     // Timeseries ordenada por fecha
     const timeseries = buildTimeseries(dailySales);
@@ -509,6 +659,8 @@ export async function getFinancialDetail({ from, to }) {
       extIncomes,
       extExpenses,
       financialDocs,
+      expenseBreakdown,
+      expenseUsers,
       // Totales consolidados
       totalIncome:   salesIncome + extIncomes,
       totalExpenses: salesCost   + extExpenses,

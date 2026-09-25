@@ -1,6 +1,6 @@
 /**
  * Tests para salesService.js
- * Cubre: fetchSalesByCustomer, registerSale, updateSale, deleteSale
+ * Cubre: fetchSalesByCustomer, registerSale, updateSale
  */
 
 const mockAdd = jest.fn();
@@ -29,7 +29,6 @@ const {
   fetchSalesByCustomer,
   registerSale,
   updateSale,
-  deleteSale,
 } = require('../../android/app/src/screens/customer/services/salesService');
 
 describe('salesService', () => {
@@ -117,14 +116,6 @@ describe('salesService', () => {
       const payload = mockUpdate.mock.calls[0][0];
       expect(payload.total).toBe(200);
       expect(payload.updatedAt).toBeInstanceOf(Date);
-    });
-  });
-
-  describe('deleteSale', () => {
-    it('elimina la venta', async () => {
-      mockDelete.mockResolvedValue();
-      await deleteSale('s1');
-      expect(mockDelete).toHaveBeenCalledTimes(1);
     });
   });
 });

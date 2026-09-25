@@ -8,25 +8,26 @@ export const MODULE_GROUPS_BY_ROLE = {
   admin: [
     { label: 'Ventas', keys: ['pre-sale', 'products-new'] },
     { label: 'Clientes y Créditos', keys: ['customers', 'credits'] },
-    { label: 'Operaciones', keys: ['routes', 'prepare-presales', 'reception', 'returns', 'my-deliveries', 'staff-purchase', 'cash-closing'] },
+    { label: 'Operaciones', keys: ['routes', 'prepare-presales', 'reception', 'returns', 'my-deliveries', 'staff-purchase', 'cash-closing', 'expenses'] },
     { label: 'Administración', keys: ['reports', 'users', 'payroll', 'settings'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   vendedor: [
     { label: 'Ventas', keys: ['pre-sale', 'products-new'] },
     { label: 'Clientes y Créditos', keys: ['customers', 'credits'] },
-    { label: 'Caja y Nómina', keys: ['cash-closing', 'payroll'] },
+    { label: 'Caja y Nómina', keys: ['cash-closing', 'payroll', 'expenses'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   bodeguero: [
     { label: 'Almacén', keys: ['prepare-presales', 'reception', 'returns', 'products-new', 'staff-purchase'] },
     { label: 'Nómina', keys: ['payroll'] },
+    { label: 'Gastos', keys: ['expenses'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
   entregador: [
     { label: 'Mis Entregas', keys: ['my-deliveries', 'returns'] },
     { label: 'Consulta', keys: ['customers', 'credits'] },
-    { label: 'Caja y Nómina', keys: ['cash-closing', 'payroll'] },
+    { label: 'Caja y Nómina', keys: ['cash-closing', 'payroll', 'expenses'] },
     { label: 'Otros', keys: ['settings'] },
     { label: 'Mi Cuenta', keys: ['profile'] },
   ],
@@ -55,6 +56,8 @@ export const ALL_MODULES = [
   { key: 'staff-purchase', label: 'Entrega a Personal', icon: 'bag-handle-outline', color: '#5856D6', screen: 'StaffPurchase', roles: ['admin', 'bodeguero'] },
   // El admin abre/cierra su propio turno igual que vendedor/entregador y además revisa los de los demás.
   { key: 'cash-closing', label: 'Cierre de Caja', icon: 'calculator-outline', color: '#007AFF', screen: 'CashClosing', roles: ['admin', 'vendedor', 'entregador'] },
+  // Cada usuario registra/consulta solo sus propios gastos (FASE E2) — mismos roles que Nómina.
+  { key: 'expenses', label: 'Gastos', icon: 'receipt-outline', color: '#F2994A', screen: 'Expenses', roles: ['admin', 'vendedor', 'bodeguero', 'entregador'] },
   { key: 'profile', label: 'Mi Perfil', icon: 'person-circle-outline', color: '#5AC8FA', screen: 'Profile', roles: ['admin', 'vendedor', 'bodeguero', 'entregador', 'user'] },
 ];
 

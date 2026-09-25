@@ -24,7 +24,7 @@ Complementa (no duplica): `android/.claude/CLAUDE.md`, `android/.github/copilot-
 - **Backend**: Firebase (Auth, Firestore, Storage, Crashlytics, Functions, App Check). Firestore = fuente de verdad.
 - **Roles**: `admin`, `vendedor`, `bodeguero`, `entregador` — mapeados a navegación y a `firestore.rules`.
 - **Estado**: zustand por módulo + React Context puntual (`RouteContext`, `preSaleContext`).
-- **Versión**: 2.1.0 (package.json aún dice 1.9.0 — inconsistencia conocida). Node ≥ 20, JDK 17, Android API ≥ 24.
+- **Versión**: 4 fuentes distintas y sin sincronizar — `android/app/build.gradle` `versionName "2.1.4"` (versionCode `48052026`, lo que realmente se publica) vs `package.json`/`README.md` en `1.9.0`. Nunca cambies estos valores sin que el usuario lo pida explícitamente. Node ≥ 20, JDK 17, Android API ≥ 24.
 
 ## Comandos (correr desde la raíz del repo)
 
@@ -32,9 +32,12 @@ Complementa (no duplica): `android/.claude/CLAUDE.md`, `android/.github/copilot-
 npm install                 # instala deps
 npm start                   # metro (reset cache)
 npm run android             # build+run debug en emulador/dispositivo
-npm run lint                # eslint .   (32 errores preexistentes en archivos ajenos, ignóralos)
-npm test                    # jest — 30 suites, 229 tests, DEBE seguir en verde
+npm run lint                # eslint . — baseline real: 2025 problemas (136 errores, 1889 warnings) preexistentes, ignóralos salvo que toques ese archivo
+npm test                    # jest — 39 suites, 322 tests (321 passing + 1 skip documentado), DEBE seguir en verde (jest.config.js excluye .claude/worktrees/ y __tests__/emulator/)
 npx jest <path>             # test individual
+npm run test:emulator       # Security Rules + concurrencia real de Quick Sale contra Firestore/Auth Emulator local
+                             # (requiere Java 17 — usa `npx firebase-tools@13`, la CLI global exige Java 21+).
+                             # Levanta y apaga el Emulator solo; nunca toca el proyecto Firebase de producción.
 ```
 
 Desde `android/`:
@@ -72,7 +75,8 @@ Deploy Firebase (raíz): `firebase deploy --only firestore:rules,firestore:index
     └── main/java                 # NATIVO Android (raro tocar)
 ```
 
-Secretos gitignored: `android/app/google-services.json`, `android/app/my-release-key.keystore`, `android/gradle.properties`.
+Secretos gitignored: `android/app/google-services.json`, `android/app/my-release-key.keystore`.
+`android/gradle.properties` está en `.gitignore` (evita tracking futuro) pero **ya está commiteado en el historial con el password del keystore en texto plano** — pendiente de rotación/purga como tarea de seguridad aparte, no lo trates como secreto protegido todavía.
 
 ## Módulos (screens/) — mapa rápido
 

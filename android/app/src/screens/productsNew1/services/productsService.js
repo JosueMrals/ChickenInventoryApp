@@ -1,5 +1,5 @@
 import { db } from '../../../services/firebase';
-import firestore, { serverTimestamp, increment } from '@react-native-firebase/firestore';
+import firestore, { serverTimestamp } from '@react-native-firebase/firestore';
 import { normalizeCategory } from '../constants/productCategories';
 
 const COLLECTION = 'products';
@@ -227,29 +227,6 @@ export function subscribeProductsByBarcodeOrName(term, onUpdate, options = {}) {
 }
 
 /* -------------------------
-   Stock operations
-   ------------------------- */
-
-export async function incrementStock(productId, amount) {
-  if (!productId) throw new Error('productId required');
-  if (Number.isNaN(Number(amount))) throw new Error('amount must be numeric');
-  const docRef = db.collection(COLLECTION).doc(productId);
-  await docRef.update({
-    stock: increment(Number(amount)),
-    updatedAt: serverTimestamp(),
-  });
-}
-
-export async function setStock(productId, newStock) {
-  if (!productId) throw new Error('productId required');
-  const docRef = db.collection(COLLECTION).doc(productId);
-  await docRef.update({
-    stock: Number(newStock),
-    updatedAt: serverTimestamp(),
-  });
-}
-
-/* -------------------------
    Utils / validations
    ------------------------- */
 
@@ -310,8 +287,6 @@ const productsService = {
   searchProductsByNamePrefix,
   searchProductsByBarcodeOrName,
   subscribeProductsByBarcodeOrName,
-  incrementStock,
-  setStock,
   validateNoDuplicates,
   listProductsPage,
 };

@@ -96,6 +96,28 @@ test('registra la venta con los totales del carrito (antes crasheaba)', async ()
   ]);
 });
 
+test('doble tap en "Confirmar" registra la venta una sola vez', async () => {
+  let resolveRegister;
+  mockRegister.mockImplementation(() => new Promise((resolve) => { resolveRegister = resolve; }));
+
+  const { getByText } = setup();
+  await act(async () => {});
+
+  const confirmButton = getByText('Confirmar C$90.00');
+  // Dos taps inmediatos, antes de que la primera llamada resuelva.
+  fireEvent.press(confirmButton);
+  fireEvent.press(confirmButton);
+
+  await act(async () => {
+    resolveRegister('sale-1');
+  });
+
+  expect(mockRegister).toHaveBeenCalledTimes(1);
+
+  // Restaura el comportamiento por defecto para el resto de la suite.
+  mockRegister.mockResolvedValue('sale-1');
+});
+
 test('el descuento manual de venta sí baja el total cobrado', async () => {
   const { getByText, getByPlaceholderText } = setup();
   await act(async () => {});

@@ -57,6 +57,7 @@ import CashClosingHistoryScreen from './android/app/src/screens/cashClosing/scre
 import ReportsScreen from './android/app/src/screens/reports/ReportsScreen';
 import ProductsStack from './android/app/src/navigation/ProductsStack';
 import ReceptionStack from './android/app/src/navigation/ReceptionStack';
+import ExpensesStack from './android/app/src/navigation/ExpensesStack';
 import PrintersScreen from './android/app/src/screens/settings/printers/PrintersScreen';
 import TicketCustomizationScreen from './android/app/src/screens/settings/ticketCustomization/TicketCustomizationScreen';
 import SettingsScreen from './android/app/src/screens/settings/SettingsScreen'; // Nuevo Import
@@ -93,10 +94,13 @@ const HandoverHistoryScreenAny = HandoverHistoryScreen as React.ComponentType<an
 const ReturnsScreenAny = ReturnsScreen as React.ComponentType<any>;
 const WarehouseDashboardScreenAny = WarehouseDashboardScreen as React.ComponentType<any>;
 const PayrollScreenAny = PayrollScreen as React.ComponentType<any>;
+const StaffAccountScreenAny = StaffAccountScreen as React.ComponentType<any>;
+const PayrollHistoryScreenAny = PayrollHistoryScreen as React.ComponentType<any>;
 const StaffPurchaseScreenAny = StaffPurchaseScreen as React.ComponentType<any>;
 const CashClosingScreenAny = CashClosingScreen as React.ComponentType<any>;
 const CashClosingHistoryScreenAny = CashClosingHistoryScreen as React.ComponentType<any>;
 const ReceptionStackAny = ReceptionStack as React.ComponentType<any>;
+const ExpensesStackAny = ExpensesStack as React.ComponentType<any>;
 
 function AppDrawer({ route, navigation }: any) {
   const { role, user, screen } = route?.params || {};
@@ -249,6 +253,11 @@ function AppDrawer({ route, navigation }: any) {
         {(props) => <ReturnsScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>
 
+      {/* GASTOS OPERATIVOS — cada usuario registra/consulta los suyos (FASE E2) */}
+      <Drawer.Screen name="Expenses" options={{ headerShown: false, drawerLabel: 'Gastos Operativos' }}>
+        {(props) => <ExpensesStackAny {...props} route={{ ...props.route, params: { ...(props.route?.params || {}), user, role } }} />}
+      </Drawer.Screen>
+
       <Drawer.Screen name="WarehouseOrderDetail"
         component={WarehouseOrderDetailScreen}
         options={{ title: "Detalle de Orden Bodega" }}
@@ -302,14 +311,16 @@ function AppDrawer({ route, navigation }: any) {
       </Drawer.Screen>
       <Drawer.Screen
         name="StaffAccount"
-        component={StaffAccountScreen}
         options={{ headerShown: false, drawerItemStyle: { display: 'none' } }}
-      />
+      >
+        {(props) => <StaffAccountScreenAny {...props} role={role} />}
+      </Drawer.Screen>
       <Drawer.Screen
         name="PayrollHistory"
-        component={PayrollHistoryScreen}
         options={{ headerShown: false, drawerItemStyle: { display: 'none' } }}
-      />
+      >
+        {(props) => <PayrollHistoryScreenAny {...props} role={role} />}
+      </Drawer.Screen>
       <Drawer.Screen name="StaffPurchase" options={{ headerShown: false, drawerLabel: 'Entrega a Personal' }}>
         {(props) => <StaffPurchaseScreenAny {...props} user={user} role={role} />}
       </Drawer.Screen>

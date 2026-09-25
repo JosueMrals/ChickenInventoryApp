@@ -100,16 +100,3 @@ export const updateSale = async (id, data) => {
     throw error;
   }
 };
-
-// ------------------------------------------------------------
-// 🗑️ Eliminar venta — opcional
-// ------------------------------------------------------------
-export const deleteSale = async (id) => {
-  try {
-    console.log('[salesService] Deleting sale:', id);
-    return await firestore().collection(COLLECTION).doc(id).delete();
-  } catch (error) {
-    console.error('[salesService] deleteSale ERROR =>', error);
-    throw error;
-  }
-};

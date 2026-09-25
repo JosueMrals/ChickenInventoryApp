@@ -1,6 +1,9 @@
 module.exports = {
   preset: '@react-native/jest-preset',
   setupFiles: ['<rootDir>/jest.setup.js'],
+  // __tests__/emulator/ requiere Firestore/Auth Emulator corriendo (npm run test:emulator),
+  // no el mock de jest.setup.js — se excluye de la suite normal para no romper `npm test`.
+  testPathIgnorePatterns: ['/node_modules/', '/.claude/worktrees/', '/__tests__/emulator/'],
   transform: {
     '^.+\\.[jt]sx?$': 'babel-jest',
   },

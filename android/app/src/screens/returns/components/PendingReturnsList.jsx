@@ -305,9 +305,11 @@ export default function PendingReturnsList({ routeId = null }) {
   }, []);
 
   const handleApprove = useCallback(async (request, verifiedQuantities) => {
+    // FASE S1.5.1: approveReturnRequest ya no acepta `returnRequest` — usa la
+    // relectura transaccional de `returnRequests/{id}` como fuente de verdad
+    // (S1.5-F0). El objeto `request` del listener solo aporta el id aquí.
     await approveReturnRequest({
       returnRequestId: request.id,
-      returnRequest: request,
       verifiedQuantities,
     });
   }, []);
