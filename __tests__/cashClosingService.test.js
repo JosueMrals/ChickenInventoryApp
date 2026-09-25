@@ -63,6 +63,7 @@ jest.mock('@react-native-firebase/auth', () => () => ({
 
 const {
   sumCollections,
+  groupAmountsByUid,
   computeReviewOutcome,
   closeTurno,
   reviewTurno,
@@ -361,5 +362,173 @@ describe('ensureOpenTurno', () => {
     const id = await ensureOpenTurno({ uid: 'u1', userName: 'Ana', role: 'vendedor' });
     expect(id).not.toBe('turno-otro');
     expect(mockState.docs[id].uid).toBe('u1');
+  });
+});
+
+// ── FASE CC1 ────────────────────────────────────────────────────────────────
+// Apertura automática atómica (puntero `cashSessions/{uid}`) y cálculo neto
+// Opción B (ingresos - egresos). Ver audit-reports/fase-cash-closing-final.md.
+
+describe('CC1 — puntero cashSessions y apertura automática', () => {
+  test('el turno nace con monto inicial 0 y sin cobros reclamados', async () => {
+    const id = await ensureOpenTurno({ uid: 'u9', userName: 'Ana', role: 'vendedor' });
+    expect(mockState.docs[id]).toMatchObject({
+      uid: 'u9', status: 'open', expectedAmount: 0, cashExpensesTotal: 0, collectionIds: [],
+    });
+  });
+
+  test('deja el puntero apuntando al turno que acaba de abrir', async () => {
+    const id = await ensureOpenTurno({ uid: 'u9', userName: 'Ana' });
+    expect(mockState.docs.u9).toEqual({ openTurnoId: id });
+  });
+
+  test('un segundo cobro reutiliza el turno del puntero y no crea otro', async () => {
+    const first = await ensureOpenTurno({ uid: 'u9', userName: 'Ana' });
+    const creados = mockState.writes.filter((w) => w.payload?.status === 'open').length;
+
+    const second = await ensureOpenTurno({ uid: 'u9', userName: 'Ana' });
+
+    expect(second).toBe(first);
+    expect(mockState.writes.filter((w) => w.payload?.status === 'open')).toHaveLength(creados);
+  });
+
+  test('un puntero que apunta a un turno ya cerrado no bloquea el siguiente turno', async () => {
+    const first = await ensureOpenTurno({ uid: 'u9', userName: 'Ana' });
+    mockState.docs[first].status = 'pending_review';
+
+    const second = await ensureOpenTurno({ uid: 'u9', userName: 'Ana' });
+
+    expect(second).not.toBe(first);
+    expect(mockState.docs.u9).toEqual({ openTurnoId: second });
+  });
+
+  test('cerrar el turno libera el puntero', async () => {
+    const id = await ensureOpenTurno({ uid: 'u9', userName: 'Ana' });
+
+    await closeTurno({ id, uid: 'u9' }, [], []);
+
+    expect(mockState.docs.u9).toEqual({ openTurnoId: null });
+  });
+});
+
+describe('CC1 — neto del turno (Opción B: ingresos - egresos)', () => {
+  const seedOpen = (uid = 'u1') => {
+    mockState.docs['turno-n'] = { uid, userName: 'Ana', status: 'open' };
+  };
+  const seedIngreso = (id, amount, uid = 'u1', extra = {}) => {
+    mockState.docs[id] = { uid, amount, turnoId: null, sourceType: 'creditAbono', ...extra };
+  };
+  const seedGasto = (id, amount, uid = 'u1') => {
+    mockState.docs[id] = {
+      createdByUid: uid, amount, paymentMethod: 'CASH', status: 'PENDING', cashClosingId: null,
+    };
+  };
+
+  test('un abono de 500 da ingresos 500', async () => {
+    seedOpen();
+    seedIngreso('i1', 500);
+    const r = await closeTurno({ id: 'turno-n' }, ['i1'], []);
+    expect(r.expectedAmount).toBe(500);
+    expect(r.cashExpensesTotal).toBe(0);
+  });
+
+  test('un gasto de 100 da egresos 100', async () => {
+    seedOpen();
+    seedGasto('g1', 100);
+    const r = await closeTurno({ id: 'turno-n' }, [], ['g1']);
+    expect(r.cashExpensesTotal).toBe(100);
+  });
+
+  test('500 de ingreso menos 100 de gasto da 400 neto', async () => {
+    seedOpen();
+    seedIngreso('i1', 500);
+    seedGasto('g1', 100);
+    const r = await closeTurno({ id: 'turno-n' }, ['i1'], ['g1']);
+    expect(r.expectedAmount).toBe(400);
+  });
+
+  test('varios movimientos: 500 + 300 - 100 - 50 = 650', async () => {
+    seedOpen();
+    seedIngreso('i1', 500);
+    seedIngreso('i2', 300, 'u1', { sourceType: 'presale' });
+    seedGasto('g1', 100);
+    seedGasto('g2', 50);
+    const r = await closeTurno({ id: 'turno-n' }, ['i1', 'i2'], ['g1', 'g2']);
+    expect(r.expectedAmount).toBe(650);
+  });
+
+  test('el cobro de OTRO usuario no entra en esta caja aunque la pantalla lo mande', async () => {
+    seedOpen('u1');
+    seedIngreso('mio', 500, 'u1');
+    seedIngreso('ajeno', 999, 'u2');
+
+    const r = await closeTurno({ id: 'turno-n' }, ['mio', 'ajeno'], []);
+
+    expect(r.expectedAmount).toBe(500);
+    expect(mockState.docs['turno-n'].collectionIds).toEqual(['mio']);
+    expect(mockState.docs.ajeno.turnoId).toBeNull();
+  });
+
+  test('sin movimientos monetarios el turno cierra en 0 (una preventa no genera cobro)', async () => {
+    seedOpen();
+    const r = await closeTurno({ id: 'turno-n' }, [], []);
+    expect(r.expectedAmount).toBe(0);
+  });
+});
+
+// ── FASE CC3 ────────────────────────────────────────────────────────────────
+// El admin ve el monto en vivo de cada caja abierta. En vez de seguir la caja
+// de cada trabajador por separado, se traen todos los movimientos sin liquidar
+// y se reparten por dueño en cliente.
+
+describe('CC3 — groupAmountsByUid', () => {
+  test('reparte cobros por dueño con sus ids y su suma', () => {
+    const r = groupAmountsByUid([
+      { id: 'c1', uid: 'u1', amount: 500 },
+      { id: 'c2', uid: 'u1', amount: 300 },
+      { id: 'c3', uid: 'u2', amount: 120 },
+    ], 'uid');
+
+    expect(r.u1).toEqual({ ids: ['c1', 'c2'], total: 800 });
+    expect(r.u2).toEqual({ ids: ['c3'], total: 120 });
+  });
+
+  test('sirve igual para gastos, que llevan el dueño en createdByUid', () => {
+    const r = groupAmountsByUid([
+      { id: 'g1', createdByUid: 'u1', amount: 100 },
+      { id: 'g2', createdByUid: 'u1', amount: 50 },
+    ], 'createdByUid');
+
+    expect(r.u1).toEqual({ ids: ['g1', 'g2'], total: 150 });
+  });
+
+  test('redondea a dos decimales, como el resto de los montos', () => {
+    const r = groupAmountsByUid([
+      { id: 'c1', uid: 'u1', amount: 100.1 },
+      { id: 'c2', uid: 'u1', amount: 50.02 },
+    ], 'uid');
+
+    expect(r.u1.total).toBe(150.12);
+  });
+
+  test('ignora lo que no tiene dueño y trata como 0 lo que no es número', () => {
+    const r = groupAmountsByUid([
+      { id: 'c1', uid: null, amount: 999 },
+      { id: 'c2', amount: 999 },
+      { id: 'c3', uid: 'u1', amount: 'x' },
+    ], 'uid');
+
+    expect(Object.keys(r)).toEqual(['u1']);
+    expect(r.u1).toEqual({ ids: ['c3'], total: 0 });
+  });
+
+  test('lista vacía o nula no rompe', () => {
+    expect(groupAmountsByUid([], 'uid')).toEqual({});
+    expect(groupAmountsByUid(null, 'uid')).toEqual({});
+  });
+
+  test('un usuario sin movimientos simplemente no aparece', () => {
+    const r = groupAmountsByUid([{ id: 'c1', uid: 'u1', amount: 500 }], 'uid');
+    expect(r.u2).toBeUndefined();
   });
 });

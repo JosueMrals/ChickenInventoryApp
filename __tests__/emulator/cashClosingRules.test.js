@@ -115,7 +115,10 @@ describe('S1.7.1 — cashCollections.create', () => {
 
 // ── cashCollections.update (S1.7-F3) ────────────────────────────────────────
 describe('S1.7.1 — cashCollections.update (reclamo en turno)', () => {
+  // FASE CC2: el reclamo ahora exige con get() que el turno destino sea del
+  // mismo dueño del cobro, así que estas pruebas siembran ese turno.
   test('el dueño reclama su cobro correctamente → PASS', async () => {
+    await seedClosing('turno-1', { uid: 'vendedor-x', status: 'open', collectionIds: [] });
     await seedCollection('cl1', collectionPayload('vendedor-x'));
     await assertSucceeds(
       asVendedor('vendedor-x').collection('cashCollections').doc('cl1').update({ turnoId: 'turno-1' })
@@ -123,6 +126,7 @@ describe('S1.7.1 — cashCollections.update (reclamo en turno)', () => {
   });
 
   test('el dueño intenta cambiar amount junto con turnoId → DENIED', async () => {
+    await seedClosing('turno-1', { uid: 'vendedor-x', status: 'open', collectionIds: [] });
     await seedCollection('cl2', collectionPayload('vendedor-x'));
     await assertFails(
       asVendedor('vendedor-x').collection('cashCollections').doc('cl2').update({ turnoId: 'turno-1', amount: 999 })

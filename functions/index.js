@@ -613,36 +613,56 @@ exports.completePreSalePayment = functions.https.onCall(async (reqData, context)
 
 /**
  * Cierre de Caja: usa el turno abierto del trabajador si existe, o abre uno
- * nuevo. Se llama fuera de cualquier transacción de cobro a propósito: si esa
- * transacción se reintenta, esto no debe reintentarse con ella.
+ * nuevo con monto inicial 0. Se llama fuera de la transacción del cobro a
+ * propósito: el cobro ya quedó escrito con `turnoId: null` y el turno lo
+ * reclama al cerrarse, así que la apertura nunca puede perder dinero.
  *
- * ponytail: no es transaccional — dos cobros casi simultáneos sin turno
- * previo podrían abrir dos turnos. Ventana angosta y de bajo impacto (el
- * admin igual revisa cada turno cerrado); si se vuelve un problema real,
- * envolver en una transacción con un id determinístico por uid.
+ * Atómica: compite sobre `cashSessions/{uid}` — el mismo puntero de id
+ * determinístico que usa el cliente (openTurnoAtomic, cashClosingService.js).
+ * Dos cobros simultáneos del mismo trabajador abren UN solo turno.
  */
 async function ensureOpenTurno(uid, userName, role) {
-    const openQuery = await db.collection('cashClosings')
+    const sessionRef = db.collection('cashSessions').doc(uid);
+    const newTurnoRef = db.collection('cashClosings').doc();
+
+    // Turnos abiertos ANTES de que existiera el puntero: sin esto, el primer
+    // cobro del día duplicaría el turno que el trabajador ya abrió a mano.
+    const legacy = await db.collection('cashClosings')
         .where('uid', '==', uid)
         .where('status', '==', 'open')
         .limit(1)
         .get();
-    if (!openQuery.empty) return;
+    if (!legacy.empty) return legacy.docs[0].id;
 
-    await db.collection('cashClosings').doc().set({
-        uid,
-        userName,
-        role: role || null,
-        status: 'open',
-        openedAt: admin.firestore.FieldValue.serverTimestamp(),
-        closedAt: null,
-        collectionIds: [],
-        expectedAmount: 0,
-        receivedAmount: null,
-        shortageAmount: 0,
-        reviewedAt: null,
-        reviewedBy: null,
-        shortageId: null,
+    return db.runTransaction(async (t) => {
+        const sessionSnap = await t.get(sessionRef);
+        const currentId = sessionSnap.exists ? sessionSnap.data().openTurnoId : null;
+        const currentSnap = currentId
+            ? await t.get(db.collection('cashClosings').doc(currentId))
+            : null;
+
+        if (currentSnap && currentSnap.exists && currentSnap.data().status === 'open') {
+            return currentId;
+        }
+
+        t.set(newTurnoRef, {
+            uid,
+            userName,
+            role: role || null,
+            status: 'open',
+            openedAt: admin.firestore.FieldValue.serverTimestamp(),
+            closedAt: null,
+            collectionIds: [],
+            expectedAmount: 0,
+            cashExpensesTotal: 0,
+            receivedAmount: null,
+            shortageAmount: 0,
+            reviewedAt: null,
+            reviewedBy: null,
+            shortageId: null,
+        });
+        t.set(sessionRef, { openTurnoId: newTurnoRef.id });
+        return newTurnoRef.id;
     });
 }
 

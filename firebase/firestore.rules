@@ -832,7 +832,18 @@ service cloud.firestore {
         && request.resource.data.amount is number
         && request.resource.data.amount > 0
         && request.resource.data.turnoId == null
-        && request.resource.data.sourceType == 'creditAbono'
+        // FASE CC1: se suma 'presale', pero SOLO para admin/vendedor — el cobro
+        // en mostrador (convertPreSaleToSale, preSaleService.js) escribe desde
+        // el cliente y antes no tenía forma de llegar a Cierre de Caja (causa
+        // real del C$0.00). El entregador queda fuera a propósito: su cobro es
+        // la rama de entrega, que escribe el Admin SDK
+        // (completePreSalePayment, sin pasar por reglas) tras validar
+        // `entregadorId == uid` — igual que ya se le niega la rama 5 de
+        // `presales.update` (presalesRules.test.js). Sigue sin poder etiquetar
+        // un cobro propio como 'presale'.
+        && (request.resource.data.sourceType == 'creditAbono'
+            || (request.resource.data.sourceType == 'presale'
+                && (isAdmin() || isVendedor())))
         && request.resource.data.keys().hasOnly([
              'uid', 'userName', 'amount', 'method', 'sourceType', 'sourceId',
              'customerName', 'at', 'turnoId']);
@@ -843,11 +854,47 @@ service cloud.firestore {
       // explícitamente en vez de depender solo de comparaciones de igualdad
       // campo por campo (que no cubrían `method`/`sourceType`/`sourceId`/
       // `customerName`/`at`).
+      // FASE CC2: se suma el admin, que ahora puede cerrar el turno de otro.
+      // Con eso aparecería un hueco nuevo — reclamar el cobro de A dentro del
+      // turno de B — así que se cierra con un get() al turno destino: el cobro
+      // sólo entra en un turno del MISMO dueño. Es 1 lectura por cobro
+      // reclamado y sólo al cerrar (no es el agregado inacotado de S1.7-F0-B:
+      // aquí cada documento se evalúa por separado). Vale igual para el dueño,
+      // que tampoco puede desviar su cobro al turno de otro.
       allow update: if isOperativo()
-        && request.auth.uid == resource.data.uid
+        && (request.auth.uid == resource.data.uid || isAdmin())
         && resource.data.turnoId == null
         && request.resource.data.turnoId is string
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['turnoId']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['turnoId'])
+        && get(/databases/$(database)/documents/cashClosings/$(request.resource.data.turnoId))
+             .data.uid == resource.data.uid;
+
+      allow delete: if false;
+    }
+
+    // =====================================================
+    //  🔑 CASH SESSIONS — puntero `{uid} → turno abierto`
+    //  Único documento de id determinístico por usuario: es el punto de
+    //  contención que hace ATÓMICA la apertura automática de turno
+    //  (openTurnoAtomic, cashClosingService.js). No guarda dinero.
+    // =====================================================
+    match /cashSessions/{sessionUid} {
+      // Solo el dueño: ningún flujo ajeno lo lee (el admin revisa `cashClosings`,
+      // no el puntero).
+      allow read: if request.auth != null && request.auth.uid == sessionUid;
+
+      // `openTurnoId` apunta al turno abierto, o null cuando closeTurno lo
+      // libera. Ningún otro campo: este documento no es un registro contable.
+      // FASE CC2: el admin también escribe — closeTurno() libera el puntero del
+      // DUEÑO del turno, y ahora el admin puede cerrar turnos ajenos. El
+      // puntero no guarda dinero: lo peor que puede dejar un admin es un id
+      // obsoleto, y openTurnoAtomic ya relee el turno y se autocorrige si no
+      // sigue 'open'.
+      allow create, update: if isOperativo()
+        && (request.auth.uid == sessionUid || isAdmin())
+        && request.resource.data.keys().hasOnly(['openTurnoId'])
+        && (request.resource.data.openTurnoId == null
+            || request.resource.data.openTurnoId is string);
 
       allow delete: if false;
     }
@@ -882,8 +929,13 @@ service cloud.firestore {
       // sin ninguna garantía real (el límite es fijo, la cantidad de cobros
       // de un día no lo es). Queda como S1.7-F0-B DEFERRED; lo que sí se cierra
       // aquí es que no puedan colarse campos ni tipos fuera del contrato real.
+      // FASE CC2: el admin también cierra. Es estrictamente menos poder del que
+      // ya tiene: quien decide el dinero es `reviewTurno` (pending_review →
+      // complete|shortage), que siempre fue exclusivo de admin. Cerrar sólo
+      // mueve el turno a revisión; el monto lo recalcula la transacción
+      // releyendo cobros y gastos, no lo escribe quien cierra.
       allow update: if isOperativo()
-        && request.auth.uid == resource.data.uid
+        && (request.auth.uid == resource.data.uid || isAdmin())
         && resource.data.status == 'open'
         && request.resource.data.status == 'pending_review'
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -1063,14 +1115,19 @@ service cloud.firestore {
       // equivale a aprobarlo — Modelo A, FASE E1.1). null→string una sola
       // vez: la propia precondición `cashClosingId==null` impide reasignarlo
       // o desvincularlo después (evita doble liquidación).
+      // FASE CC2: se suma el admin (ahora puede cerrar el turno de otro), con el
+      // mismo candado que en cashCollections: el gasto sólo puede vincularse a
+      // un cierre del MISMO dueño, verificado con un get() al turno destino.
       allow update: if isOperativo()
-        && request.auth.uid == resource.data.createdByUid
+        && (request.auth.uid == resource.data.createdByUid || isAdmin())
         && resource.data.paymentMethod == 'CASH'
         && resource.data.cashClosingId == null
         && request.resource.data.cashClosingId is string
         && (resource.data.status == 'PENDING' || resource.data.status == 'APPROVED')
         && request.resource.data.status == resource.data.status
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cashClosingId']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cashClosingId'])
+        && get(/databases/$(database)/documents/cashClosings/$(request.resource.data.cashClosingId))
+             .data.uid == resource.data.createdByUid;
 
       // Registro contable: no se borra (mismo criterio que goodsReceipts/sales).
       allow delete: if false;

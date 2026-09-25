@@ -58,6 +58,18 @@ const validExpense = (overrides = {}) => ({
   ...overrides,
 });
 
+// FASE CC2: `expenses.update` (rama cashClosingId) ahora exige con get() que el
+// cierre destino sea del MISMO dueño del gasto — antes bastaba con ser el dueño
+// del gasto. Por eso estas pruebas siembran el turno al que vinculan.
+const seedClosing = async (id, uid) => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().collection('cashClosings').doc(id).set({
+      uid, userName: `${uid}@test.com`, status: 'open', collectionIds: [],
+      expectedAmount: 0, cashExpensesTotal: 0,
+    });
+  });
+};
+
 const seedExpense = async (id, data) => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await ctx.firestore().collection('expenses').doc(id).set(data);
@@ -299,6 +311,7 @@ describe('expenses — Security Rules (Firestore Emulator real)', () => {
   // FASE E3 — transición cashClosingId (null → id del cierre).
   describe('cashClosingId (FASE E3)', () => {
     test('el dueño puede vincular su gasto CASH sin liquidar a un cierre', async () => {
+      await seedClosing('closing-1', 'vendedor-1');
       await seedExpense('e30', validExpense());
       await assertSucceeds(
         asVendedor('vendedor-1').collection('expenses').doc('e30').update({ cashClosingId: 'closing-1' })
@@ -312,10 +325,29 @@ describe('expenses — Security Rules (Firestore Emulator real)', () => {
       );
     });
 
-    test('admin tampoco puede vincular el gasto de otro (esta rama exige ser el dueño)', async () => {
+    // FASE CC2: el admin ya puede cerrar el turno de otro, así que esta rama
+    // dejó de exigir ser el dueño del gasto. Lo que la sustituye es más fuerte
+    // y vale para todos: el gasto sólo entra en un cierre del MISMO dueño.
+    test('admin vincula el gasto de otro SOLO al cierre de ese mismo dueño', async () => {
+      await seedClosing('closing-1', 'vendedor-1');
       await seedExpense('e32', validExpense({ createdByUid: 'vendedor-1' }));
-      await assertFails(
+      await assertSucceeds(
         asAdmin().collection('expenses').doc('e32').update({ cashClosingId: 'closing-1' })
+      );
+    });
+
+    test('admin NO puede vincular el gasto de A al cierre de B', async () => {
+      await seedClosing('closing-ajeno', 'vendedor-2');
+      await seedExpense('e32b', validExpense({ createdByUid: 'vendedor-1' }));
+      await assertFails(
+        asAdmin().collection('expenses').doc('e32b').update({ cashClosingId: 'closing-ajeno' })
+      );
+    });
+
+    test('un cierre inexistente no cuela', async () => {
+      await seedExpense('e32c', validExpense({ createdByUid: 'vendedor-1' }));
+      await assertFails(
+        asVendedor('vendedor-1').collection('expenses').doc('e32c').update({ cashClosingId: 'no-existe' })
       );
     });
 
@@ -334,6 +366,7 @@ describe('expenses — Security Rules (Firestore Emulator real)', () => {
     });
 
     test('no se puede cambiar amount aprovechando esta transición', async () => {
+      await seedClosing('closing-1', 'vendedor-1');
       await seedExpense('e35', validExpense());
       await assertFails(
         asVendedor('vendedor-1').collection('expenses').doc('e35').update({ cashClosingId: 'closing-1', amount: 999 })

@@ -5,6 +5,7 @@ import globalStyles from '../../../styles/globalStyles';
 import styles, { COLORS, formatMoney } from '../styles/cashClosingStyles';
 import { useMyTurno } from '../hooks/useMyTurno';
 import { usePendingReviews } from '../hooks/usePendingReviews';
+import { useOpenTurnos } from '../hooks/useOpenTurnos';
 import { openTurno, closeTurno, reviewTurno } from '../services/cashClosingService';
 import { useSubmitLock } from '../../../hooks/useSubmitLock';
 import { useAdaptiveBottom } from '../../../hooks/useAdaptiveBottom';
@@ -76,11 +77,14 @@ function MyTurnoCard({ uid, user, role }) {
 
   return (
     <View style={styles.turnoCard}>
-      <Text style={styles.turnoLabel}>{turno ? 'Cobrado en tu turno' : 'Mi turno'}</Text>
-      <Text style={styles.turnoAmount}>{turno ? formatMoney(total) : 'Cerrado'}</Text>
-      {turno && cashExpensesTotal > 0 && (
+      <Text style={styles.turnoLabel}>{turno ? 'Neto de tu turno' : 'Mi turno'}</Text>
+      {/* Lo que el trabajador entrega = ingresos - egresos. El desglose va
+          siempre visible (aunque valga cero) para que un cero sea una lectura
+          y no una duda. */}
+      <Text style={styles.turnoAmount}>{turno ? formatMoney(netAmount) : 'Cerrado'}</Text>
+      {turno && (
         <Text style={styles.turnoMeta}>
-          Gastos en efectivo: -{formatMoney(cashExpensesTotal)} · A entregar: {formatMoney(netAmount)}
+          Ingresos: {formatMoney(total)} · Gastos en efectivo: -{formatMoney(cashExpensesTotal)}
         </Text>
       )}
       {turno && <Text style={styles.turnoMeta}>Abierto {formatTimestamp(turno.openedAt)}</Text>}
@@ -103,6 +107,49 @@ function MyTurnoCard({ uid, user, role }) {
     </View>
   );
 }
+
+/**
+ * Una caja abierta ahora mismo, con su monto en vivo. El neto es lo que ese
+ * trabajador tendría que entregar si cerrara en este momento; el cierre lo
+ * recalcula igual dentro de la transacción.
+ */
+function OpenTurnoRow({ item, isMine, onClose, busy }) {
+  return (
+    <View style={styles.pendingCard}>
+      <View style={styles.pendingTopRow}>
+        <Text style={styles.pendingName} numberOfLines={1}>
+          {item.userName || item.uid}{isMine ? ' · tú' : ''}
+        </Text>
+        <Text style={styles.pendingAmount}>{formatMoney(item.neto)}</Text>
+      </View>
+      <Text style={styles.pendingMeta}>
+        Ingresos {formatMoney(item.ingresos)} · Gastos en efectivo -{formatMoney(item.egresos)}
+      </Text>
+      <Text style={styles.pendingMeta}>
+        {item.role ? `${item.role} · ` : ''}Abierto {formatTimestamp(item.openedAt)}
+      </Text>
+
+      <View style={styles.pendingActions}>
+        <TouchableOpacity
+          style={[styles.secondaryButton, { flex: 1 }, busy && styles.disabledButton]}
+          onPress={() => onClose(item)}
+          disabled={busy}
+        >
+          <Icon name="lock-closed-outline" size={16} color={COLORS.accent} />
+          <Text style={styles.secondaryButtonText}>Cerrar turno</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+/** El desglose que el admin confirma antes de cerrar la caja de alguien. */
+const buildCloseSummary = (ingresos, egresos) => {
+  const neto = Number((ingresos - egresos).toFixed(2));
+  return egresos > 0
+    ? `Ingresos ${formatMoney(ingresos)} menos ${formatMoney(egresos)} de gastos en efectivo = ${formatMoney(neto)} a entregar.`
+    : `Cobrado ${formatMoney(ingresos)}.`;
+};
 
 function PendingReviewRow({ item, onMarkComplete, onRegisterShortage, busy }) {
   return (
@@ -131,11 +178,45 @@ export default function CashClosingScreen({ navigation, user, role }) {
   const uid = user?.uid;
   const isAdmin = role === 'admin';
   const { closings: pendingReviews, loading: reviewsLoading } = usePendingReviews();
+  const { turnos: openTurnos } = useOpenTurnos(isAdmin);
   const { runLocked } = useSubmitLock();
   const { bottomPadding } = useAdaptiveBottom();
   const [menuVisible, setMenuVisible] = useState(false);
   const [reviewTarget, setReviewTarget] = useState(null);
   const [savingReview, setSavingReview] = useState(false);
+  const [closingUid, setClosingUid] = useState(null);
+
+  // Los ids a reclamar vienen de la misma suscripción en vivo que pinta el
+  // monto de la fila — no hace falta releer antes de preguntar. La transacción
+  // de closeTurno los relee igual, así que esta lista nunca decide nada.
+  const runClose = useCallback(
+    (turno) =>
+      runLocked(async () => {
+        setClosingUid(turno.uid);
+        try {
+          await closeTurno(turno, turno.collectionIds, turno.expenseIds);
+        } catch (e) {
+          Alert.alert('Error', e?.message || 'No se pudo cerrar el turno.');
+        } finally {
+          setClosingUid(null);
+        }
+      }).catch(() => {}),
+    [runLocked],
+  );
+
+  const askCloseTurno = useCallback(
+    (turno) => {
+      Alert.alert(
+        `Cerrar turno de ${turno.userName || turno.uid}`,
+        `${buildCloseSummary(turno.ingresos, turno.egresos)} Quedará pendiente de revisión.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Cerrar turno', onPress: () => runClose(turno) },
+        ],
+      );
+    },
+    [runClose],
+  );
 
   const submitReview = useCallback(
     (turno, shortageAmount) =>
@@ -180,7 +261,25 @@ export default function CashClosingScreen({ navigation, user, role }) {
         ListHeaderComponent={
           <>
             <MyTurnoCard uid={uid} user={user} role={role} />
-            {isAdmin && <Text style={styles.sectionTitle}>Turnos por revisar</Text>}
+            {isAdmin && (
+              <>
+                <Text style={styles.sectionTitle}>Cajas abiertas ahora ({openTurnos.length})</Text>
+                {openTurnos.length === 0 ? (
+                  <Text style={styles.pendingMeta}>Nadie tiene una caja abierta.</Text>
+                ) : (
+                  openTurnos.map((t) => (
+                    <OpenTurnoRow
+                      key={t.id}
+                      item={t}
+                      isMine={t.uid === uid}
+                      busy={closingUid === t.uid}
+                      onClose={askCloseTurno}
+                    />
+                  ))
+                )}
+                <Text style={styles.sectionTitle}>Turnos por revisar</Text>
+              </>
+            )}
           </>
         }
         ListEmptyComponent={

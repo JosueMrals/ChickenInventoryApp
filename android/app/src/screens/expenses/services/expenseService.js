@@ -1,6 +1,7 @@
-import { firestore } from '../../../services/firebaseConfig';
+import { firestore, auth } from '../../../services/firebaseConfig';
 import { CATEGORY_LABELS } from '../utils/expenseLabels';
 import { captureError } from '../../../services/errorMonitoring';
+import { ensureOpenTurno } from '../../cashClosing/services/cashClosingService';
 
 // Gastos operativos (combustible, viáticos, etc.). Cada usuario registra los
 // suyos; no hay aprobación previa obligatoria (STEP 5 de FASE E1) — el gasto
@@ -90,7 +91,7 @@ export const createExpense = async ({
   if (!validation.ok) throw new Error(validation.message);
   if (!createdByUid) throw new Error('Usuario inválido.');
 
-  const { reimbursementAmount } = computeCashImpact({ amount, paymentMethod });
+  const { affectsCash, reimbursementAmount } = computeCashImpact({ amount, paymentMethod });
   const ref = expensesRef().doc();
 
   await ref.set({
@@ -110,6 +111,23 @@ export const createExpense = async ({
       ? { status: 'PENDING', amount: reimbursementAmount, paidAt: null }
       : null,
   });
+
+  // Cierre de Caja: un gasto en efectivo SÍ es salida de dinero, así que abre
+  // turno solo si no hay uno. TRANSFER/CARD/PERSONAL no tocan la caja
+  // (computeCashImpact) y por eso no llegan aquí. No debe tumbar el gasto ya
+  // registrado si esto falla: el gasto queda elegible igual y el próximo
+  // cierre lo recoge.
+  if (affectsCash) {
+    try {
+      await ensureOpenTurno({
+        uid: createdByUid,
+        userName: auth()?.currentUser?.email || createdByUid,
+        role: null,
+      });
+    } catch (turnoError) {
+      captureError(turnoError, { scope: 'expenseService.ensureOpenTurno', expenseId: ref.id });
+    }
+  }
 
   return ref.id;
 };
@@ -153,6 +171,30 @@ export const subscribeMyEligibleCashExpenses = (uid, onUpdate, onError) =>
       },
       (error) => {
         console.error('[expenseService] subscribeMyEligibleCashExpenses:', error);
+        onError?.(error);
+        onUpdate([]);
+      },
+    );
+
+/**
+ * En vivo: los gastos CASH sin liquidar de TODOS los usuarios. Es la versión
+ * sin `createdByUid` de subscribeMyEligibleCashExpenses, para que el panel del
+ * admin muestre el egreso de cada caja abierta con una sola suscripción.
+ * `expenses.read` exige isAdmin() para ver los ajenos: en un no-admin esta
+ * query se deniega y la lista queda vacía, sin romper la pantalla.
+ */
+export const subscribeAllEligibleCashExpenses = (onUpdate, onError) =>
+  expensesRef()
+    .where('paymentMethod', '==', 'CASH')
+    .where('cashClosingId', '==', null)
+    .onSnapshot(
+      (snap) => onUpdate(
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((e) => e.status === 'PENDING' || e.status === 'APPROVED'),
+      ),
+      (error) => {
+        console.error('[expenseService] subscribeAllEligibleCashExpenses:', error);
         onError?.(error);
         onUpdate([]);
       },

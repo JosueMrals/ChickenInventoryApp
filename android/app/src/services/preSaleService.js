@@ -1,6 +1,8 @@
 import firestore from '@react-native-firebase/firestore';
 import auth from "@react-native-firebase/auth";
 import { buildCustomerName } from "../utils/customerUtils";
+import { ensureOpenTurno } from "../screens/cashClosing/services/cashClosingService";
+import { captureError } from "./errorMonitoring";
 import { formatCurrency } from "../utils/formatMoney";
 
 const presalesCollection = firestore().collection('presales');
@@ -8,6 +10,20 @@ const creditsCollection = firestore().collection('credits');
 const salesCollection = firestore().collection('sales');
 const countersCollection = firestore().collection('counters');
 const productsCollection = firestore().collection('products');
+
+// Cierre de Caja: solo el efectivo pasa por las manos del vendedor y se
+// entrega al cierre. Tarjeta no (el dinero nunca llega a la caja) y crédito
+// tampoco (no hay cobro todavía: se cobra después como abono).
+const CASH_PAYMENT_METHODS = new Set(['cash', 'efectivo']);
+
+/** Pura: cuánto efectivo retiene quien cobra una preventa en mostrador. */
+export const computePreSaleCashRetained = ({ paymentMethod, amountPaid, total }) => {
+  if (!CASH_PAYMENT_METHODS.has(String(paymentMethod || '').toLowerCase())) return 0;
+  const paid = Number(amountPaid) || 0;
+  const due = Number(total) || 0;
+  // El vuelto ya se devolvió: solo se retiene hasta cubrir el total.
+  return Math.max(Math.min(paid, due), 0);
+};
 
 const BLOCKING_DELETE_ORDER_STATUSES = new Set([
   'preparing',
@@ -563,6 +579,19 @@ export const convertPreSaleToSale = async (preSale, paymentDetails) => {
     inventoryDeducted: true,
   };
 
+  // Cierre de Caja: id determinístico `presale-{id}` — el MISMO que usa el
+  // cobro en entrega (completePreSalePayment, functions/index.js). Una
+  // preventa solo se cobra una vez, así que los dos caminos no pueden
+  // duplicar el cobro, y un reintento de la transacción tampoco.
+  const cashCollectionRef = firestore().collection('cashCollections').doc(`presale-${preSale.id}`);
+  const retainedCash = user?.uid
+    ? computePreSaleCashRetained({
+        paymentMethod: salePayload.paymentMethod,
+        amountPaid: salePayload.amountPaid,
+        total: salePayload.total,
+      })
+    : 0;
+
   await firestore().runTransaction(async (tx) => {
     const preSaleSnap = await tx.get(preSaleRef);
 
@@ -600,7 +629,33 @@ export const convertPreSaleToSale = async (preSale, paymentDetails) => {
       action: 'PAID',
       details: `Pre-venta cobrada. Monto: ${salePayload.amountPaid.toFixed(2)}, Método: ${salePayload.paymentMethod}. Venta #${saleNumber}`,
     });
+
+    // Cierre de Caja: el efectivo cobrado nace sin turno (`turnoId: null`) y
+    // el turno lo reclama al cerrarse. Por eso NO hace falta que la apertura
+    // de turno sea parte de esta transacción: si la apertura falla, el dinero
+    // ya quedó registrado y aparece en cuanto haya un turno.
+    if (retainedCash > 0) {
+      tx.set(cashCollectionRef, {
+        uid: user.uid,
+        userName: user?.email || 'N/A',
+        amount: retainedCash,
+        method: null,
+        sourceType: 'presale',
+        sourceId: preSale.id,
+        customerName: preSale.customerName || null,
+        at: firestore.FieldValue.serverTimestamp(),
+        turnoId: null,
+      });
+    }
   });
+
+  if (retainedCash > 0) {
+    try {
+      await ensureOpenTurno({ uid: user.uid, userName: user?.email || 'N/A', role: null });
+    } catch (turnoError) {
+      captureError(turnoError, { scope: 'preSaleService.ensureOpenTurno', preSaleId: preSale.id });
+    }
+  }
 
   return saleRef.id;
 };
